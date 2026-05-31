@@ -1,0 +1,18 @@
+# 一次性脏堆（worker 节点的临时 cwd）—— 不进版本控制
+workspaces/
+
+# 运行期 scratch（index 的关键产物手动 git add；其余忽略）
+index/**/tmp/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.ipynb_checkpoints/
+
+# secrets
+*.key
+.env.*
+!.env.example
