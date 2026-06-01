@@ -43,13 +43,25 @@ _LIT_RUBRIC = (
     "score(0-1) 反映引用可追溯性与覆盖度；missing 标明哪些候选缺真实文献。"
 )
 
+# stage-3 验收 rubric（M3b）：从上游候选选定靶点，多维一致 + 显式取舍。
+_SEL_RUBRIC = (
+    "你是靶点选定阶段的审稿人。收敛标准：\n"
+    "1) 从上游候选中给出**选定**靶点（非空）；\n"
+    "2) 每个选定有**多维依据**（关联强度 + 可成药性 tractability + 安全/遗传约束 + 文献），"
+    "淘汰项有理由；\n"
+    "3) 选定与证据一致——dry AMD 的补体（CFH/C3 等，强遗传+文献）应进入选定；小分子可成药性弱时"
+    "应标注 modality（antibody/peptide），而非仅因此排除；\n"
+    "4) 显式呈现冲突/取舍（如遗传强但小分子不可成药）。\n"
+    "score(0-1) 反映选定依据的充分性与一致性；missing 标明缺哪类评估。"
+)
+
 
 # 发现段 stage 1-4（DOMAIN §5.1 节点清单）
 DISCOVERY_PIPELINE: list[Stage] = [
     Stage("target-hypothesis", rubric_prompt=_TH_RUBRIC, scatter=True,
           angles=["genetic", "expression", "network", "literature"]),
     Stage("literature-evidence", rubric_prompt=_LIT_RUBRIC),
-    Stage("target-selection"),
+    Stage("target-selection", rubric_prompt=_SEL_RUBRIC),
     Stage("target-validation", scatter=True,
           angles=["genetic", "perturbation", "expression", "network", "safety"]),
 ]

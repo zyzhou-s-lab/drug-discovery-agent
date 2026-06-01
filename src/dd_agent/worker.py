@@ -4,9 +4,10 @@ Protocol: async worker_fn(stage, NodeInput, angle: str | None) -> NodeOutput.
 - dummy_worker: zero-API stand-in (M0), exercises control flow.
 - sdk_worker:   M1/M2/M3 — Claude Agent SDK session(s) that CALL in-process MCP
                 tools and return a typed NodeOutput. Dispatches per stage:
-                  target-hypothesis  -> _hypothesis_worker (angle-aware, OpenTargets)
-                  literature-evidence-> _literature_worker (Europe PMC, real PMIDs)
-                  (others)           -> dummy until M3b/M4.
+                  target-hypothesis   -> _hypothesis_worker (angle-aware, OpenTargets)
+                  literature-evidence -> _literature_worker (Europe PMC, real PMIDs)
+                  target-selection    -> _selection_worker  (OT target_profile triage)
+                  (others)            -> dummy until M4.
                 The node's LLM decides whether/how to call tools; the harness only
                 mounts the menu + sets cwd/role (§3.7 D/E).
 """
@@ -17,12 +18,11 @@ from pathlib import Path
 
 from .schemas import Evidence, NodeInput, NodeOutput, TargetCandidate
 from .tools.europepmc import search_literature
-from .tools.opentargets import disease_associated_targets, search_disease
+from .tools.opentargets import disease_associated_targets, search_disease, target_profile
 
 STAGE_DIR = Path(__file__).resolve().parents[2] / "stages"
 
 # scatter angle → OpenTargets datatype (M2; ARCHITECTURE §3.7 E + phase-a-plan M2).
-# Independent sources (GTEx/STRING/EuropePMC) deferred to M3.
 ANGLE_DATATYPE = {
     "genetic": "genetic_association",
     "expression": "rna_expression",
@@ -38,8 +38,6 @@ async def dummy_worker(stage, node_input: NodeInput, angle: str | None = None) -
     """Zero-API stand-in to exercise the control flow."""
     cands: list[TargetCandidate] = []
     if stage.name == "target-hypothesis":
-        # anchor (DOMAIN §1): genetics-first dry-AMD top target = complement (CFH/C3);
-        # ROCK = mechanism/repurposing candidate.
         cands = [
             TargetCandidate(symbol="CFH", modality="small_molecule",
                             evidence=[Evidence(kind=angle or "genetic", source="dummy")],
@@ -65,21 +63,20 @@ def _load_role(stage_name: str) -> str:
 
 
 def _ot_server():
-    """In-process SDK MCP server exposing OpenTargets as callable tools."""
+    """In-process SDK MCP server: OpenTargets disease→targets (stage-1)."""
     from claude_agent_sdk import create_sdk_mcp_server, tool
 
     @tool("search_disease",
           "Resolve a disease name to OpenTargets EFO ids. Returns JSON [{id,name}].",
           {"name": str})
     async def _search(args):
-        hits = search_disease(args["name"])
-        return {"content": [{"type": "text", "text": json.dumps(hits)}]}
+        return {"content": [{"type": "text", "text": json.dumps(search_disease(args["name"]))}]}
 
     @tool("disease_associated_targets",
           "Targets associated with an EFO disease id, ranked by a chosen evidence "
           "datatype (sort_by: genetic_association|rna_expression|affected_pathway|"
-          "literature). Returns JSON {disease, efo_id, sort_by, rows:[{symbol,name,"
-          "overall,genetic,sort_score,datatypes}]}.",
+          "literature). Returns JSON {disease,efo_id,sort_by,rows:[{symbol,name,overall,"
+          "genetic,sort_score,datatypes}]}.",
           {"efo_id": str, "size": int, "sort_by": str})
     async def _assoc(args):
         res = disease_associated_targets(
@@ -91,7 +88,7 @@ def _ot_server():
 
 
 def _europepmc_server():
-    """In-process SDK MCP server exposing Europe PMC search."""
+    """In-process SDK MCP server: Europe PMC search (stage-2)."""
     from claude_agent_sdk import create_sdk_mcp_server, tool
 
     @tool("search_literature",
@@ -103,6 +100,21 @@ def _europepmc_server():
         return {"content": [{"type": "text", "text": json.dumps(res)}]}
 
     return create_sdk_mcp_server("europepmc", "1.0.0", [_search])
+
+
+def _profile_server():
+    """In-process SDK MCP server: OpenTargets target triage profile (stage-3)."""
+    from claude_agent_sdk import create_sdk_mcp_server, tool
+
+    @tool("target_profile",
+          "Druggability/safety triage for a target symbol: small-molecule tractability "
+          "buckets, genetic constraint (gnomAD; lof oe/upperBin low = LoF-intolerant = "
+          "caution), safety liabilities, has_known_drug. Returns JSON.",
+          {"symbol": str})
+    async def _tp(args):
+        return {"content": [{"type": "text", "text": json.dumps(target_profile(args["symbol"]))}]}
+
+    return create_sdk_mcp_server("otprofile", "1.0.0", [_tp])
 
 
 def _result_server(captured: dict, stage_name: str):
@@ -147,6 +159,15 @@ async def _run_session(stage, system: str, prompt: str, mcp_servers: dict, allow
         return captured["output"]
     return NodeOutput(stage=stage.name, summary=f"[sdk/{label}] session ended without submit_result",
                       open_questions=["worker did not call submit_result"])
+
+
+def _prior_brief(prior: list[dict]) -> str:
+    """Compact JSON of upstream candidates (symbol + scores + evidence kinds) for prompts."""
+    return json.dumps(
+        [{"symbol": c.get("symbol"), "scores": c.get("scores"),
+          "evidence_kinds": sorted({e.get("kind") for e in c.get("evidence", []) if e.get("kind")})}
+         for c in prior],
+        ensure_ascii=False)
 
 
 # ----------------------------------------------------------------------------
@@ -213,6 +234,39 @@ async def _literature_worker(stage, node_input: NodeInput) -> NodeOutput:
 
 
 # ----------------------------------------------------------------------------
+# M3b: stage-3 target-selection (OT target_profile triage)
+# ----------------------------------------------------------------------------
+async def _selection_worker(stage, node_input: NodeInput) -> NodeOutput:
+    captured: dict = {}
+    role = _load_role(stage.name)
+    prior = node_input.prior_candidates or []
+    symbols = [c.get("symbol") for c in prior if c.get("symbol")]
+    prior_txt = ", ".join(symbols) if symbols else "(上游未提供候选)"
+    system = (
+        role
+        + "\n\n## 本次运行\n"
+        "对上游候选做三联评估并**选定**靶点：用 `mcp__otprofile__target_profile` 查每个候选的"
+        "可成药性(tractability)、遗传约束(gnomAD: lof oe/upperBin 越低越不耐受→需谨慎)、"
+        "安全负债(safety_liabilities)。综合【关联强度(上游 scores)+可成药性+安全+文献(上游)】"
+        "为每个候选打分，**选出**最值得推进的靶点；对淘汰项给理由。补体类靶点(如 CFH/C3)若小分子"
+        "可成药性弱但遗传/文献强，应保留并标注 modality（如 antibody/peptide），不要仅因小分子弱而淘汰。"
+        "完成后**必须**调用 `mcp__result__submit_result`：candidates 只保留**选定**靶点，scores 含 "
+        "tractability/constraint/safety 维度，rationale 写选定/淘汰理由。"
+    )
+    prompt = (
+        f"疾病：{node_input.disease}\n"
+        f"上游候选（含遗传+文献证据）：{prior_txt}\n"
+        f"候选简要（symbol/scores/evidence_kinds）：{_prior_brief(prior)}\n"
+        f"建议流程：逐个 `target_profile(symbol)` → 综合评估 → 选定 top 靶点 → submit_result。"
+    )
+    return await _run_session(
+        stage, system, prompt,
+        {"otprofile": _profile_server(), "result": _result_server(captured, stage.name)},
+        ["mcp__otprofile__target_profile", "mcp__result__submit_result"],
+        captured, "selection")
+
+
+# ----------------------------------------------------------------------------
 # dispatch
 # ----------------------------------------------------------------------------
 async def sdk_worker(stage, node_input: NodeInput, angle: str | None = None) -> NodeOutput:
@@ -220,4 +274,6 @@ async def sdk_worker(stage, node_input: NodeInput, angle: str | None = None) -> 
         return await _hypothesis_worker(stage, node_input, angle)
     if stage.name == "literature-evidence":
         return await _literature_worker(stage, node_input)
-    return await dummy_worker(stage, node_input, angle)   # stage 3/4 not wired until M3b/M4
+    if stage.name == "target-selection":
+        return await _selection_worker(stage, node_input)
+    return await dummy_worker(stage, node_input, angle)   # stage 4 not wired until M4
