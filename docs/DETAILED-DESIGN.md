@@ -203,6 +203,8 @@ Runner 全确定性：没有 LLM、没有累积 context（ARCHITECTURE §2 硬�
 
 ## 7. 领域阶段流程（药物靶点发现 workflow）
 
+> **权威 pipeline 见 [DOMAIN.md §5](DOMAIN.md)——scope 已扩为「发现→设计」全链路（7 阶段：发现 1-3 / 桥接 4=structure-prep / 设计 5-6 / report）。下表是早期 6 阶段 sketch，保留作结构示意。**
+
 借鉴 Robin 的 pipeline 形状 + Biomni 的工具集（见 [REFERENCES.md](REFERENCES.md)）。每阶段一个 `.claude/skills/<stage>/SKILL.md` + `/td-<stage>` command + 若干子 agent。
 
 | # | 阶段 (stage) | 输入 | 节点内部做什么（CC harness） | 产出（写 index） | judge 验收 |

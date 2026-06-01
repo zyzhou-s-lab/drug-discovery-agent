@@ -41,7 +41,7 @@
 | [docs/CONCEPTS.md](docs/CONCEPTS.md) | 设计哲学：LLM=纯函数、context 污染、副作用=state、代数效应/Koka、agent-as-tool、信息索引化、对话被赶到两端 |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 三层架构、组件职责、关键设计决定、节点执行器选型对比 |
 | [docs/DETAILED-DESIGN.md](docs/DETAILED-DESIGN.md) | 细节设计：节点 I/O 契约、Runner、judge schema、index、CC 原生资产、headless 配置、prompt caching、领域阶段流程、目录结构 |
-| [docs/DOMAIN.md](docs/DOMAIN.md) | **领域落地**：复现 dry-AMD→ROCK→ripasudil 基准；领域↔harness 绑定、真实 schema、stage-1 垂直切片、judge rubric、落地顺序 |
+| [docs/DOMAIN.md](docs/DOMAIN.md) | **领域落地**：**发现→设计全链路（7 阶段）**；anchor 复现 dry-AMD→ROCK→ripasudil（两端 ground truth）；领域↔harness 绑定、真实 schema、stage-1 切片、工具层+访问约束、数据底座、落地顺序（Phase A 发现 / B 设计） |
 | [docs/REFERENCES.md](docs/REFERENCES.md) | 参考项目分析：Robin、Biomni、pi/oh-my-pi、paper-agent；开源现状（含内部 manifesto 副本 `docs/refs/`） |
 
 ---
@@ -50,11 +50,12 @@
 
 - [x] 架构方向确定（三层 + index + observer）
 - [x] 节点执行器选型确定（worker = CC harness headless；judge = raw API 结构化输出）
-- [x] 锚定场景：**复现 dry-AMD→ROCK→ripasudil**（ground truth 校准 judge）→ `docs/DOMAIN.md`
-- [x] 参考文档集中：manifesto 收进 `docs/refs/`；外部保留指针+摘录
-- [~] stage-1（target-hypothesis）领域资产 scaffold（`.claude/skills/` + `stages/.../CLAUDE.md`；待从 Robin `prompts.py` 挖科学内容填 `DOMAIN-FILL`）
-- [ ] 填 `schemas.py` 领域字段 + 接 OpenTargets/PubMed MCP
+- [x] 锚定场景：**复现 dry-AMD→ROCK→ripasudil**（两端 ground truth，可校准 judge）→ `docs/DOMAIN.md`
+- [x] scope 定为**发现→设计全链路**（7 阶段：发现 1-3 / 桥接 4 structure-prep / 设计 5-6 / report）
+- [x] 参考文档集中：manifesto + PL 源笔记 + 药物设计工具链调查 收进 `docs/refs/`
+- [~] stage-1（target-hypothesis）领域资产 scaffold（待从 Robin `prompts.py` 挖科学内容填 `DOMAIN-FILL`）
+- [ ] **Phase A（发现，无阻塞）**：填 `schemas.py` + 接 OpenTargets/PubMed MCP + 跑 stage-1 看 ROCK 是否进 top-N
+- [ ] **Phase B（设计）**：先解决 `qiaoy1` 工具访问 → wrap AlphaFold3/Vina/GROMACS/RDKit/ORCA
 - [ ] Runner + judge + index 最小骨架（路线图 Step 1）
-- [ ] 跑 stage-1：看 ROCK 是否进 top-N → 校准 judge rubric
 
-详见 [DETAILED-DESIGN §路线图](docs/DETAILED-DESIGN.md#路线图) + [DOMAIN §6 落地顺序](docs/DOMAIN.md)。
+详见 [DETAILED-DESIGN §路线图](docs/DETAILED-DESIGN.md#路线图) + [DOMAIN §7 落地顺序](docs/DOMAIN.md)。
