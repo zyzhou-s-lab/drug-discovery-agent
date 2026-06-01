@@ -50,7 +50,7 @@
 
 ### Worker 节点（中层 / boxed agent = functional core）
 - 一个节点 = 一个**有界阶段** = 一次**全新的 CC session**，一次性自主跑完。
-- **必须作为顶层 main agent 启动**，绝不是某个 orchestrator agent 的嵌套 subagent —— 见 §3.6（关乎缓存命中 + 子 agent 递归能力）。
+- **本身就是顶层 main agent**（Runner 是纯代码、不占 agent 层级，所以自动成立）；其缓存意义与"节点内子 agent 只有一层"的注意事项见 §3.6。
 - 内部**尽情用 Claude Code 的 harness 能力**：skills、子 agent / agent team、内置+MCP 工具、todo 自跟踪。
 - **盒子由 Runner 钉**：固定 system prompt（角色）、`allowed_tools`、`max_turns`、全新 context（跨节点不 resume）、一次性 cwd（脏堆）、headless 预授权、收尾产出 typed 结果写进 index。
 - **harness 给 loop，不给盒子**——schema / 终止 / 隔离 / 类型化返回仍是我们的活。
@@ -112,14 +112,29 @@
 - 必须**预授权**（`permission_mode="bypassPermissions"` 或 `can_use_tool` 回调 / `--allowedTools`），否则节点卡在等人确认。
 - `max_turns` 定终止；fresh session 每节点；一次性 cwd 当脏堆。
 
-### 3.6 节点必须作为顶层 main agent（缓存 + 子 agent 递归）— 硬约束
+### 3.6 为什么 Runner 保持哑代码、阶段保持独立 session（理由 + 节点内嵌套注意）
 
-Runner 为每个阶段 spawn 的节点，**必须是一个顶层 CC session（即"主 agent"）**，绝不能把它做成"某个常驻 orchestrator agent 的嵌套 subagent"。两个硬理由：
+> **"节点是顶层 main agent" 不是一条要记住去执行的纪律——它是架构的自然结果**：Runner 是纯代码、不是 agent，所以它经 Agent SDK / `claude -p` 起的每个节点天然就是顶层 `claude` session（主 agent）。本节记录两件事：**(A) 为什么必须保持这样**（支撑 §3.3/§3.4 两个已做决定的理由），**(B) 真正要在节点内部盯的唯一一件事**。
 
-1. **缓存命中**：Anthropic 的 prompt cache **只惠及主 agent 的请求**（~1h TTL）。若让一个 orchestrator 占了主 agent 位，真正干活的 worker 沦为 subagent，**不享受主 agent 缓存** → 缓存的是每轮都变的编排逻辑（命中率低），干活的全价 input → 账单爆炸。每个节点作为顶层主 agent 时，它**稳定的 system+tools 前缀才真正被缓存**（呼应 §9 / DETAILED-DESIGN §9）。
-2. **子 agent 递归**：几乎所有框架**禁止 subagent 再开 subagent**。orchestrator 占主位 → worker 是 subagent → **开不了自己的子 agent**，而浏览器/代码搜索/文献挖掘这类"工具"本质就是子 agent → 执行层能力腰斩。节点作为顶层主 agent 时，**才保得住节点内 fan-out agent team 的能力**（§2 worker 内部多 agent 的前提）。
+#### A. 两个理由 —— 守住"Runner 哑"(§3.4) 与"每阶段独立 session"(§3.3)
 
-推论：**编排只在 Runner（纯代码、不占 agent 层级）里发生；绝不引入一个"主 agent 当总管"。** 这正是参考 manifesto《状态机优于编排器》§二.5/§二.6 的论点。
+别被诱惑去把 Runner 升级成"聪明的 orchestrator agent"，也别把多个阶段塞进一个大 session 当 stage-subagent。否则同时踩两个坑：
+
+1. **缓存命中**：Anthropic 的 prompt cache **只惠及主 agent 的请求**（~1h TTL）。一旦某个 orchestrator agent 占了主位，真正干活的 worker 沦为 subagent → 不享受主 agent 缓存；被缓存的反而是每轮都变的编排逻辑（命中率低）→ 干活的全价 input → 账单爆炸。**节点作为顶层主 agent 时，它稳定的 system+tools 前缀才真正被缓存**（见 DETAILED-DESIGN §9）。
+2. **子 agent 递归被禁**：框架**只允许一层委派**（主 agent → subagent；subagent 不带 Task 工具，开不了下一层）。若 orchestrator 占主位、worker 是 subagent → worker **再也开不了自己的子 agent**，节点内 agent team 能力归零。**节点作为顶层主 agent 时，才保得住"节点内 fan-out 一队子 agent"的能力**（§2）。
+
+→ 所以编排只能在 Runner（纯代码、不占 agent 层级）里发生；**绝不引入"主 agent 当总管"**。参考 manifesto《状态机优于编排器》§二.5/§二.6。
+
+#### B. 节点内部唯一要盯的：子 agent 只有一层（且只限"再开 agent"，不限工具）
+
+上面第 2 条的另一面——节点（depth-0 主 agent）可以 fan-out 一队子 agent（depth-1），但 **depth-1 成员不能再 spawn 子 agent（depth-2 静默不可用）**。三个澄清，避免误读：
+
+- **天花板只管"再 spawn agent（Task）"，不管"调工具"**：depth-1 子 agent 照样自由用 Bash / 文件 / Grep / WebFetch / **MCP 领域工具**——这些是工具调用，不吃委派层级。
+- **正常扁平 fan-out 完全没问题**：节点 → 一队子 agent，每个子 agent 各自用工具干活 = depth-1，合法。**SDK 的一层上限正好兜住，这种结构不用操心。**
+- **唯一要避开**："让一个子 agent 自己再当小 orchestrator 去委派下一层"——那本身就是该避免的迷你 orchestrator。
+- **设计规则**：需要"再委派"的活，要么**节点本身（depth-0）直接做**，要么把那个能力**包成 MCP/工具**（不吃层级），别让 depth-1 成员去 spawn depth-2。
+
+> 一句话：顶层（节点=主 agent）是设计自带、不用管；要管的只有"别在节点里套第二层 agent"，而把能力做成工具就绕开了。
 
 ## 4. 一次请求的生命周期
 

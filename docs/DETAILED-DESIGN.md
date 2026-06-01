@@ -132,7 +132,7 @@ async def run_node(stage: Stage, node_input: NodeInput, workdir: str) -> NodeOut
 - **全新 context**：每次 `query()` 全新；跨节点**不 resume**。
 - **领域流程在 `/td-<stage>` 这个 command + 对应 skill 里**，不在 Python。
 - 裸 CLI 等价：`claude -p "/td-<stage> ..." --output-format stream-json --allowedTools ... --permission-mode ... --mcp-config ... --max-turns ...`，要进程隔离时用它。
-- **顶层 main agent**：无论 SDK 还是裸 CLI，节点都作为顶层 session 启动，不嵌套在 orchestrator agent 下（见 ARCHITECTURE §3.6：缓存 + 子 agent 递归）。
+- **顶层 main agent（自动成立）**：Runner 是纯代码，所以 SDK/裸 CLI 起的节点天然是顶层 session——要盯的不是"顶层启动"（废话），而是"节点内子 agent 只有一层，且只限再开 agent、不限工具调用"，见 ARCHITECTURE §3.6.B。
 - **成本上限**：可加 `claude -p --max-budget-usd <N>` 给每节点设花费天花板，与 `max_turns` 双保险。
 - **cwd = `stages/<stage>/`**：让节点继承本阶段 scoped 的 `CLAUDE.md` + skills（目录=身份，见 §1）。
 
