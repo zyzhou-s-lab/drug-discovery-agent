@@ -16,6 +16,8 @@
   - **设计端判据**：拿 **ripasudil 对接 ROCK + MD** 作正对照，验证设计段能复现"ROCK 抑制剂可结合"的已知结论。
 - **不重造**：发现段挖 Robin（部署在 `gpu-zhouy1:~/Projects/robin`，`prompts.py` 835 行 + 疾病 notebook）；设计段复用集群**已装工具链**（见 [refs/drug-design](refs/drug-design/README.md)）。
 
+> **发现段已完成文献+数据调研** → [discovery-logic-chain.md](discovery-logic-chain.md)。**重要纠偏**：genetics-first 下 dry-AMD 的 top 靶点是**补体(CFH/C3)**（已上市 GA 药 pegcetacoplan/avacincaptad 即补体抑制剂）；ROCK→ripasudil 是机制/repurposing 假设。故 anchor 校准：**发现段 ground-truth → 补体**，**repurposing/设计段 → ROCK**。
+
 ---
 
 ## 2. 领域 ↔ harness 绑定
@@ -112,13 +114,14 @@ class DesignArtifact(BaseModel):
   ├── reports/
   └── manifest.json    # 状态 + 各阶段 verdict（权威源）
 ```
+> **本地已有可复用资源（发现段无需联网即可起步）**：`zhouy1:~/database_workshop/opentarget_25.03`（OT 25.03 dump）、共享 `/data/database/databases20210723/`（GTEx/GO/KEGG/HGNC/OMIM/L1000/DRKG/PrediXcan）、UKBioBank、1000G、参考基因组。在线 API（Open Targets/GWAS Catalog/Europe PMC/ChEMBL/STRING）实测均可达。详见 [discovery-logic-chain.md §四](discovery-logic-chain.md)。
 
 ---
 
 ## 7. 落地顺序
 
 **Phase A — 发现段（无访问阻塞，先做）**
-1. **挖 Robin**：读 `gpu-zhouy1:~/Projects/robin/robin/prompts.py` + AMD notebook，填 stage-1 的 `DOMAIN-FILL`。
+1. **发现段科学已就绪** → [discovery-logic-chain.md](discovery-logic-chain.md)（逻辑链条 + 数据调研）。据此填 stage 1-3 的 `DOMAIN-FILL`；可再挖 Robin `prompts.py` 补充。
 2. **填 schema**：`TargetCandidate` 字段/阈值定稿 → `src/dd_agent/schemas.py`。
 3. **接发现工具**：`mcp/opentargets_server.py` + `mcp/pubmed_server.py`（参考 Biomni）。
 4. **跑 stage 1**：`disease="dry AMD"`，看 ROCK 是否进 top-N → 校准 judge。
