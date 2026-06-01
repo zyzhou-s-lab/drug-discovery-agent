@@ -219,6 +219,43 @@
 - **方法消融**：in-silico KO 即基因消融，**强制对照**（负=随机/无关基因，正=已知靶点如 ROCK/ripasudil）→ 判效应**特异**而非伪影。
 - **敏感性消融**：judge 做 **leave-one-angle-out**（去掉任一角度结论是否翻转 → `robustness` = robust/fragile）+ 看同角度多工具一致度（`tool_consensus`）；**仅对"通过边缘"靶点做**（明显通过/失败跳过，省算力）。
 
+### 3.8 持久化与恢复（CC 边界 + Runner 的 durable 责任）
+
+**调研结论（2026，见 [REFERENCES](REFERENCES.md)）**：所有本地/SDK 编码 agent（Claude Code、Codex、Aider、Amp、Devin）只做到 **session 级恢复**（重放 transcript + 文件快照）；**唯一做到 workflow 级 durable execution 的是 Cursor 云端，且靠外挂 Temporal**。→ **durable 是独立引擎，agent 不自带；我们必须在 Runner/index 层自建。** 语言：**Python**（同类科学 agent 全 Python + 领域工具生态；Agent SDK 双语成熟，不构成 TS 理由）。
+
+**两层要分清：**
+- **session 级**（CC 白嫖）：持久化对话 transcript，resume 时重放进新 context。**关键陷阱：transcript 记录"调过哪些 tool"，不追踪"副作用是否已发生" → resume 会重复发起 tool call（重跑命令 / 重复提交作业）。**
+- **workflow 级**（我们自建）：每步落盘，崩了从断点续，长作业**幂等 / exactly-once**。
+
+**节点内可直接复用 CC/Agent SDK（免费）：**
+- 单节点中断 → 存 `session_id` + `resume`（尤其 `error_max_turns`/`error_max_budget` 提限续跑）；`fork_session` 分支；transcript JSONL（`~/.claude/projects/<cwd>/<id>.jsonl`）当免费审计日志。
+- ⚠️ `/rewind` 文件 checkpoint **只追踪 Edit/Write，不追踪 bash/外部工具改的文件**（我们领域工具几乎全是外部命令 → 别指望它）。
+- ⚠️ 跨主机 resume 不自动（session 文件本地 + cwd 编码）。**Anthropic 自己建议：别靠 transcript 跨机恢复，把结果存成应用状态传给新 session ——正是本项目 index-as-权威源**（节点输出存 index，不靠 transcript）。
+
+**Runner/index 层必须自建（CC 帮不上）：**
+- **跨节点 pipeline durable**：index 存每条 pipeline 状态（哪些节点完成、产出、各节点可 resume 的 `session_id`）；崩了从第一个未完成节点续。节点产出当**内容寻址工件（content-addressed artifact）**落盘，不靠 transcript 恢复。
+- **长 GPU/slurm 作业幂等（头号风险）**：见下模式。
+- **原子提交**：节点产出写临时路径、成功后 rename；Runner 校验工件完整再标记完成。
+
+**长作业循环模式（短-loop + 解耦 + 幂等）：**
+```
+✗ 错：节点里 submit_slurm(); 等几小时; 解读        # 崩了 resume → 重复提交
+
+✓ 对：
+  [submit 节点]  key = hash(node_id + inputs)
+                 if index.has_job(key): jobid = index.get(key)      # 幂等：已提交→重连
+                 else: jobid = sbatch(...); index.put(key, jobid)   # 先记 jobid 再算“已提交”
+                 → 返回 jobid，节点退出（session 结束）
+  [Runner 代码]  轮询 sacct(jobid) 到 DONE（崩了重启→读 index 拿 jobid 继续轮询，不重交）
+  完成 → 起 [解读节点] 读产物（content-addressed）
+```
+即 Cursor 经 Temporal 得到的"short loops that exit + 解耦 loop 与机器状态"，我们手写轻量版。
+
+**落地策略 (c)→(a) 渐进：**
+- **Phase A 先 (c)**：快节点（LLM/API/分钟级）先跑通 loop 控制流，崩了重跑代价小，index 预留 durable 接口。
+- **一接 GPU/slurm 长算就上 (a) 手写轻量**：idempotency key + 记 jobid + 重连而非重交（上面模式）。
+- **(b) Temporal** 留到将来多用户/生产化（它不强加 agent 抽象，与"哑 Runner + 隔离 session"哲学对齐）。
+
 ## 4. 一次请求的生命周期
 
 ```

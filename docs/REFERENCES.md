@@ -90,3 +90,22 @@
 3. **领域工具**：照搬 Biomni 集成 + PaperQA2（别造轮子）。
 4. **workflow 形状**：照 Robin 的 Step/pipeline + 它的 prompts/阶段划分，执行换成自托管 CC session。
 5. **avoid**：把 loop 外包（Managed Agents / Robin→Edison）——除非明确要托管容器。
+
+---
+
+## Agent 框架 & 持久化/恢复机制调研（2026，web 核实）
+
+两轮 web 调研，支撑【语言=Python】与【durable 设计】（见 ARCHITECTURE §3.1 / §3.8）。
+
+**框架对比**：LangGraph、OpenAI Agents SDK、Microsoft AutoGen（已进 maintenance，合并入 **Microsoft Agent Framework**；AG2 为社区 fork——别押停更分支）、CrewAI、Temporal、FutureHouse aviary/ldp、DSPy、Claude Agent SDK、pi/oh-my-pi、Robin、Biomni。要点：
+- **科学发现 agent 几乎全 Python**（Biomni 82% / Robin / aviary·ldp 94% / DSPy）；无主流科学 agent 用 TS 做骨架（pi 是编码 agent）。
+- **checkpoint ≠ durable execution**（Diagrid）：LangGraph/CrewAI 只存 state、恢复/防重复要自己来。
+- **Temporal 是唯一与"哑 Runner + 隔离 session"哲学对齐的 durable 底座**（只做 durable 编排、不强加 agent 抽象）。
+
+**持久化/恢复机制（CC/Codex 等）**：
+- **Claude Code/Agent SDK**：transcript JSONL（`~/.claude/projects/<cwd>/<id>.jsonl`）+ `--resume/--continue/fork_session`；`/rewind` 文件 checkpoint **仅 Edit/Write**（bash 改的文件不追踪）；跨主机 resume 不自动。
+- **Codex**：rollout JSONL + `codex resume`；cloud=每任务临时容器（缓存≤12h，`--attempts` best-of-N）。
+- **Aider**=git auto-commit/`/undo`；**Devin**=VM 快照（Blockdiff）+checkpoint；**Cursor 云端**=唯一真 durable，**靠外挂 Temporal**。
+- **共性**：都是 session 级恢复；**resume 会重复发起 tool call**（transcript 不追踪副作用是否已发生）；无 exactly-once。→ 印证 durable + 长作业幂等必须我们自建（ARCHITECTURE §3.8）。
+
+出处：[LangChain durable-execution](https://docs.langchain.com/oss/python/langgraph/durable-execution) · [Temporal AI](https://temporal.io/blog/durable-execution-meets-ai-why-temporal-is-the-perfect-foundation-for-ai) · [Diagrid: checkpoints≠durable](https://www.diagrid.io/blog/checkpoints-are-not-durable-execution-why-langgraph-crewai-google-adk-and-others-fall-short-for-production-agent-workflows) · [Claude Code sessions](https://code.claude.com/docs/en/sessions) / [checkpointing](https://code.claude.com/docs/en/checkpointing) / [Agent SDK sessions](https://code.claude.com/docs/en/agent-sdk/sessions) · [Codex rollout (DeepWiki)](https://deepwiki.com/openai/codex/3.5.2-rollout-persistence-and-replay) · [Cursor cloud-agent lessons (Temporal)](https://cursor.com/blog/cloud-agent-lessons) · [Aider git](https://aider.chat/docs/git.html) · [Devin Blockdiff](https://cognition.ai/blog/blockdiff) · [ZenML: why agents need durable execution](https://www.zenml.io/blog/why-agents-need-durable-execution)
