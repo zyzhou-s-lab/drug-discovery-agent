@@ -51,3 +51,15 @@ class Verdict(BaseModel):
     reasons: list[str] = Field(default_factory=list)
     missing: list[str] = Field(default_factory=list)         # drives the next retry's input
     retry_hint: str | None = None
+
+
+# ---- stage-4 validation planning (M4) ----
+class ValidationAnglePlan(BaseModel):
+    target: str
+    angles: list[str] = Field(default_factory=list)          # subset of the fixed menu
+    rationale: str = ""
+
+
+class ValidationPlan(BaseModel):
+    disease: str = ""
+    plans: list[ValidationAnglePlan] = Field(default_factory=list)

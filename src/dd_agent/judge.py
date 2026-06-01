@@ -32,22 +32,9 @@ def api_judge(stage, output: NodeOutput) -> Verdict:
     if not rubric:                                  # not wired for this stage yet → dummy
         return dummy_judge(stage, output)
 
-    import anthropic
+    from .llm import anthropic_client_and_model
 
-    # Reuse whatever the box's claude code is configured with; DD_JUDGE_* overrides.
-    # Supports x-api-key (api_key) or Bearer (auth_token), custom base_url (relays).
-    key = os.environ.get("DD_JUDGE_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
-    token = os.environ.get("ANTHROPIC_AUTH_TOKEN")
-    base_url = os.environ.get("DD_JUDGE_BASE_URL") or os.environ.get("ANTHROPIC_BASE_URL")
-    kw: dict = {}
-    if base_url:
-        kw["base_url"] = base_url
-    if key:
-        kw["api_key"] = key
-    elif token:
-        kw["auth_token"] = token
-    client = anthropic.Anthropic(**kw)
-    model = os.environ.get("DD_JUDGE_MODEL") or os.environ.get("ANTHROPIC_MODEL") or "claude-sonnet-4-5"
+    client, model = anthropic_client_and_model()
 
     verdict_tool = {
         "name": "emit_verdict",

@@ -267,6 +267,48 @@ async def _selection_worker(stage, node_input: NodeInput) -> NodeOutput:
 
 
 # ----------------------------------------------------------------------------
+# M4a: stage-4 target-validation (planner-driven; one session per target×angle)
+# ----------------------------------------------------------------------------
+async def _validation_worker(stage, node_input: NodeInput, angle: str | None) -> NodeOutput:
+    target = node_input.constraints.get("target")
+    if not target:
+        return NodeOutput(stage=stage.name, summary="[validate] no target in input")
+    captured: dict = {}
+    role = _load_role(stage.name)
+    disease = node_input.disease
+    if angle == "safety":
+        system = (
+            role + "\n\n## 本次运行（验证角度：safety）\n"
+            f"验证靶点 **{target}** 的安全性：调 `mcp__otprofile__target_profile` 看 genetic_constraint"
+            "（lof 的 oe/upperBin 越低=越不耐受 LoF=on-target 毒性风险）+ safety_liabilities，"
+            "判断作为药靶的安全风险（支持/警示）。evidence kind='safety'、source='OpenTargets'。"
+            f"完成后**必须** submit_result：candidates 只含 {target}，scores 含 safety 维度，rationale 写风险评估。"
+        )
+        servers = {"otprofile": _profile_server(), "result": _result_server(captured, stage.name)}
+        allowed = ["mcp__otprofile__target_profile", "mcp__result__submit_result"]
+        prompt = (f"验证靶点：{target}（角度：safety），疾病：{disease}。"
+                  f"流程：target_profile('{target}') → 评估安全 → submit_result。")
+    else:  # genetic (default)
+        system = (
+            role + "\n\n## 本次运行（验证角度：genetic）\n"
+            f"独立验证靶点 **{target}** 与 {disease} 的遗传因果：search_disease 找 EFO → "
+            "disease_associated_targets(sort_by='genetic_association') 定位该靶点，看其 genetic_association "
+            "分与 datatype 分解是否**稳健支持因果**（而非仅弱关联）。evidence kind='genetic'、"
+            "source='OpenTargets'、detail 写分值与判断。"
+            f"完成后**必须** submit_result：candidates 只含 {target}，scores 含 genetic 验证分，"
+            "rationale 写支持/冲突结论。"
+        )
+        servers = {"opentargets": _ot_server(), "result": _result_server(captured, stage.name)}
+        allowed = ["mcp__opentargets__search_disease", "mcp__opentargets__disease_associated_targets",
+                   "mcp__result__submit_result"]
+        prompt = (f"验证靶点：{target}（角度：genetic），疾病：{disease}。"
+                  f"流程：search_disease → disease_associated_targets(sort_by='genetic_association') "
+                  f"定位 {target} → 评估遗传因果稳健性 → submit_result。")
+    return await _run_session(stage, system, prompt, servers, allowed, captured,
+                              f"validate/{target}/{angle}")
+
+
+# ----------------------------------------------------------------------------
 # dispatch
 # ----------------------------------------------------------------------------
 async def sdk_worker(stage, node_input: NodeInput, angle: str | None = None) -> NodeOutput:
@@ -276,4 +318,6 @@ async def sdk_worker(stage, node_input: NodeInput, angle: str | None = None) -> 
         return await _literature_worker(stage, node_input)
     if stage.name == "target-selection":
         return await _selection_worker(stage, node_input)
-    return await dummy_worker(stage, node_input, angle)   # stage 4 not wired until M4
+    if stage.name == "target-validation":
+        return await _validation_worker(stage, node_input, angle)
+    return await dummy_worker(stage, node_input, angle)

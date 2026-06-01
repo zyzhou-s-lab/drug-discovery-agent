@@ -19,6 +19,7 @@ class Stage:
     max_attempts: int = 3
     scatter: bool = False                       # scatter-gather: parallel angle worker nodes
     angles: list[str] = field(default_factory=list)
+    planner: bool = False                       # M4: planner-driven dynamic scatter (stage-4)
 
 
 # stage-1 验收 rubric（M1）。judge 据此出 typed Verdict（ARCHITECTURE §3.7 D：
@@ -55,6 +56,17 @@ _SEL_RUBRIC = (
     "score(0-1) 反映选定依据的充分性与一致性；missing 标明缺哪类评估。"
 )
 
+# stage-4 验证 rubric（M4a）：多角度加权验证，显式冲突，正交一致。
+_VAL_RUBRIC = (
+    "你是靶点验证阶段的审稿人。收敛标准：\n"
+    "1) 对选定靶点给出多角度验证结论（非空）；\n"
+    "2) **加权而非投票**：靶点通过 iff 因果向角度（genetic）稳健支持，且综合其他角度"
+    "（safety 等）权重一致；权重反映证据强度，不是简单多数；\n"
+    "3) **显式呈现冲突**（如遗传强但 LoF intolerant 的安全顾虑）——冲突不必一票否决，但必须标注；\n"
+    "4) 验证结论与上游证据一致（补体 C3/CFH 的遗传应被独立确认）。\n"
+    "score(0-1) 反映验证的正交一致性与稳健性；missing 标明缺哪些角度/证据。"
+)
+
 
 # 发现段 stage 1-4（DOMAIN §5.1 节点清单）
 DISCOVERY_PIPELINE: list[Stage] = [
@@ -62,6 +74,5 @@ DISCOVERY_PIPELINE: list[Stage] = [
           angles=["genetic", "expression", "network", "literature"]),
     Stage("literature-evidence", rubric_prompt=_LIT_RUBRIC),
     Stage("target-selection", rubric_prompt=_SEL_RUBRIC),
-    Stage("target-validation", scatter=True,
-          angles=["genetic", "perturbation", "expression", "network", "safety"]),
+    Stage("target-validation", rubric_prompt=_VAL_RUBRIC, planner=True),
 ]

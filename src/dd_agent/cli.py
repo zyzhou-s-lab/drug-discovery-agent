@@ -58,7 +58,9 @@ def main(argv=None) -> None:
     # --only just restricts which stage actually executes this run.
     # M2+: --real fans out the stage's scatter angles (M1's single-angle downgrade removed).
 
-    runner = Runner(idx, worker_fn, judge_fn, DISCOVERY_PIPELINE)
+    from .planner import plan_validation
+    runner = Runner(idx, worker_fn, judge_fn, DISCOVERY_PIPELINE,
+                    planner_fn=(plan_validation if real else None))
     res = asyncio.run(runner.run(args.campaign, args.disease, only=only))
     print(f"[{res['campaign']}] {args.cmd} done{' [real]' if real else ''}. state:")
     _print_states(idx, args.campaign)

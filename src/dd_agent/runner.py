@@ -1,24 +1,44 @@
 """Runner = deterministic state machine (imperative shell). NOT a node.
 
 Orchestrates, never reasons: for each stage -> (skip if done = durable resume)
--> retry loop [build_input -> worker (scatter-gather if stage.scatter) ->
-converge into index -> judge -> deterministic route]. judge ADVISES; Runner
-transitions. Aggregation (gather) is deterministic code, not a node.
-(ARCHITECTURE §2/§3.6/§3.7)
+-> retry loop [build_input -> (planner|scatter|worker) -> converge into index ->
+judge -> deterministic route]. judge ADVISES; Runner transitions. Aggregation
+(gather) is deterministic code, not a node. (ARCHITECTURE §2/§3.6/§3.7)
 """
 from __future__ import annotations
 
 import asyncio
 
 from .index import Index
-from .schemas import NodeInput, NodeOutput, TargetCandidate
+from .schemas import NodeInput, NodeOutput, TargetCandidate, ValidationAnglePlan, ValidationPlan
+
+
+def _merge_by_symbol(results) -> list[TargetCandidate]:
+    """Deterministic gather: merge candidates across results by symbol — union
+    evidence, merge per-angle scores, rank by #distinct supporting angles."""
+    merged: dict[str, TargetCandidate] = {}
+    for r in results:
+        for c in r.candidates:
+            if c.symbol not in merged:
+                merged[c.symbol] = c.model_copy(deep=True)
+                continue
+            m = merged[c.symbol]
+            m.evidence.extend(c.evidence)
+            m.scores.update(c.scores)
+            if c.rationale and c.rationale not in m.rationale:
+                m.rationale = f"{m.rationale} | {c.rationale}".strip(" |")
+            if not m.modality and c.modality:
+                m.modality = c.modality
+    return sorted(merged.values(), key=lambda c: len({e.kind for e in c.evidence}), reverse=True)
 
 
 class Runner:
-    def __init__(self, index: Index, worker_fn, judge_fn, pipeline, max_parallel: int = 8):
+    def __init__(self, index: Index, worker_fn, judge_fn, pipeline,
+                 planner_fn=None, max_parallel: int = 8):
         self.index = index
         self.worker_fn = worker_fn
         self.judge_fn = judge_fn
+        self.planner_fn = planner_fn                 # stage-4 validation planning (M4)
         self.pipeline = pipeline
         self.sem = asyncio.Semaphore(max_parallel)   # bounded concurrency, not raw gather
 
@@ -52,31 +72,49 @@ class Runner:
 
     async def _scatter_gather(self, stage, node_input) -> NodeOutput:
         # parallel angle worker nodes -> barrier -> deterministic gather (NOT a node).
-        # gather merges candidates by symbol: union evidence, merge per-angle scores
-        # (ARCHITECTURE §3.7 A — aggregation is deterministic code, not a node).
         results = await asyncio.gather(
             *[self._run_angle(stage, node_input, a) for a in stage.angles]
         )
-        merged: dict[str, TargetCandidate] = {}
-        for r in results:
-            for c in r.candidates:
-                if c.symbol not in merged:
-                    merged[c.symbol] = c.model_copy(deep=True)
-                    continue
-                m = merged[c.symbol]
-                m.evidence.extend(c.evidence)
-                m.scores.update(c.scores)
-                if c.rationale and c.rationale not in m.rationale:
-                    m.rationale = f"{m.rationale} | {c.rationale}".strip(" |")
-                if not m.modality and c.modality:
-                    m.modality = c.modality
-        # rank by how many distinct angles support each candidate (cross-angle corroboration)
-        cands = sorted(merged.values(),
-                       key=lambda c: len({e.kind for e in c.evidence}), reverse=True)
+        cands = _merge_by_symbol(results)
         return NodeOutput(
             stage=stage.name,
             summary=(f"[scatter] {len(results)} angles ({', '.join(stage.angles)}) "
                      f"-> {len(cands)} merged candidates"),
+            candidates=cands,
+        )
+
+    async def _run_validation(self, stage, node_input, target, angle):
+        async with self.sem:
+            sub = node_input.model_copy(deep=True)
+            sub.constraints = {**sub.constraints, "target": target}   # thread target to worker
+            out = await self.worker_fn(stage, sub, angle)
+            for c in out.candidates:
+                for e in c.evidence:
+                    e.kind = angle                                     # deterministic angle stamp
+            return out
+
+    def _default_plan(self, node_input) -> ValidationPlan:
+        # fallback when no planner_fn (dummy / zero-API runs): validate each on genetics.
+        targets = [c.get("symbol") for c in (node_input.prior_candidates or []) if c.get("symbol")]
+        return ValidationPlan(disease=node_input.disease,
+                              plans=[ValidationAnglePlan(target=t, angles=["genetic"]) for t in targets])
+
+    async def _planner_validate(self, stage, node_input) -> NodeOutput:
+        # planner picks angles per target (dynamic, mode a) -> fan out one worker per
+        # (target, angle) -> deterministic gather per target. ARCHITECTURE §3.7 A/E.
+        plan = self.planner_fn(stage, node_input) if self.planner_fn else self._default_plan(node_input)
+        pairs = [(p.target, a) for p in plan.plans for a in p.angles]
+        if not pairs:
+            return NodeOutput(stage=stage.name,
+                              summary="[validate] empty plan (no selected targets upstream)")
+        results = await asyncio.gather(
+            *[self._run_validation(stage, node_input, t, a) for (t, a) in pairs]
+        )
+        cands = _merge_by_symbol(results)
+        plan_txt = "; ".join(f"{p.target}:[{'+'.join(p.angles)}]" for p in plan.plans)
+        return NodeOutput(
+            stage=stage.name,
+            summary=f"[validate] plan {{{plan_txt}}} -> {len(cands)} validated targets",
             candidates=cands,
         )
 
@@ -90,7 +128,9 @@ class Runner:
             for _ in range(stage.max_attempts):
                 self.index.record_attempt(campaign, stage.name)
                 node_input = self._build_input(campaign, disease, stage)
-                if stage.scatter:
+                if getattr(stage, "planner", False):
+                    out = await self._planner_validate(stage, node_input)
+                elif stage.scatter:
                     out = await self._scatter_gather(stage, node_input)
                 else:
                     out = await self.worker_fn(stage, node_input, None)
