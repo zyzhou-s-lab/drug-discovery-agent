@@ -37,10 +37,12 @@ PL 设计哲学在对话中确定，落入 `docs/{CONCEPTS,ARCHITECTURE,DETAILED
 | 05:29 | **M2** stage-1 scatter：4 角度并行 fan-out → 确定性去重合并 | ✅ 11 候选、补体多角度命中，judge 0.9 | `967af92` `55207c0` |
 | 05:43 | **M3a** stage 间数据流 + stage-2 文献证据（Europe PMC 真实 PMID） | ✅ 10 候选附真 PMID，judge 0.85（含修 `--only` bug） | `7f705a1` `d6311f3` |
 | 06:12 | **M3b** stage-3 选定（OT `target_profile` 三联评估：可成药性/约束/安全） | ✅ C3=Top、CFH=biologic（modality 分支）、HTRA1=次选，judge 0.85 | `5362829` `1daa27f` `c3b1bb8` |
+| 07:xx | **M4a** stage-4 验证（planner 动态选角度 + 动态 scatter + 加权/冲突 judge） | ✅ C3/CFH/HTRA1 各 genetic+safety，judge 0.45 显式标注 C3 safety 冲突 | `871e2c2` `791b4ef` |
+| 07:xx | **M5 observer**（HAPI 并行）：Index 上 CQRS 只读 API + SSE + SDK 事件流 + web 前端 | 合并入主线（与 M4a 正交零冲突）；events 落盘 path 待对接 | `cfa49d0` |
 
-**发现段 stage 1-3 至此全链真实跑通**：`dry AMD` → 提名(scatter) → 文献(PMID) → 三联评估选定。
+**发现段 stage 1-4 至此全链真实跑通**：`dry AMD` → 提名(scatter) → 文献(PMID) → 三联评估选定 → 多角度加权验证。
 
 ## 待办
+- **M4b**：stage-4 接重型本地工具（FUSION TWAS / GRN_transfer in-silico KO / coloc / MR）+ 独立源（GWAS Catalog / GTEx / STRING）+ **stage-1 planner 回填**（§3.7 E）；菜单扩 perturbation/expression/network。性质转变：在线 API → gpu/cpu 本地重型计算，可能上 slurm + durable (a) 层。
 - **M3 剩余**：stage-1 独立证据源（GTEx / STRING）给 expression/network 角度——延后，不阻塞（M2 实测暴露 OT datatype 在这两个角度对遗传驱动病空转）。
-- **M4**：stage-4 `target-validation`（planner 动态选角度 + 本地重型工具 TWAS/in-silico KO/扰动 + stage-1 planner 回填，见 §3.7 E）。性质转变：从在线 API → gpu/cpu 本地重型计算，可能上 slurm + durable (a) 层。
-- **M5**：observer（只读 dashboard）+ 端到端。
+- **M5 observer**：HAPI 已起步（api.py + events.py + web/，已合并）；待对接 events 落盘 path、端到端联调。

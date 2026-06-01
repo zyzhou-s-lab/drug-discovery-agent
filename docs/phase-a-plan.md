@@ -93,3 +93,20 @@ M3 拆成 **M3a**（stage 间数据流 + stage 2 literature-evidence）+ **M3b**
 - **stage-1 独立源（GTEx/STRING）= M3 剩余项**，延后（不阻塞发现链；M2 暴露的 expression/network 空转是质量问题，非链路问题）。
 
 **发现段 stage 1-3 至此全部真实跑通**（提名 → 文献 → 选定）。
+
+## M4 切法（决定 2026-06-01，路线 (i)：先机制 + 轻量真实工具）
+M4 两块正交：① 机制（planner 动态选角度 + 动态 scatter + 加权/冲突 judge）；② 重型本地工具（FUSION/GRN_transfer/slurm/durable）。先做 ①（M4a），② 留 M4b。
+
+### M4a 完成记录（2026-06-01）
+**发现段 1-4 全链真实跑通**（提名 → 文献 → 选定 → 验证）：
+- **planner**（`planner.py`，messages forced-tool `emit_plan` → typed `ValidationPlan`）：从固定菜单 `[genetic, safety]` 为每个选定靶点动态选角度——**第一次"运行时决定跑哪些角度"**（stage-1 是固定，§3.7 E）。实测对 C3/CFH/HTRA1 各选 genetic+safety。
+- **Runner 动态 scatter**（`Stage.planner` + `_planner_validate`）：planner → 按 plan fan-out per (target×angle)（6 worker）→ `_merge_by_symbol` per target → judge；`_default_plan` fallback 让无 planner_fn 的 dummy/M0 也能跑。
+- **验证 worker**（`_validation_worker`）：genetic→OT 遗传关联交叉确认；safety→OT `target_profile`（gnomAD 约束/安全）。
+- **加权/冲突 judge**（`_VAL_RUBRIC`）：实测 `converged=true, score=0.45`——遗传稳健支持（通过），但**显式标注 C3 的 safety 冲突**（LoF constraint + 代谢综合征 triglyceride 风险），冲突拉分不一票否决。加权而非投票，符合设计。
+- **修 bug**：DeepSeek 兼容层偶发在 forced-tool 返回空 input → `Verdict.model_validate({})` 崩 → `api_judge` try/except fallback（attempts=2 重试后过）。
+
+### M5 observer 已并行起步（HAPI，2026-06-01）
+gpu 上由 **HAPI** 做出 M5 observer 并合并入主线（`cfa49d0`，与 M4a 在 worker.py 正交、零冲突）：`api.py`（Index 之上 CQRS 只读 HTTP/SSE + run trigger，**非节点，Runner 仍是唯一 writer**）+ `events.py`（Agent SDK 消息流 → per-stage JSONL step cards）+ `web/`（vite/tailwind/radix/mermaid 前端）+ worker `_emit_stream` + pyproject `api` extra + `scripts/seed_demo.py`。**待对接**：events 落盘的 `DD_ARTIFACTS`/path（本次 stage-4 未生成 events 目录，emit 被 worker 的 try 静默吞掉）。
+
+### M4b 待办
+重型本地工具（FUSION TWAS / GRN_transfer in-silico KO / coloc / MR）+ 独立源（GWAS Catalog / GTEx / STRING）+ **stage-1 planner 回填** + 可能 slurm + durable (a) 层；菜单扩 `perturbation`/`expression`/`network`。
