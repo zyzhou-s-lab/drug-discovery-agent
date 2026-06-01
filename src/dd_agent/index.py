@@ -26,7 +26,10 @@ class Index:
         self.artifacts_root = artifacts_root
         os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
         os.makedirs(artifacts_root, exist_ok=True)
-        self.db = sqlite3.connect(db_path)
+        # check_same_thread=False: the read API (FastAPI) touches the Index from
+        # worker threads; WAL + busy_timeout keep concurrent reads safe. Writes are
+        # still single-writer (Runner owns the write path).
+        self.db = sqlite3.connect(db_path, check_same_thread=False)
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA busy_timeout=5000")
         self.db.execute("PRAGMA foreign_keys=ON")
@@ -45,6 +48,12 @@ class Index:
                 verdict_json TEXT,
                 updated_at   REAL,
                 PRIMARY KEY (campaign, stage)
+            );
+            -- campaign metadata: disease drives the frontend's "project" grouping.
+            CREATE TABLE IF NOT EXISTS campaigns(
+                campaign   TEXT PRIMARY KEY,
+                disease    TEXT,
+                created_at REAL
             );
             -- (a) durable hook for long external jobs (slurm); used when GPU lands.
             CREATE TABLE IF NOT EXISTS jobs(
@@ -117,6 +126,46 @@ class Index:
             "SELECT stage, status, attempts FROM stage_state WHERE campaign=? ORDER BY rowid",
             (campaign,),
         ).fetchall()
+
+    def verdict(self, campaign: str, stage: str) -> dict | None:
+        r = self.db.execute(
+            "SELECT verdict_json FROM stage_state WHERE campaign=? AND stage=?", (campaign, stage)
+        ).fetchone()
+        return json.loads(r[0]) if r and r[0] else None
+
+    def stage_updated_at(self, campaign: str, stage: str) -> float | None:
+        r = self.db.execute(
+            "SELECT updated_at FROM stage_state WHERE campaign=? AND stage=?", (campaign, stage)
+        ).fetchone()
+        return r[0] if r else None
+
+    def record_campaign(self, campaign: str, disease: str) -> None:
+        self.db.execute(
+            """INSERT INTO campaigns(campaign, disease, created_at) VALUES(?,?,?)
+               ON CONFLICT(campaign) DO UPDATE SET disease=excluded.disease""",
+            (campaign, disease, time.time()),
+        )
+        self.db.commit()
+
+    def list_campaigns(self) -> list[dict]:
+        """All campaigns with progress accounting + disease — drives the frontend run list.
+        Unions campaigns from both tables so legacy runs (no `campaigns` row) still show."""
+        diseases = dict(self.db.execute("SELECT campaign, disease FROM campaigns").fetchall())
+        agg = {
+            c: (s, d, e, u)
+            for (c, s, d, e, u) in self.db.execute(
+                """SELECT campaign, COUNT(*), SUM(status='done'),
+                          SUM(status='exhausted'), MAX(updated_at)
+                   FROM stage_state GROUP BY campaign"""
+            ).fetchall()
+        }
+        out = []
+        for c in set(diseases) | set(agg):
+            s, d, e, u = agg.get(c, (0, 0, 0, None))
+            out.append({"campaign": c, "disease": diseases.get(c),
+                        "stages": s, "done": d or 0, "exhausted": e or 0, "updated_at": u})
+        out.sort(key=lambda r: (r["updated_at"] or 0), reverse=True)
+        return out
 
     # ---- content-addressed artifact store ----
     def write_artifact(self, campaign: str, name: str, data: str, subdir: str = "01_discovery") -> str:

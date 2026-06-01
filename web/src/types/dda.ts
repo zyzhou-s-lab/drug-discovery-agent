@@ -1,0 +1,107 @@
+// TS mirror of dd_agent's pydantic schemas + api.py responses.
+// Kept in sync with src/dd_agent/schemas.py and src/dd_agent/api.py.
+
+export type StageStatus = 'queued' | 'in_progress' | 'done' | 'exhausted'
+
+export interface Evidence {
+    kind: string // genetic | expression | network | literature | ...
+    source: string // OpenTargets | PubMed:<pmid> | ...
+    detail: string
+    ref: string // e.g. "PMID:15761122"
+}
+
+export interface TargetCandidate {
+    symbol: string
+    name: string | null
+    modality: string | null // small_molecule | peptide | antibody | ...
+    evidence: Evidence[]
+    scores: Record<string, number> // association / tractability / constraint / safety
+    rationale: string
+}
+
+export interface NodeOutput {
+    stage: string
+    summary: string
+    artifacts: string[]
+    candidates: TargetCandidate[]
+    self_assessment: string
+    open_questions: string[]
+}
+
+export interface Verdict {
+    converged: boolean
+    score: number
+    reasons: string[]
+    missing: string[]
+    retry_hint: string | null
+}
+
+export interface PipelineStage {
+    name: string
+    scatter: boolean
+    angles: string[]
+    max_attempts: number
+}
+
+export interface CampaignStage {
+    name: string
+    status: StageStatus
+    attempts: number
+    scatter: boolean
+    angles: string[]
+    updated_at: number | null
+}
+
+export interface CampaignView {
+    campaign: string
+    stages: CampaignStage[]
+}
+
+export interface CampaignSummary {
+    campaign: string
+    disease: string | null
+    stages: number
+    done: number
+    exhausted: number
+    updated_at: number | null
+}
+
+export interface DdaConfig {
+    model: string | null
+    base_url_set: boolean
+    real_available: boolean
+}
+
+export interface StageDetail {
+    campaign: string
+    stage: string
+    status: StageStatus
+    attempts: number
+    output: NodeOutput | null
+    verdict: Verdict | null
+}
+
+// One captured Agent SDK step (events.py / worker._emit_stream)
+export type StepEventType = 'session_start' | 'thinking' | 'text' | 'tool_use' | 'tool_result' | 'result'
+
+export interface StepEvent {
+    seq: number
+    ts: number
+    stage: string
+    label: string // scatter angle ("genetic"…) or "literature"/"selection"
+    type: StepEventType
+    // tool_use
+    name?: string
+    input?: unknown
+    tool_id?: string
+    // tool_result
+    content?: unknown
+    is_error?: boolean
+    // thinking / text
+    text?: string
+    // session_start
+    prompt?: string
+    // result
+    cost?: number | null
+    num_turns?: number | null
+}

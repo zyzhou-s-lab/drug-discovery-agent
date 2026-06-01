@@ -16,9 +16,40 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from .events import emit
 from .schemas import Evidence, NodeInput, NodeOutput, TargetCandidate
 from .tools.europepmc import search_literature
 from .tools.opentargets import disease_associated_targets, search_disease, target_profile
+
+
+def _emit_stream(stage_name: str, label: str, msg) -> None:
+    """Map one Agent SDK message to step-card events (路子一: same stream HAPI consumes)."""
+    from claude_agent_sdk import (
+        AssistantMessage, ResultMessage, TextBlock, ThinkingBlock,
+        ToolResultBlock, ToolUseBlock, UserMessage,
+    )
+    try:
+        if isinstance(msg, AssistantMessage):
+            for b in msg.content:
+                if isinstance(b, ThinkingBlock):
+                    emit(stage_name, label, "thinking", text=b.thinking)
+                elif isinstance(b, TextBlock):
+                    if b.text and b.text.strip():
+                        emit(stage_name, label, "text", text=b.text)
+                elif isinstance(b, ToolUseBlock):
+                    emit(stage_name, label, "tool_use", tool_id=b.id, name=b.name, input=b.input)
+        elif isinstance(msg, UserMessage):
+            content = msg.content
+            if isinstance(content, list):
+                for b in content:
+                    if isinstance(b, ToolResultBlock):
+                        emit(stage_name, label, "tool_result", tool_id=b.tool_use_id,
+                             content=b.content, is_error=bool(getattr(b, "is_error", False)))
+        elif isinstance(msg, ResultMessage):
+            emit(stage_name, label, "result", is_error=bool(getattr(msg, "is_error", False)),
+                 cost=getattr(msg, "total_cost_usd", None), num_turns=getattr(msg, "num_turns", None))
+    except Exception:
+        pass  # telemetry must never break the run
 
 STAGE_DIR = Path(__file__).resolve().parents[2] / "stages"
 
@@ -153,8 +184,9 @@ async def _run_session(stage, system: str, prompt: str, mcp_servers: dict, allow
         permission_mode="bypassPermissions",
         max_turns=stage.max_turns,
     )
-    async for _ in query(prompt=prompt, options=opts):
-        pass
+    emit(stage.name, label, "session_start", prompt=prompt)
+    async for msg in query(prompt=prompt, options=opts):
+        _emit_stream(stage.name, label, msg)
     if "output" in captured:
         return captured["output"]
     return NodeOutput(stage=stage.name, summary=f"[sdk/{label}] session ended without submit_result",
