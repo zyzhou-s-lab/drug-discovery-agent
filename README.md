@@ -3,7 +3,7 @@
 > 一个面向**药物靶点发现（therapeutic target discovery）**的长程 Agent 系统的架构方案。
 > 核心立场：用程序语言理论（PL）的视角设计 harness，而不是堆一个"会聊天的大 agent"。
 
-最后更新：2026-05-31
+最后更新：2026-06-01
 
 ---
 
@@ -51,6 +51,46 @@
 
 ---
 
+## 怎么运行（Quickstart）
+
+> 运行环境在 **`gpu-zhouy1:~/Projects/drug-discovery-agent`**；本地只编辑 → `git push` → gpu `git pull` 跑。
+> 前置：Python ≥ 3.11 + pydantic ≥ 2（gpu base conda 已有 2.12）。
+> **M0 现为 dummy（零 API）**：worker/judge 是占位的，只验证控制流（状态机 + 断点续 + scatter-gather），真实数据从 M1 起。
+
+零安装跑法（M0 即用此验证）：
+
+```bash
+cd ~/Projects/drug-discovery-agent && git pull --ff-only
+
+# 跑发现段 pipeline（stage 1-4）
+PYTHONPATH=src python -m dd_agent.cli run --disease "dry AMD" --campaign c1 \
+    --db /tmp/dd/state.sqlite --artifacts /tmp/dd/artifacts
+
+# 只看状态表
+PYTHONPATH=src python -m dd_agent.cli status --campaign c1 \
+    --db /tmp/dd/state.sqlite --artifacts /tmp/dd/artifacts
+
+# 断点续：重跑会跳过 state-DB 里已 done 的阶段
+PYTHONPATH=src python -m dd_agent.cli resume --disease "dry AMD" --campaign c1 \
+    --db /tmp/dd/state.sqlite --artifacts /tmp/dd/artifacts
+```
+
+装成包（多一个 `dd-agent` 命令 + 可跑 pytest；本地无 pydantic 时建 venv 用这个）：
+
+```bash
+python -m venv .venv && .venv/bin/pip install -e ".[dev]"
+.venv/bin/dd-agent run --disease "dry AMD" --campaign c1
+.venv/bin/pytest -q          # M0 smoke
+```
+
+`--db` / `--artifacts` 不传默认落 `/tmp/dd/`。
+
+**子命令**：`run`（从当前状态跑）、`resume`（= run，靠 SQLite 跳过已 done 阶段）、`status`（只打印状态表，不执行）。
+
+**结果在哪**：状态机 → `--db` 的 SQLite（`stage_state` 表：status / attempts / output_json / verdict_json）；每阶段产物 → `--artifacts/<campaign>/01_discovery/<stage>-<sha>.json`（内容寻址，tmp+rename 原子写）。
+
+---
+
 ## 状态
 
 - [x] 架构方向确定（三层 + index + observer）
@@ -68,6 +108,7 @@
 - [x] **审计 coder-loop**（TS+Bun+SQLite harness 现成参考）→ 吸收：**持久层 = SQLite(WAL) state-DB + content-addressed artifact-store 分离**、**daemon watchdog 算法**（进程组 kill / recover-stale / 退避预算 / `probe-claude-resume`）照其 Python 重写；保留 judge/scatter-gather/tool 幂等/Agent SDK worker（科学域独有或更强）。详见 REFERENCES + ARCHITECTURE §3.8
 - [ ] **Phase A 实现**：据逻辑链条填 stage1-3 `DOMAIN-FILL` + `schemas.py` + 接 Open Targets/GWAS Catalog/Europe PMC（anchor 发现端 ground-truth = 补体 CFH/C3）
 - [ ] **Phase B（设计）**：qiaoy1 访问手段已具备（凭据 + remote `sshpass`）→ wrap AlphaFold3/Vina/GROMACS/RDKit/ORCA（建议迁共享 `/data`）
-- [ ] Runner + judge + index 最小骨架（路线图 Step 1）
+- [x] **M0 骨架（dummy，零 API）跑通**（gpu 验证：状态机 stage 1-4 全 done + 断点续跳过已 done + scatter-gather 聚合）→ `src/dd_agent/`、`docs/phase-a-plan.md`
+- [ ] **M1**：stage-1 真实切片（OpenTargets MCP + Agent SDK worker + `messages.parse` judge → dry-AMD 遗传角度出补体 CFH/C3）
 
 详见 [DETAILED-DESIGN §路线图](docs/DETAILED-DESIGN.md#路线图) + [DOMAIN §7 落地顺序](docs/DOMAIN.md)。
