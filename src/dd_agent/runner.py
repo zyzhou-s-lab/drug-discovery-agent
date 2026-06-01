@@ -23,8 +23,21 @@ class Runner:
         self.sem = asyncio.Semaphore(max_parallel)   # bounded concurrency, not raw gather
 
     def _build_input(self, campaign: str, disease: str, stage) -> NodeInput:
+        # stage chain: thread the latest upstream candidates downstream (read from index,
+        # deterministic — Runner threads context, nodes stay boxed). CONCEPTS §5.
+        prior: list = []
+        done_refs: list[str] = []
+        for s in self.pipeline:
+            if s.name == stage.name:
+                break
+            out = self.index.output(campaign, s.name)
+            if out:
+                done_refs.append(s.name)
+                if out.get("candidates"):
+                    prior = out["candidates"]
         return NodeInput(campaign_id=campaign, stage=stage.name, disease=disease,
-                         objective=f"run {stage.name}")
+                         objective=f"run {stage.name}",
+                         context_refs=done_refs, prior_candidates=prior)
 
     async def _run_angle(self, stage, node_input, angle):
         async with self.sem:

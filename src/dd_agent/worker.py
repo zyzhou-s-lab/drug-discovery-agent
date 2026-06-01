@@ -2,12 +2,13 @@
 
 Protocol: async worker_fn(stage, NodeInput, angle: str | None) -> NodeOutput.
 - dummy_worker: zero-API stand-in (M0), exercises control flow.
-- sdk_worker:   M1/M2 — Claude Agent SDK session that CALLS in-process MCP tools
-                (OpenTargets + submit_result) and returns a typed NodeOutput.
-                M2: angle-aware — each scatter angle is an independent boxed session
-                that queries OpenTargets by its own datatype (genetic/expression/
-                network/literature). The node's LLM decides whether/how to call the
-                tools; the harness only mounts the menu + sets cwd/role (§3.7 D/E).
+- sdk_worker:   M1/M2/M3 — Claude Agent SDK session(s) that CALL in-process MCP
+                tools and return a typed NodeOutput. Dispatches per stage:
+                  target-hypothesis  -> _hypothesis_worker (angle-aware, OpenTargets)
+                  literature-evidence-> _literature_worker (Europe PMC, real PMIDs)
+                  (others)           -> dummy until M3b/M4.
+                The node's LLM decides whether/how to call tools; the harness only
+                mounts the menu + sets cwd/role (§3.7 D/E).
 """
 from __future__ import annotations
 
@@ -15,12 +16,13 @@ import json
 from pathlib import Path
 
 from .schemas import Evidence, NodeInput, NodeOutput, TargetCandidate
+from .tools.europepmc import search_literature
 from .tools.opentargets import disease_associated_targets, search_disease
 
 STAGE_DIR = Path(__file__).resolve().parents[2] / "stages"
 
 # scatter angle → OpenTargets datatype (M2; ARCHITECTURE §3.7 E + phase-a-plan M2).
-# Independent sources (GTEx/STRING/EuropePMC) deferred to M2-late/M3.
+# Independent sources (GTEx/STRING/EuropePMC) deferred to M3.
 ANGLE_DATATYPE = {
     "genetic": "genetic_association",
     "expression": "rna_expression",
@@ -55,7 +57,7 @@ async def dummy_worker(stage, node_input: NodeInput, angle: str | None = None) -
 
 
 # ----------------------------------------------------------------------------
-# M1/M2: Claude Agent SDK worker (real, for target-hypothesis)
+# shared SDK helpers
 # ----------------------------------------------------------------------------
 def _load_role(stage_name: str) -> str:
     p = STAGE_DIR / stage_name / "CLAUDE.md"
@@ -88,6 +90,21 @@ def _ot_server():
     return create_sdk_mcp_server("opentargets", "1.0.0", [_search, _assoc])
 
 
+def _europepmc_server():
+    """In-process SDK MCP server exposing Europe PMC search."""
+    from claude_agent_sdk import create_sdk_mcp_server, tool
+
+    @tool("search_literature",
+          "Search Europe PMC for REAL papers. Returns JSON [{pmid,doi,title,year,journal}]. "
+          "Use the returned pmid as the evidence ref; never invent one.",
+          {"query": str, "size": int})
+    async def _search(args):
+        res = search_literature(args["query"], int(args.get("size") or 5))
+        return {"content": [{"type": "text", "text": json.dumps(res)}]}
+
+    return create_sdk_mcp_server("europepmc", "1.0.0", [_search])
+
+
 def _result_server(captured: dict, stage_name: str):
     """In-process tool that captures the node's typed NodeOutput."""
     from claude_agent_sdk import create_sdk_mcp_server, tool
@@ -111,13 +128,31 @@ def _result_server(captured: dict, stage_name: str):
     return create_sdk_mcp_server("result", "1.0.0", [_submit])
 
 
-async def sdk_worker(stage, node_input: NodeInput, angle: str | None = None) -> NodeOutput:
-    """M1/M2: real session for target-hypothesis, one angle per call. Else → dummy."""
-    if stage.name != "target-hypothesis":
-        return await dummy_worker(stage, node_input, angle)   # other stages not wired until M3/M4
-
+async def _run_session(stage, system: str, prompt: str, mcp_servers: dict, allowed_tools: list,
+                       captured: dict, label: str) -> NodeOutput:
+    """Run one boxed Agent SDK session; return captured NodeOutput or a no-result stub."""
     from claude_agent_sdk import ClaudeAgentOptions, query
 
+    opts = ClaudeAgentOptions(
+        cwd=str(STAGE_DIR / stage.name),
+        system_prompt=system,
+        mcp_servers=mcp_servers,
+        allowed_tools=allowed_tools,
+        permission_mode="bypassPermissions",
+        max_turns=stage.max_turns,
+    )
+    async for _ in query(prompt=prompt, options=opts):
+        pass
+    if "output" in captured:
+        return captured["output"]
+    return NodeOutput(stage=stage.name, summary=f"[sdk/{label}] session ended without submit_result",
+                      open_questions=["worker did not call submit_result"])
+
+
+# ----------------------------------------------------------------------------
+# M1/M2: stage-1 target-hypothesis (angle-aware, OpenTargets)
+# ----------------------------------------------------------------------------
+async def _hypothesis_worker(stage, node_input: NodeInput, angle: str | None) -> NodeOutput:
     captured: dict = {}
     role = _load_role(stage.name)
     angle_name = angle or "genetic"
@@ -138,23 +173,51 @@ async def sdk_worker(stage, node_input: NodeInput, angle: str | None = None) -> 
         f"建议流程：search_disease 找 EFO → disease_associated_targets(sort_by='{datatype}') "
         f"→ 挑该维度可追溯候选 → submit_result。候选数 ≤ {top_n}。"
     )
-    opts = ClaudeAgentOptions(
-        cwd=str(STAGE_DIR / stage.name),
-        system_prompt=system,
-        mcp_servers={"opentargets": _ot_server(), "result": _result_server(captured, stage.name)},
-        allowed_tools=[
-            "mcp__opentargets__search_disease",
-            "mcp__opentargets__disease_associated_targets",
-            "mcp__result__submit_result",
-        ],
-        permission_mode="bypassPermissions",
-        max_turns=stage.max_turns,
-    )
-    async for _ in query(prompt=prompt, options=opts):
-        pass
+    return await _run_session(
+        stage, system, prompt,
+        {"opentargets": _ot_server(), "result": _result_server(captured, stage.name)},
+        ["mcp__opentargets__search_disease", "mcp__opentargets__disease_associated_targets",
+         "mcp__result__submit_result"],
+        captured, angle_name)
 
-    if "output" in captured:
-        return captured["output"]
-    return NodeOutput(stage=stage.name,
-                      summary=f"[sdk/{angle_name}] session ended without calling submit_result",
-                      open_questions=["worker did not call submit_result"])
+
+# ----------------------------------------------------------------------------
+# M3a: stage-2 literature-evidence (Europe PMC, real PMIDs)
+# ----------------------------------------------------------------------------
+async def _literature_worker(stage, node_input: NodeInput) -> NodeOutput:
+    captured: dict = {}
+    role = _load_role(stage.name)
+    prior = node_input.prior_candidates or []
+    symbols = [c.get("symbol") for c in prior if c.get("symbol")]
+    prior_txt = ", ".join(symbols) if symbols else "(上游未提供候选)"
+    system = (
+        role
+        + "\n\n## 本次运行\n"
+        "对上游提名的候选靶点做文献综述：用 `mcp__europepmc__search_literature` 查**真实**文献，"
+        "每个候选至少 1 条 literature evidence——evidence 的 ref 必须填工具返回的**真实 PMID**、"
+        "kind='literature'、source 形如 'EuropePMC' 或 'PubMed:<pmid>'、detail 写论文标题/结论要点。"
+        "**禁止编造 PMID 或引用**；查不到就如实标注证据不足。保留上游候选集，给它们补文献证据。"
+        "完成后**必须**调用 `mcp__result__submit_result`。"
+    )
+    prompt = (
+        f"疾病：{node_input.disease}\n"
+        f"候选靶点（来自上游 target-hypothesis）：{prior_txt}\n"
+        f"建议流程：对每个候选 `search_literature(query='<symbol> AND {node_input.disease}')` "
+        f"→ 挑相关真实文献记 PMID → 汇总进各候选的 evidence → submit_result。"
+    )
+    return await _run_session(
+        stage, system, prompt,
+        {"europepmc": _europepmc_server(), "result": _result_server(captured, stage.name)},
+        ["mcp__europepmc__search_literature", "mcp__result__submit_result"],
+        captured, "literature")
+
+
+# ----------------------------------------------------------------------------
+# dispatch
+# ----------------------------------------------------------------------------
+async def sdk_worker(stage, node_input: NodeInput, angle: str | None = None) -> NodeOutput:
+    if stage.name == "target-hypothesis":
+        return await _hypothesis_worker(stage, node_input, angle)
+    if stage.name == "literature-evidence":
+        return await _literature_worker(stage, node_input)
+    return await dummy_worker(stage, node_input, angle)   # stage 3/4 not wired until M3b/M4

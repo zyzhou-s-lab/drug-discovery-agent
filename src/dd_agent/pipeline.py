@@ -33,12 +33,22 @@ _TH_RUBRIC = (
     "score(0-1) 反映证据可追溯性与覆盖度；missing 写明缺哪类证据以驱动下一次重试。"
 )
 
+# stage-2 验收 rubric（M3a）：文献证据必须真实可追溯（PMID），严禁编造引用。
+_LIT_RUBRIC = (
+    "你是文献证据阶段的审稿人。收敛标准：\n"
+    "1) 对上游候选靶点给出文献证据；\n"
+    "2) 每条 literature evidence 的 ref 必须是**真实 PMID**（可追溯），source 指向 "
+    "Europe PMC/PubMed——**严禁编造引用**：若 evidence 无 PMID 或明显杜撰则 converged=false；\n"
+    "3) 主要候选（尤其补体 CFH/C3）应有文献支撑。\n"
+    "score(0-1) 反映引用可追溯性与覆盖度；missing 标明哪些候选缺真实文献。"
+)
+
 
 # 发现段 stage 1-4（DOMAIN §5.1 节点清单）
 DISCOVERY_PIPELINE: list[Stage] = [
     Stage("target-hypothesis", rubric_prompt=_TH_RUBRIC, scatter=True,
           angles=["genetic", "expression", "network", "literature"]),
-    Stage("literature-evidence"),
+    Stage("literature-evidence", rubric_prompt=_LIT_RUBRIC),
     Stage("target-selection"),
     Stage("target-validation", scatter=True,
           angles=["genetic", "perturbation", "expression", "network", "safety"]),

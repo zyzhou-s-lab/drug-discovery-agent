@@ -17,6 +17,7 @@ class NodeInput(BaseModel):
     objective: str = ""
     context_refs: list[str] = Field(default_factory=list)  # pointers into index, not full text
     constraints: dict[str, Any] = Field(default_factory=dict)
+    prior_candidates: list[dict[str, Any]] = Field(default_factory=list)  # upstream stage candidates (chain)
 
 
 class Evidence(BaseModel):
