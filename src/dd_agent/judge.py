@@ -58,6 +58,11 @@ def api_judge(stage, output: NodeOutput) -> Verdict:
     )
     for block in resp.content:
         if getattr(block, "type", None) == "tool_use" and block.name == "emit_verdict":
-            return Verdict.model_validate(block.input)
+            try:
+                return Verdict.model_validate(block.input)
+            except Exception as e:                          # relay may return empty/partial tool input
+                return Verdict(converged=False, score=0.0,
+                               reasons=[f"judge verdict malformed: {e}"],
+                               missing=["verdict"], retry_hint="re-emit a complete emit_verdict")
     return Verdict(converged=False, score=0.0,
                    reasons=["judge returned no emit_verdict tool_use"], missing=["verdict"])
