@@ -100,6 +100,27 @@ class DesignArtifact(BaseModel):
 
 ---
 
+### 5.1 发现段节点清单（stage 1–4）
+
+> **节点** = 被 Runner 编排的 boxed agent session（worker / planner / judge）。**聚合 gather、路由、Runner 本身 = 确定性代码，不计为节点**（定义见 [ARCHITECTURE §3.6/§3.7](ARCHITECTURE.md)）。下表为**设计层节点种类**；运行时按「候选靶点数 × 验证角度数 × consensus 工具数」横向 fan-out 出实例。
+
+| Stage | 结构 | worker / planner 节点 | judge | 聚合 |
+|---|---|---|---|---|
+| 1 `target-hypothesis` | scatter-gather（角度**固定**，无 planner） | 遗传 / 表达 / 网络 / 文献 = **4** | 1 | 代码 |
+| 2 `literature-evidence` | 单 worker（per 候选靶点） | **1** | 1 | — |
+| 3 `target-selection` | 单 worker（三联评估 + 选定） | **1** | 1 | — |
+| 4 `target-validation` | scatter-gather（**动态** planner 选角度） | planner **1** + 角度 worker **≤5**（菜单：遗传/扰动/表达/网络/安全；关键角度 consensus） | 1 | 代码 |
+
+**计数：**
+- 主 stage 状态机节点：**4**
+- 固定 boxed-agent 节点：**11** ＝ worker 6（4+1+1）＋ judge 4（每 stage 一个）＋ planner 1（stage4）
+- ＋ stage4 动态验证角度节点 **≤5**（planner 按靶点选，典型 3–4）→ 典型一次 ≈ **15** 个节点
+- **不计入节点**：Runner（代码）、聚合 gather（代码）、consensus 的多工具（节点内工具调用）
+
+**两点注意：**
+1. **运行时会再乘**：stage 2–4 是 per 候选靶点复制；stage4 内再 fan-out 角度、角度内 consensus 再多工具调用。实例数 = 种类数 × 候选靶点 × 角度 × 工具。
+2. **stage1 vs stage4 的 scatter-gather 不同**：stage1 角度固定（遗传/表达/网络/文献）→ 无需 planner；stage4 角度动态（按靶点+文献选）→ 有 planner。
+
 ## 6. 工具层、访问约束与数据底座
 
 **工具层**：发现段用 web/DB（OpenTargets/PubMed/表达图谱——建 MCP 或直接 HTTP）；设计段**优先 wrap 实机已装工具**（AlphaFold3 / Vina / GROMACS / RDKit / ORCA / 扩散模型，见 [refs/drug-design](refs/drug-design/README.md)），不重造。
