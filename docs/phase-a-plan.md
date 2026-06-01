@@ -108,5 +108,12 @@ M4 两块正交：① 机制（planner 动态选角度 + 动态 scatter + 加权
 ### M5 observer 已并行起步（HAPI，2026-06-01）
 gpu 上由 **HAPI** 做出 M5 observer 并合并入主线（`cfa49d0`，与 M4a 在 worker.py 正交、零冲突）：`api.py`（Index 之上 CQRS 只读 HTTP/SSE + run trigger，**非节点，Runner 仍是唯一 writer**）+ `events.py`（Agent SDK 消息流 → per-stage JSONL step cards）+ `web/`（vite/tailwind/radix/mermaid 前端）+ worker `_emit_stream` + pyproject `api` extra + `scripts/seed_demo.py`。**待对接**：events 落盘的 `DD_ARTIFACTS`/path（本次 stage-4 未生成 events 目录，emit 被 worker 的 try 静默吞掉）。
 
+### M5 联调完成（2026-06-01）
+- **events 对接修复**：`events.emit` 靠 `events_dir_var`（ContextVar），cli 原先没设 → noop。修 `cli.py` 跑前 `events_dir_var.set(artifacts/campaign/events)`，cli run 现在落 step events（与 api 的 `_run_pipeline` 一致）。
+- **api 起 + serve 真实数据**：`pip install .[api]` → `uvicorn dd_agent.api:app :8099`（`DD_DB`/`DD_ARTIFACTS` 指向真实 m3 库）。read 端点 serve 真实发现 run（含 M4a stage-4：C3/CFH/HTRA1 各 genetic+safety、judge 0.45），**非 seed replay**。
+- **events 流验证**：cli 重跑 stage-3 → `events/target-selection.jsonl`（110 events：thinking / tool_use×39 / tool_result×39 / result）→ `/events` 端点 serve。
+- **前端**：`web/` typecheck 过，`vite dev :5173`（proxy /api→:8099）起，全栈联通（proxy /api/health 200）。**浏览器访问 `http://10.202.2.224:5173`**（gpu tailscale IP；或 `ssh -L 5173:localhost:5173 gpu-zhouy1` 转发）。
+- observer 本体是 HAPI 写的（前端组件 lifted 自 `tiann/hapi`，AGPL）；本次仅加 cli events 对接 + 指向真实 db。
+
 ### M4b 待办
 重型本地工具（FUSION TWAS / GRN_transfer in-silico KO / coloc / MR）+ 独立源（GWAS Catalog / GTEx / STRING）+ **stage-1 planner 回填** + 可能 slurm + durable (a) 层；菜单扩 `perturbation`/`expression`/`network`。

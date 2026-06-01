@@ -38,7 +38,7 @@ PL 设计哲学在对话中确定，落入 `docs/{CONCEPTS,ARCHITECTURE,DETAILED
 | 05:43 | **M3a** stage 间数据流 + stage-2 文献证据（Europe PMC 真实 PMID） | ✅ 10 候选附真 PMID，judge 0.85（含修 `--only` bug） | `7f705a1` `d6311f3` |
 | 06:12 | **M3b** stage-3 选定（OT `target_profile` 三联评估：可成药性/约束/安全） | ✅ C3=Top、CFH=biologic（modality 分支）、HTRA1=次选，judge 0.85 | `5362829` `1daa27f` `c3b1bb8` |
 | 07:xx | **M4a** stage-4 验证（planner 动态选角度 + 动态 scatter + 加权/冲突 judge） | ✅ C3/CFH/HTRA1 各 genetic+safety，judge 0.45 显式标注 C3 safety 冲突 | `871e2c2` `791b4ef` |
-| 07:xx | **M5 observer**（HAPI 并行）：Index 上 CQRS 只读 API + SSE + SDK 事件流 + web 前端 | 合并入主线（与 M4a 正交零冲突）；events 落盘 path 待对接 | `cfa49d0` |
+| 07:xx | **M5 observer**（HAPI 并行）：Index 上 CQRS 只读 API + SSE + SDK 事件流 + web 前端 | 合并入主线（与 M4a 正交零冲突）→ **联调跑通**：api serve 真实 m3（含 stage-4）+ events 流（110 events）+ vite :5173 全栈通；浏览器 `http://10.202.2.224:5173` | `cfa49d0` `0838edf` |
 
 **发现段 stage 1-4 至此全链真实跑通**：`dry AMD` → 提名(scatter) → 文献(PMID) → 三联评估选定 → 多角度加权验证。
 
