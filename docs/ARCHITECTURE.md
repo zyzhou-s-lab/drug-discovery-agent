@@ -136,6 +136,24 @@
 
 > 一句话：顶层（节点=主 agent）是设计自带、不用管；要管的只有"别在节点里套第二层 agent"，而把能力做成工具就绕开了。
 
+### 3.7 fan-out 验证（scatter-gather）+ 节点/工具粒度原则
+
+**(A) scatter-gather 验证模式**（用于 stage 4 `target-validation`，并可复用到 stage 1 多证据提名）：
+`planner 节点(无状态, 出类型化 plan) → Runner 并行 fan-out「一个角度=一个 worker 节点」(barrier) → 确定性 gather → 无状态 judge 出 verdict → Runner 确定性转移`。
+- 一个角度 = 一个**顶层 worker 节点**（**不是**单节点内 fan-out 子 agent）。理由：① §3.6.B——顶层节点才能再开自己的子 agent（如 TWAS 跨组织 fan-out）；② §3.4——聚合/判定交**外部 judge**，不信节点内自评。
+- barrier 在此**正确**（judge 需全部角度才判）；长算角度用 submit→resume 异步（见 B-2），别让 barrier 干等。
+- 动态选角度 = planner；**模式 (a)**：只从「已封装工具菜单」选（(b) 自动封装未接工具 / (c) 安装新工具算法 = 未来规划）。plan **记入 index**（可复现、有界：角度数/预算上限 + 每角度理由）。
+- 并行由 **Runner（确定代码）**发起；**别让 LLM 节点在一次 thinking 里并行 SSH**（取消级联污染 thinking 签名）。
+
+**(B) 节点 vs 工具的粒度原则**——"算法工具一律封装为工具调用、不单开 session；节点 session = 一个角度/完整工作流，不是单个工具"。**成立**，与 §12 控制谱系、agent-as-tool 区分、§3.6 成本一致：
+- **算法 = 确定性工具**（`f(params)→result`，无需推理循环）→ 封装为 **MCP/in-process 工具**由节点**调用**；为跑一条命令单开 session = 浪费 + 抽象倒置。
+- **节点 session = 一个角度/完整工作流**（推理 + 调若干工具 + 解读 + 出类型化结果），**不是单个工具**。
+- 三条细化：
+  - **B-1 边界=要不要推理**：纯计算无判断的角度（跑一次 vina 出分）可由 **Runner 直接调工具**（更便宜更确定）；需选参/解读/迭代/纠错的角度才配 agent 节点——节点挣的是"推理"的钱。
+  - **B-2 长异步重算**（MD/AlphaFold）：工作流在异步边界**挂起→续跑**（submit-节点拿 job-id 后 session 结束 → headless 跑 → Runner 完成时唤起 resume/解读节点），**别在一个 session 里干等数小时**（= 代数效应 suspend/resume）。
+  - **B-3 注入形式（§12）**：算法**调用** = 工具/MCP（硬、必调）；角度**方法学/how-to** = skill 或节点 CLAUDE.md（软）。**别把必调算法藏在 skill 里**（可能被跳过）。
+- 副效益：工具调用可复现（`vina(params)` 可重放，整段 session 不可）；§3.6.B——节点调工具不吃委派层级，节点仍保留 fan-out 子 agent 的能力。
+
 ## 4. 一次请求的生命周期
 
 ```

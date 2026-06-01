@@ -92,6 +92,30 @@ class Verdict(BaseModel):             # judge 的 typed 裁决
     retry_hint: str | None = None
 ```
 
+**验证段 schema（scatter-gather，stage 4；见 ARCHITECTURE §3.7）：**
+
+```python
+class ValidationAngle(BaseModel):     # planner 选出的一个角度（模式 a：tool 取自已封装菜单）
+    angle: str                        # genetic | perturbation | expression | network | safety
+    tool: str                         # 已封装工具名（如 fusion_twas / cell_oracle_ko / coloc）
+    params: dict[str, Any] = {}
+    tier: int = 1                     # 1=便宜先跑(gate)  2=贵(GPU/MD, submit→resume)
+    rationale: str
+
+class ValidationPlan(BaseModel):      # planner 节点输出（记入 index，可复现、有界）
+    target_symbol: str
+    angles: list[ValidationAngle]
+
+class ValidationResult(BaseModel):    # 每个角度节点输出
+    angle: str
+    tool: str
+    metric: dict[str, float]          # 如 {twas_p: 1e-6, ko_signature_shift: 0.42}
+    direction: str | None = None      # 与疾病方向是否一致
+    passed: bool
+    confidence: float
+    evidence_refs: list[str]
+```
+
 类型即契约：固定的是 schema 形状，内部内容动态（CONCEPTS §5）。
 
 ## 3. Worker 节点（`worker.py`）

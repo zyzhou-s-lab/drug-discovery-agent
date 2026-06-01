@@ -94,7 +94,7 @@ class DesignArtifact(BaseModel):
 | 8 | `report` | — | 汇总发现→设计报告 | — | 端到端复现已知结论 |
 
 - **modality 分叉**：stage 5–7 按 `TargetCandidate.modality`（小分子 / 多肽）走两条工具链（见 [refs/drug-design](refs/drug-design/README.md)）。
-- **验证段（stage 4 `target-validation`）= 发现段新增的实验验证**：多角度交叉确认（TWAS/GWAS/coloc/MR/in-silico 基因扰动/表达/网络），本地最强项是**基因扰动**（GRN_transfer 自建基准 + 一整套扰动模型，已跑）。详见 [target-validation.md](target-validation.md)。
+- **验证段（stage 4 `target-validation`）= scatter-gather**（ARCHITECTURE §3.7）：planner（**模式 (a)**：从已封装工具菜单动态选角度）→ 并行角度 worker 节点（分层：便宜先 gate）→ 聚合 → judge（加权/冲突）。**一个角度=一个节点工作流，算法封装为工具调用、不单开 session**。本地最强项=基因扰动（GRN_transfer 已跑）。详见 [target-validation.md](target-validation.md)。
 - **anchor 端到端**：发现段→ROCK；设计段→拿 ripasudil（已知 ROCK 抑制剂）做对接/MD 正对照。两端都可校准。
 - 每阶段 rubric/prompt 雏形：发现段挖 `robin/prompts.py`；设计段参考 `refs/drug-design/`。
 

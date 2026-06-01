@@ -38,19 +38,18 @@
 
 ---
 
-## 三、`target-validation` 阶段设计（落到 pipeline）
+## 三、`target-validation` 阶段设计（scatter-gather：动态规划 → 并行角度节点 → 聚合 → judge）
 
-**位置**：发现段 `target-selection`(stage 3) 之后、桥接 `structure-prep` 之前（DOMAIN §5 stage 4）。
+**位置**：`target-selection`(stage 3) 之后、`structure-prep` 之前（DOMAIN §5 stage 4）。**结构 = fan-out / 聚合 / 判定**（审计采用并行 worker 节点，非单节点内 fan-out；理由见 [ARCHITECTURE §3.7](ARCHITECTURE.md)）：
 
-**输入**：选定的候选靶点（`TargetCandidate`）+ 疾病。
-**做什么**（节点内 fan-out 子 agent，每个一条角度，扁平一层）：
-- `genetics-validator`：TWAS（FUSION/PrediXcan/iRIGS）+ coloc + MR → 因果方向与一致性。
-- `perturbation-validator`：in-silico KO（GRN_transfer/CellOracle/scTenifoldKnk）+ 扰动预测（GEARS 等）→ 干预靶点是否移动疾病签名。
-- `expression-validator`：疾病相关细胞类型表达（单细胞/GTEx）。
-- `network-validator`：模块中心性 / KG 证据（STRING/DRKG）。
-- `safety-validator`：gnomAD 约束 + 组织特异性。
-**输出**（追加到 `TargetCandidate`）：每角度的 `validation`: {angle, method, tool, result, evidence_ref, pass}。
-**judge rubric（验证段）**：靶点**通过** ⟺ **≥ N 条正交角度同向支持**（建议 N≥3，且至少含 1 条因果遗传 A/B/C + 1 条功能 E/H）；不足 → `missing` 指出缺哪条 → 回 stage 1/3 重排或补证据。
+1. **规划（planner 节点，无状态）**：输入 = 选定靶点 + 疾病 + stage 2 文献证据；输出 = 类型化 `ValidationPlan`——按本靶点**动态选**哪些角度 + 每角度用菜单里哪个工具。**模式 (a)**：只从「已封装工具菜单」里选（(b) 自动封装未接工具 / (c) 安装新工具算法 = 未来规划）。plan **记入 index**（可复现），且**有界**（角度数/预算上限 + 每角度理由）。
+2. **分层 fan-out（并行角度节点）**：Runner 据 plan 并行起 worker 节点，**一个角度 = 一个节点工作流**（算法封装为工具调用，**不为单个工具单开 session**——见 ARCHITECTURE §3.7B）。**Cost-aware 两段**：先跑便宜角度（遗传/表达/网络，API/本地，分钟级）作廉价 gate；过了再跑贵的（in-silico 扰动 GPU、MD，小时级，长算用 submit→resume）。每节点输出类型化 `ValidationResult`。
+3. **聚合（gather）**：确定性代码（`index.converge`）把各 `ValidationResult` 并成一个结构；仅当需推理调和矛盾时才用一个 synthesis 节点。
+4. **判定 + 转移**：**无状态 judge** 出类型化 verdict；**状态机转移留在 Runner**（judge 只出裁决，不在节点里跑状态机——§3.6/§3.4）。
+
+**角度节点（从菜单按需选，非全跑）**：`genetics-validator`(TWAS FUSION/iRIGS + coloc/MR) · `perturbation-validator`(in-silico KO GRN_transfer/CellOracle/scTenifoldKnk + GEARS) · `expression-validator`(单细胞/GTEx) · `network-validator`(STRING/DRKG) · `safety-validator`(gnomAD/GTEx)。
+
+**judge rubric（验证段）**：**证据加权**（因果遗传 A/B/C > 相关性），**非简单计票**；通过 ⟺ 加权分 ≥ 阈值且 ≥1 因果遗传 + ≥1 功能(E/H) 同向；**冲突是一等输出**（如遗传 no、扰动 yes → 标低置信 / 经 index 上报，不强行多数决）；不足或冲突 → `missing`/`conflicts` 驱动回 stage 1/3 重排或补证据。
 
 ---
 
