@@ -66,3 +66,9 @@ drug-discovery-agent/
 2. **独立证据源**（GTEx / STRING / Europe PMC）= 证据质量增强，延到 M2 后段或 M3（原 M2「加 pubmed/gtex/string MCP」据此推迟；datatype 切分先行）。
 3. **确定性 gather 去重合并**：多角度提同一 symbol（如 CFH 在 genetic+expression 都出）→ 按 symbol 聚合 evidence + 合并各角度 scores（聚合=确定性代码，非节点）。
 4. **DoD**：`--real` 跑 target-hypothesis 时 4 角度并行 fan-out → 合并候选（补体应多角度命中）→ judge 过；scatter 在真实 worker 下并行+barrier 正确。
+
+### M2 完成记录（2026-06-01）
+`--real --only target-hypothesis --disease "dry AMD"`：4 角度并行 fan-out → 确定性合并 **11 候选** → judge `converged=true, score=0.9`。补体多角度命中：CFH/C3(genetic+literature)、CFI(literature)。
+**两点观察**：
+1. **evidence.kind 不可信**：LLM 倾向填 datatype 名（`genetic_association`）而非 angle 名 → gather 的跨角度佐证计数语义乱。**已修**：Runner `_run_angle` 确定性给每条 evidence 盖 angle 戳（佐证统计不再依赖 LLM 守规矩）。
+2. **expression/network 角度在 OT datatype 下对 dry AMD 空转**（AMD 遗传驱动，`rna_expression`/`affected_pathway` 分值弱）→ 印证第 2 点：独立源（GTEx/STRING/Europe PMC）是必要的证据增强，延到 M3。

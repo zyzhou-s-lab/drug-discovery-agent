@@ -28,7 +28,14 @@ class Runner:
 
     async def _run_angle(self, stage, node_input, angle):
         async with self.sem:
-            return await self.worker_fn(stage, node_input, angle)
+            out = await self.worker_fn(stage, node_input, angle)
+            # deterministic: stamp the angle onto each evidence so gather's cross-angle
+            # corroboration count is reliable — don't trust the LLM to fill evidence.kind.
+            if angle:
+                for c in out.candidates:
+                    for e in c.evidence:
+                        e.kind = angle
+            return out
 
     async def _scatter_gather(self, stage, node_input) -> NodeOutput:
         # parallel angle worker nodes -> barrier -> deterministic gather (NOT a node).
