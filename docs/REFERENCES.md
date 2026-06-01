@@ -4,6 +4,22 @@
 
 ---
 
+## Agent architecture manifesto（内部笔记，强对齐）
+
+来源：`zhouy1@gpu-zhouy1:/data1/home/zhouy1/Documents/notes/agent_architecture_manifesto.md`（《长程 AI Agent 架构设计：状态机优于编排器》）。
+
+核心句：**"给 AI 设起止点和边界，边界之外程序化，边界之间靠路由。"** —— 与本项目的 imperative shell / functional core **几乎同构**，是对架构方向的强背书。已吸收进各文档的点：
+- **状态机 > orchestrator**、AI 判断"在哪"/程序决定"去哪"、任务即状态、文件即信号、故障隔离 —— ARCHITECTURE / CONCEPTS（早已对齐）。
+- **节点必须顶层 main agent**（缓存只惠及主 agent + subagent 递归禁令）—— 新增 ARCHITECTURE §3.6 + DETAILED-DESIGN §9。
+- **目录 = agent 身份**（每阶段 scoped cwd + CLAUDE.md + 收窄 skills）—— 新增 DETAILED-DESIGN §1。
+- **Skills vs MCP = 注入方式**（必做步骤别只放 Skill）+ **四级控制谱系** —— 新增 DETAILED-DESIGN §12。
+- **计费/认证**（worker 可走订阅；judge raw API 需 key，冲突与解法）—— 新增 DETAILED-DESIGN §13。
+- **Push 模式 MCP**（长外部计算休眠唤醒）—— 新增 DETAILED-DESIGN §8。
+
+一处刻意分歧：manifesto 用 agent 自写 `can_do_next` 文件做路由信号；本项目额外加**独立 judge** 做质量验收（不信 in-session 自评）。`can_do_next` 类信号可作**路由提示**，但**完成与否拍板权在外层 judge**。
+
+---
+
 ## pi / oh-my-pi（harness 学习对象）
 
 - `earendil-works/pi`（即 `badlogic/pi-mono`，TypeScript monorepo，作者 @mariozechner）——一个 LLM coding agent harness，把底层做成可复用运行时。

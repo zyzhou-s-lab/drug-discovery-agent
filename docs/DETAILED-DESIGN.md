@@ -36,6 +36,10 @@ drug-discovery-agent/
 │   ├── commands/                  # slash 入口（每阶段一个）
 │   │   └── td-<stage>.md
 │   └── settings.json              # 工具白名单 / 权限 / MCP 配置（headless 预授权）
+├── stages/                        # 每阶段一个 scoped cwd（目录=身份；worker 启在这里）
+│   └── <stage>/
+│       ├── CLAUDE.md              # 本阶段角色 + 必做步骤（always-in-context, 不靠 SKILL.md 被读到）
+│       └── .claude/skills/        # 只软链该阶段需要的 skill（收窄可见性）
 ├── mcp/                           # 领域工具 MCP servers
 │   ├── chembl_server.py
 │   ├── pubmed_server.py
@@ -52,6 +56,8 @@ drug-discovery-agent/
 ```
 
 > **index/ vs workspaces/**：index 是**权威、持久、可观测**（关键产物进 git）；workspaces 是**不可信、一次性**，随时清空重来。对应 CONCEPTS §6。
+>
+> **目录 = 身份（每阶段 scoped）**：worker 启动在 `stages/<stage>/`（用它当 `cwd`），自动加载该目录的 `CLAUDE.md` + 只可见该阶段的 skills——用**目录**而非仅 `allowed_tools` 收窄能力边界。盒子更紧、context 更小、缓存前缀更稳定。对应 manifesto §四"目录=agent 身份"。`workspaces/` 仍是真正的脏堆；`stages/<stage>/` 只放只读身份资产。
 
 ## 2. 核心 schema（`schemas.py`，pydantic）
 
@@ -126,6 +132,9 @@ async def run_node(stage: Stage, node_input: NodeInput, workdir: str) -> NodeOut
 - **全新 context**：每次 `query()` 全新；跨节点**不 resume**。
 - **领域流程在 `/td-<stage>` 这个 command + 对应 skill 里**，不在 Python。
 - 裸 CLI 等价：`claude -p "/td-<stage> ..." --output-format stream-json --allowedTools ... --permission-mode ... --mcp-config ... --max-turns ...`，要进程隔离时用它。
+- **顶层 main agent**：无论 SDK 还是裸 CLI，节点都作为顶层 session 启动，不嵌套在 orchestrator agent 下（见 ARCHITECTURE §3.6：缓存 + 子 agent 递归）。
+- **成本上限**：可加 `claude -p --max-budget-usd <N>` 给每节点设花费天花板，与 `max_turns` 双保险。
+- **cwd = `stages/<stage>/`**：让节点继承本阶段 scoped 的 `CLAUDE.md` + skills（目录=身份，见 §1）。
 
 ## 4. Judge 节点（`judge.py`）
 
@@ -220,12 +229,15 @@ Runner 全确定性：没有 LLM、没有累积 context（ARCHITECTURE §2 硬�
 
 > 不重造领域工具：优先参考 **Biomni** 的工具/数据库集成清单，能搬就搬（REFERENCES.md）。
 
+**Push 模式（CC v2.1.80+）**：stage 4/5 若要等**长时外部计算**（docking、AlphaFold 跑几小时），用 **MCP 长连接推送**唤醒节点，而不是在 `bash` 里 `sleep`-轮询——节点休眠不耗 token，计算完成即响应，省 token 且实时。对应 manifesto §四 Push 模式。
+
 ## 9. Prompt caching（长循环优化）
 
 - worker 节点被循环调用上千次：把**不变前缀（system 角色 + tools 定义）做 ephemeral 缓存**，只让 per-invocation 的输入变。
 - 前缀必须**逐字节稳定**（别塞时间戳/UUID）——与"fresh 但确定"纪律一致。
 - Opus 4.8 最小可缓存前缀 4096 tokens；命中后缓存读 ≈ 0.1× 价。
 - judge 同理：缓存 `rubric_prompt`，只变摘要。
+- **关键前提：节点是顶层 main agent**——prompt cache 只惠及主 agent 的请求。这就是 ARCHITECTURE §3.6 把"节点必须顶层 main agent"列为硬约束的原因：否则缓存命中率塌掉、账单爆炸。
 
 ## 10. Observer（`observer.py`，只读）
 
@@ -239,6 +251,35 @@ Runner 全确定性：没有 LLM、没有累积 context（ARCHITECTURE §2 硬�
 - **headless 必须预授权**，否则卡等确认。
 - **远程编排串行执行 SSH/工具批次**：并行批次里一条出错会触发同级取消级联，可能损坏 thinking-block 签名 → 会话永久 400。大输出先落盘再读。
 - Managed Agents / Robin 式托管会**外包 loop**——若选自托管路线（本方案默认），用 Agent SDK / `claude -p` / pi core。
+
+## 12. 控制谱系与放置原则（什么放哪）
+
+四级控制谱系（manifesto §四），从硬到软：
+
+| 等级 | 机制 | 特点 | 本项目用在 |
+|---|---|---|---|
+| 最硬 | **程序状态机** | 代码写死、100% 确定、零 token | Runner：阶段序列、路由、loop/terminate |
+| 硬 | **MCP Tool** | 主动注入每次请求，LLM 必然可见 | **必做步骤**：领域工具、`submit_result` 收尾 |
+| 软 | **Skill** | 被动存在，AI 可能读也可能不读 | **可选**领域流程 / 能力扩展 |
+| 最软 | **Prompt / CLAUDE.md** | 一次性文本 | 阶段角色、风格、临时说明 |
+
+**放置原则（必读）**：
+- **必须执行的步骤不要只放 `SKILL.md`**——Skill 只给 LLM 一个文件名列表，读不读看 AI 心情（manifesto 原话：「降智的 opus 点名都不看」）。把**必做脚手架**提升为 **MCP 工具**，或写进 **slash command 正文 / `stages/<stage>/CLAUDE.md`**（始终在 context）。
+- `submit_result`（收尾、拿类型化输出）已是 MCP / in-process 工具 ✓，保持。
+- **可选**能力（"如需可查 X"）才放 Skill。
+- 一句话：**确定性流程 → 状态机；不可遗漏 → MCP；可选能力 → Skill；一次性指令 → Prompt/CLAUDE.md。**
+
+## 13. 计费与认证（订阅 vs API Key）
+
+manifesto §一 指出的实操约束，对本项目（个人本地、跑在 `gpu-zhouy1`）很关键：
+
+- **worker（`claude -p` / Agent SDK，个人本地用）可走订阅额度（OAuth）**，无需 API Key。注意：若环境里**同时**有 `ANTHROPIC_API_KEY` 和 OAuth 登录，CLI **优先用 API Key**（按 token 计费）；想走订阅要 `unset ANTHROPIC_API_KEY`。
+- **judge 用 raw Messages API（`anthropic.Anthropic`）必须有 API Key**，走不了订阅 → 与"worker 想 unset key 走订阅"**冲突**。
+
+**决定（默认 (a)，可改）**：
+- **(a)【默认】judge 显式传 key、用独立变量名**：`anthropic.Anthropic(api_key=os.environ["DD_JUDGE_API_KEY"])`，**不污染全局 `ANTHROPIC_API_KEY`** → worker 仍可走订阅。judge token 量小，按量计费可接受。
+- (b) **judge 也改用 `claude -p --output-format json`**：可走订阅，但**失去 `messages.parse` 的强 schema 校验**（需自己校验 + 重试）。成本极敏感时选它。
+- worker 另可加 `--max-budget-usd <N>` 设每节点花费天花板。
 
 ## 路线图
 

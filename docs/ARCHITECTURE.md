@@ -50,6 +50,7 @@
 
 ### Worker 节点（中层 / boxed agent = functional core）
 - 一个节点 = 一个**有界阶段** = 一次**全新的 CC session**，一次性自主跑完。
+- **必须作为顶层 main agent 启动**，绝不是某个 orchestrator agent 的嵌套 subagent —— 见 §3.6（关乎缓存命中 + 子 agent 递归能力）。
 - 内部**尽情用 Claude Code 的 harness 能力**：skills、子 agent / agent team、内置+MCP 工具、todo 自跟踪。
 - **盒子由 Runner 钉**：固定 system prompt（角色）、`allowed_tools`、`max_turns`、全新 context（跨节点不 resume）、一次性 cwd（脏堆）、headless 预授权、收尾产出 typed 结果写进 index。
 - **harness 给 loop，不给盒子**——schema / 终止 / 隔离 / 类型化返回仍是我们的活。
@@ -110,6 +111,15 @@
 ### 3.5 headless 无人值守的硬要求
 - 必须**预授权**（`permission_mode="bypassPermissions"` 或 `can_use_tool` 回调 / `--allowedTools`），否则节点卡在等人确认。
 - `max_turns` 定终止；fresh session 每节点；一次性 cwd 当脏堆。
+
+### 3.6 节点必须作为顶层 main agent（缓存 + 子 agent 递归）— 硬约束
+
+Runner 为每个阶段 spawn 的节点，**必须是一个顶层 CC session（即"主 agent"）**，绝不能把它做成"某个常驻 orchestrator agent 的嵌套 subagent"。两个硬理由：
+
+1. **缓存命中**：Anthropic 的 prompt cache **只惠及主 agent 的请求**（~1h TTL）。若让一个 orchestrator 占了主 agent 位，真正干活的 worker 沦为 subagent，**不享受主 agent 缓存** → 缓存的是每轮都变的编排逻辑（命中率低），干活的全价 input → 账单爆炸。每个节点作为顶层主 agent 时，它**稳定的 system+tools 前缀才真正被缓存**（呼应 §9 / DETAILED-DESIGN §9）。
+2. **子 agent 递归**：几乎所有框架**禁止 subagent 再开 subagent**。orchestrator 占主位 → worker 是 subagent → **开不了自己的子 agent**，而浏览器/代码搜索/文献挖掘这类"工具"本质就是子 agent → 执行层能力腰斩。节点作为顶层主 agent 时，**才保得住节点内 fan-out agent team 的能力**（§2 worker 内部多 agent 的前提）。
+
+推论：**编排只在 Runner（纯代码、不占 agent 层级）里发生；绝不引入一个"主 agent 当总管"。** 这正是参考 manifesto《状态机优于编排器》§二.5/§二.6 的论点。
 
 ## 4. 一次请求的生命周期
 
