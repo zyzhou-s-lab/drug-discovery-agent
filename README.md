@@ -48,6 +48,7 @@
 | [docs/discovery-logic-chain.md](docs/discovery-logic-chain.md) | **发现段调研报告**：完整靶点发现逻辑链条（文献支撑）+ 各步数据需求 + gpu/cpu 数据可得性调研 + 缺口分析；anchor 纠偏（genetics→补体, ROCK=repurposing）。原始日志见 `docs/refs/discovery-*` |
 | [docs/target-validation.md](docs/target-validation.md) | **靶点验证（新增 stage 4）**：多角度计算实验验证（TWAS/GWAS/coloc/MR/in-silico 基因扰动/表达/网络）→ 本地工具映射（cpu FUSION/LDSC/ANNOVAR、gpu GRN_transfer/iRIGS/CellOracle/扰动模型、/data PrediXcan/DRKG）+ 缺口（coloc/MR 待补）+ judge 收敛规则。日志见 `docs/refs/validation-*` |
 | [docs/REFERENCES.md](docs/REFERENCES.md) | 参考项目分析：Robin、Biomni、pi/oh-my-pi、paper-agent；开源现状（含内部 manifesto 副本 `docs/refs/`） |
+| [docs/PROGRESS.md](docs/PROGRESS.md) | **进度时间线**：设计期 + 实现期 Phase A 每步完成时间 / 验证结果 / 对应 commit |
 
 ---
 
