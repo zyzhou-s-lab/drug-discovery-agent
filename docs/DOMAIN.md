@@ -135,7 +135,7 @@ class DesignArtifact(BaseModel):
   ├── 03_docking/      # 候选 + 对接 pose/打分          (stage 6)
   ├── 04_simulation/   # MD/QM 轨迹与分析               (stage 7)
   ├── reports/
-  └── manifest.json    # 状态 + 各阶段 verdict（权威源）
+  └── state.sqlite     # 状态/队列/run/各节点 session_id/verdict（SQLite WAL，权威源；吸收 coder-loop）。上面各目录 = content-addressed artifact-store
 ```
 > **本地已有可复用资源（发现段无需联网即可起步）**：`zhouy1:~/database_workshop/opentarget_25.03`（OT 25.03 dump）、共享 `/data/database/databases20210723/`（GTEx/GO/KEGG/HGNC/OMIM/L1000/DRKG/PrediXcan）、UKBioBank、1000G、参考基因组。在线 API（Open Targets/GWAS Catalog/Europe PMC/ChEMBL/STRING）实测均可达。详见 [discovery-logic-chain.md §四](discovery-logic-chain.md)。
 

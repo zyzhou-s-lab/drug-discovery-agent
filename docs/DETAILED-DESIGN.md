@@ -236,7 +236,7 @@ Runner 全确定性：没有 LLM、没有累积 context（ARCHITECTURE §2 硬�
 
 ## 6. Index（`index.py`，权威数据源）
 
-- 存储：文件系统 + JSONL（`manifest.json` / `targets.jsonl` / `evidence/` / `reports/`）。关键产物进 git（可复现 + 可观测）；scratch 不进。
+- 存储（**state-DB + artifact-store 分离**，吸收自 coder-loop `sqlite-state.ts`）：**SQLite(WAL) 存状态/队列/run 记账/各节点 `session_id`/幂等键**（事务 + `busy_timeout` + `UNIQUE` 防重 + schema 版本化迁移；并发安全、断点续跑）；**content-addressed 文件存科学产物**（`targets.jsonl` / `evidence/` / 结构 / MD 轨迹 / `reports/`）。关键产物进 git（可复现 + 可观测）；scratch 不进。
 - 接口：
   - `build_input(stage, state) -> NodeInput`：把当前状态**投影**成本阶段的类型化输入（给指针不给全文）。
   - `converge(state, stage, out) -> state`：把 `NodeOutput.artifacts` 落盘、合并 candidates、去重、更新 manifest（= effect handler 的"收敛"）。

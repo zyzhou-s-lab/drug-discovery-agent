@@ -109,3 +109,28 @@
 - **共性**：都是 session 级恢复；**resume 会重复发起 tool call**（transcript 不追踪副作用是否已发生）；无 exactly-once。→ 印证 durable + 长作业幂等必须我们自建（ARCHITECTURE §3.8）。
 
 出处：[LangChain durable-execution](https://docs.langchain.com/oss/python/langgraph/durable-execution) · [Temporal AI](https://temporal.io/blog/durable-execution-meets-ai-why-temporal-is-the-perfect-foundation-for-ai) · [Diagrid: checkpoints≠durable](https://www.diagrid.io/blog/checkpoints-are-not-durable-execution-why-langgraph-crewai-google-adk-and-others-fall-short-for-production-agent-workflows) · [Claude Code sessions](https://code.claude.com/docs/en/sessions) / [checkpointing](https://code.claude.com/docs/en/checkpointing) / [Agent SDK sessions](https://code.claude.com/docs/en/agent-sdk/sessions) · [Codex rollout (DeepWiki)](https://deepwiki.com/openai/codex/3.5.2-rollout-persistence-and-replay) · [Cursor cloud-agent lessons (Temporal)](https://cursor.com/blog/cloud-agent-lessons) · [Aider git](https://aider.chat/docs/git.html) · [Devin Blockdiff](https://cognition.ai/blog/blockdiff) · [ZenML: why agents need durable execution](https://www.zenml.io/blog/why-agents-need-durable-execution)
+
+## coder-loop（harness 骨架现成参考，2026-05；TS+Bun+SQLite）
+
+[`mouriya-s-lab/coder-loop`](https://github.com/mouriya-s-lab/coder-loop)——项目无关的「N 角色字符串调度引擎」：哑引擎（loop/scheduler/daemon）读 preset + target runtime，按 phase spawn agent、据 SQLite 里 item status 推进；GitHub issue/PR 迭代只是内置 preset。与本项目「哑 Runner + 外部判断 + 状态契约 + durable」**几乎同构**，但落在软件工程域、TS 写、且对 LLM 判断信任度更高（其 gate 是**有状态 prompt 链**、非独立 typed judge）。
+
+**硬约束**：本项目定 Python（领域工具生态），coder-loop 是 TS → **不直接当骨架；借鉴其算法/契约纪律（语言无关）用 Python 重写。**
+
+**该吸收（coder-loop 更成熟）：**
+1. **持久层 = SQLite(WAL) state-DB + content-addressed artifact-store 分离**（`sqlite-state.ts`：事务/`busy_timeout`/`UNIQUE` 防重/schema 迁移）→ ✅ 已更新 ARCHITECTURE §3.8 / DETAILED §6 / DOMAIN §6。
+2. **daemon watchdog 算法**（`daemon.ts:545 recoverStaleSchedulerState`、`:1300` 杀进程组、`loop.ts:4982 decideResume`、`:5051 runAgentWithBackoff` 退避预算、`scripts/probe-claude-resume.ts` 实证 resume 跨轮保留 context）→ ✅ §3.8 (a) 第 1 件套照此 Python 重写；**进程组级 kill 务必照做**（避免只杀子 agent、parent 残留）。
+3. **把边界写进 prompt 契约**（`runtime-contract.md` 的 Program-FSM vs Agent-FSM、`state-contract.md` final-state 不变量 + 「不许发明 verdict」）→ 写进 `stages/<stage>/CLAUDE.md`，让节点自知「写终态/路由不归我」。[backlog]
+4. **声明式 phase + `{item./config./runtime.}` 变量 DSL** + **item-trigger / chain-complete phase**（副作用后置阶段，对应长作业 resume 解读节点 / report）。[backlog]
+5. **DAG `dependsOn` + 跨依赖 unblock + 环检测**（`sqlite-state.ts:1132`、`scheduler.ts:906`）→ 编排「候选靶点 × 验证角度」实例图。[backlog]
+6. **gate 方法学**（四维覆盖 function/environment/integration/assumption + adversarial validation）→ 映射进 judge rubric。[backlog]
+7. **supervisor in-loop 纪律**（`templates/supervisor/role.md`：只走只读 status/doctor/daemon API、duration 阈值判 stall、kill parent+children）→ 强化 observer + 「谁看守看守者」。[backlog]
+
+**保留（本项目更强 / 科学域独有，别被带偏）：**
+- **judge = 独立无状态进程 + 强 schema Verdict**（coder-loop 的 gate 是有状态 prompt 链、自然语言 verdict、无数值 score/robustness——科学验收必须 fresh-context + typed + 加权 + leave-one-out）。
+- **scatter-gather**（单验证目标内多角度并行 + barrier + 确定性聚合）——coder-loop 只有「多 item 各跑各」的并行（按 `(chain,repoCwd)` 槽位 + git worktree），无单任务 fan-out。
+- **worker 首选 Agent SDK（进程内 `@tool` 注 MCP）**——比 coder-loop 裸 CLI 更顺接 Python 领域工具。
+- **tool 级幂等（idempotency-key + PreToolUse/PostToolUse hook + index 对账）+ 长 GPU/MD submit→resume**——coder-loop 工作单元是分钟级 PR 迭代、天然幂等，给不了参考；科学长作业「524 超时但作业可能已提交」只能自建（§3.8 第 2 件套）。
+
+**关键文件**：`src/{loop,scheduler,daemon,sqlite-state}.ts`、`src/runners/session-id.ts`、`scripts/probe-claude-resume.ts`、`presets/gh-issue-pr-iteration/{preset.toml,contract.md,common/{runtime,state}-contract.md,review/*-gate.md}`、`CLAUDE.md`、`templates/supervisor/role.md`。
+
+> **一句话**：coder-loop 是 §3.8 durable 三件套里「daemon watchdog + 状态契约/持久层」的成熟现成参考（照算法 Python 重写省力）；judge / scatter-gather / tool 幂等 / 长作业 / Agent SDK worker 全部保留自建。

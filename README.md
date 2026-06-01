@@ -65,6 +65,7 @@
 - [x] **工具选择 + 消融判断**：同角度工具集+策略（**关键角度 consensus / 否则 best / fallback**）+ 选择判据；in-silico 消融**强制对照**（正/负）；judge **leave-one-angle-out 敏感性**（仅对"通过边缘"靶点，省算力）→ ARCHITECTURE §3.7C
 - [x] **语言定为 Python**（科学 agent 全 Python + 领域工具生态；Agent SDK 双语成熟，不构成 TS 理由）→ 调研见 REFERENCES
 - [x] **持久化/恢复策略**：CC 只给 session 级恢复（resume 会重复 tool call），durable 必须自建 → ARCHITECTURE §3.8。**(c)→(a) 渐进**：快节点先跑通(c)，接 GPU/slurm 长算上(a)；(b) Temporal 留待生产化。**(a) 实现三件套**：daemon watchdog（监控 pid + stream-json 提 session_id + 检 524/崩溃 → `claude --resume`+继续）+ `PreToolUse`/`PostToolUse` hook 幂等（防 524 重复提交）+ Runner/index 跨节点
+- [x] **审计 coder-loop**（TS+Bun+SQLite harness 现成参考）→ 吸收：**持久层 = SQLite(WAL) state-DB + content-addressed artifact-store 分离**、**daemon watchdog 算法**（进程组 kill / recover-stale / 退避预算 / `probe-claude-resume`）照其 Python 重写；保留 judge/scatter-gather/tool 幂等/Agent SDK worker（科学域独有或更强）。详见 REFERENCES + ARCHITECTURE §3.8
 - [ ] **Phase A 实现**：据逻辑链条填 stage1-3 `DOMAIN-FILL` + `schemas.py` + 接 Open Targets/GWAS Catalog/Europe PMC（anchor 发现端 ground-truth = 补体 CFH/C3）
 - [ ] **Phase B（设计）**：qiaoy1 访问手段已具备（凭据 + remote `sshpass`）→ wrap AlphaFold3/Vina/GROMACS/RDKit/ORCA（建议迁共享 `/data`）
 - [ ] Runner + judge + index 最小骨架（路线图 Step 1）
