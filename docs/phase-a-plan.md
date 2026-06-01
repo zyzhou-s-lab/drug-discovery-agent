@@ -72,3 +72,12 @@ drug-discovery-agent/
 **两点观察**：
 1. **evidence.kind 不可信**：LLM 倾向填 datatype 名（`genetic_association`）而非 angle 名 → gather 的跨角度佐证计数语义乱。**已修**：Runner `_run_angle` 确定性给每条 evidence 盖 angle 戳（佐证统计不再依赖 LLM 守规矩）。
 2. **expression/network 角度在 OT datatype 下对 dry AMD 空转**（AMD 遗传驱动，`rna_expression`/`affected_pathway` 分值弱）→ 印证第 2 点：独立源（GTEx/STRING/Europe PMC）是必要的证据增强，延到 M3。
+
+## M3 切法（决定 2026-06-01）
+M3 拆成 **M3a**（stage 间数据流 + stage 2 literature-evidence）+ **M3b**（stage 3 target-selection + stage-1 独立源 GTEx/STRING）。
+
+### M3a 完成记录（2026-06-01）
+- **stage 间数据流**：`NodeInput.prior_candidates` + `Runner._build_input` 从 index 读最近上游候选串给下游（确定性，节点仍 boxed；CONCEPTS §5）。
+- **stage 2 literature-evidence**：worker（`_literature_worker`）读 10 个上游候选 → Europe PMC（`tools/europepmc.py`，stdlib）查**真实文献** → 每候选附真实 PMID（ARMS2:42180516 与工具自检结果复现一致，证明未编造）→ judge `converged=true, score=0.85`。worker 重构为按 stage 分发（`_hypothesis_worker`/`_literature_worker`/共享 `_run_session`）。
+- **修复 bug**：`--only` 原先过滤 pipeline list，害 `_build_input` 看不到上游 → 改为 Runner 始终持完整 pipeline，`--only` 仅限制执行哪个 stage（`run(only=...)`）。
+- **可观察性教训**：artifact 是 content-addressed（hash 命名），`glob[-1]` 非最新；**查产出认 index 的 `stage_state.output_json`（权威），别按 artifact 文件名排序**（印证 index-as-authoritative-source）。
