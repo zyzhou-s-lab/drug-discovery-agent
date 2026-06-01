@@ -219,6 +219,14 @@
 - **方法消融**：in-silico KO 即基因消融，**强制对照**（负=随机/无关基因，正=已知靶点如 ROCK/ripasudil）→ 判效应**特异**而非伪影。
 - **敏感性消融**：judge 做 **leave-one-angle-out**（去掉任一角度结论是否翻转 → `robustness` = robust/fragile）+ 看同角度多工具一致度（`tool_consensus`）；**仅对"通过边缘"靶点做**（明显通过/失败跳过，省算力）。
 
+**(D) 工具调用的决策归属**（"菜单 by harness / 调用 by model"——审计补强）：
+谁决定调 OpenTargets？**不是 harness**。边界划在「工具/阶段」之间，不划在「调不调工具」上：
+- **harness 决定"上桌哪些工具"**：每个角度/阶段挂哪些工具（mode (a) 预封装菜单）由 harness 钉死——这是**领域知识**（如 stage-1 遗传角度挂 OpenTargets，因其聚合 GWAS Catalog + L2G locus-to-gene 打分，是遗传证据权威源）。
+- **模型决定"动不动筷子、先夹哪盘"**：节点 session 内，**要不要调、调哪个 endpoint、查什么、查几次、怎么组合多工具、怎么解读** —— 全是 node 内 LLM 自主。harness **不发"去调 OpenTargets"指令、不替它拼 query**。
+- **harness 不命令调用，而用 judge 的验收标准"逼"模型自己去调**：stage-1 judge rubric 要求"候选必须有遗传证据支撑"→ 模型空手提假设会被打回重试 → 它**自洽地意识到"要过 verdict 我得查 OT"**而主动调用。这是 perform/handle（设定"什么算完成"），不是 micro-manage（命令调哪个工具）。
+- **边界**：**做不做哪一步（阶段/角度）= harness 钉死**（领域逻辑链固化 → 不漏、可复现，否则退化成自由对话 agent）；**怎么完成这一步（用哪些工具）= 模型自主**。
+- **演进**：(a) 菜单固定（Phase A）→ (b) 模型动态增删工具 → (c) 模型即时写工具（未来，见本节 (A)）。
+
 ### 3.8 持久化与恢复（CC 边界 + Runner 的 durable 责任）
 
 **调研结论（2026，见 [REFERENCES](REFERENCES.md)）**：所有本地/SDK 编码 agent（Claude Code、Codex、Aider、Amp、Devin）只做到 **session 级恢复**（重放 transcript + 文件快照）；**唯一做到 workflow 级 durable execution 的是 Cursor 云端，且靠外挂 Temporal**。→ **durable 是独立引擎，agent 不自带；我们必须在 Runner/index 层自建。** 语言：**Python**（同类科学 agent 全 Python + 领域工具生态；Agent SDK 双语成熟，不构成 TS 理由）。
