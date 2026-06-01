@@ -1,13 +1,12 @@
-"""OpenTargets Platform GraphQL — genetic-evidence source for stage-1 (M1).
+"""OpenTargets Platform GraphQL — genetic-evidence + target-profile source.
 
 Pure stdlib (urllib) so it is independently testable on any box with network,
 WITHOUT claude-agent-sdk / anthropic / API keys. The Agent SDK @tool wrappers
-live in worker.py (which imports these functions); the node's LLM decides
-whether/how to call them (ARCHITECTURE §3.7 D).
+live in worker.py; the node's LLM decides whether/how to call them (§3.7 D).
 
-Why OpenTargets for the genetic angle: it aggregates GWAS Catalog + L2G
-(locus-to-gene) scoring into a per-target `genetic_association` datatype score,
-which is the authoritative genetics signal for target–disease links.
+Why OpenTargets: it aggregates GWAS Catalog + L2G (genetic_association), and per
+target it also aggregates tractability, genetic constraint (gnomAD), safety
+liabilities and known drugs — so stage-3 triage needs one source, not four.
 
 Self-check:  python -m dd_agent.tools.opentargets
 """
@@ -45,6 +44,28 @@ query Assoc($efoId: String!, $size: Int!) {
         datatypeScores { id score }
       }
     }
+  }
+}
+"""
+
+_TARGET_SEARCH_Q = """
+query TS($q: String!) {
+  search(queryString: $q, entityNames: ["target"], page: {index: 0, size: 1}) {
+    hits { id approvedSymbol }
+  }
+}
+"""
+
+_TARGET_Q = """
+query T($id: String!) {
+  target(ensemblId: $id) {
+    id
+    approvedSymbol
+    approvedName
+    tractability { modality value label }
+    geneticConstraint { constraintType score oe upperBin }
+    safetyLiabilities { event datasource }
+    knownDrugs { count }
   }
 }
 """
@@ -103,26 +124,58 @@ def disease_associated_targets(efo_id: str, size: int = 50,
             "sort_by": sort_by, "rows": rows}
 
 
+def target_profile(symbol: str) -> dict:
+    """Druggability/safety triage profile for a target symbol (stage-3).
+
+    Returns {symbol, target_id, sm_tractability:[labels], genetic_constraint:{type:
+    {score,oe,upperBin}}, safety_liabilities:[events], known_drugs_count}. {} if unknown.
+    genetic_constraint 'lof' upperBin/oe ≈ gnomAD LOEUF (low = intolerant = caution).
+    """
+    s = _gql(_TARGET_SEARCH_Q, {"q": symbol})
+    hits = s.get("search", {}).get("hits", [])
+    if not hits:
+        return {}
+    data = _gql(_TARGET_Q, {"id": hits[0]["id"]})
+    t = data.get("target") or {}
+    sm_tract = [b.get("label") for b in (t.get("tractability") or [])
+                if b.get("modality") == "SM" and b.get("value")]
+    constraint = {c.get("constraintType"): {"score": c.get("score"), "oe": c.get("oe"),
+                                            "upperBin": c.get("upperBin")}
+                  for c in (t.get("geneticConstraint") or [])}
+    return {
+        "symbol": t.get("approvedSymbol"),
+        "target_id": t.get("id"),
+        "sm_tractability": sm_tract,
+        "genetic_constraint": constraint,
+        "safety_liabilities": [s2.get("event") for s2 in (t.get("safetyLiabilities") or [])],
+        "known_drugs_count": (t.get("knownDrugs") or {}).get("count", 0),
+    }
+
+
 def _selfcheck() -> int:
-    """Genetics-first dry-AMD should surface complement genes near the top."""
+    """Genetics-first dry-AMD should surface complement genes near the top; and a
+    target_profile(CFH) should return tractability/constraint fields."""
     hits = search_disease("age-related macular degeneration")
-    print("search hits:")
-    for h in hits:
-        print(f"  {h['id']:16} {h['name']}")
     if not hits:
         print("FAIL: no disease hits")
         return 1
     efo = hits[0]["id"]
     res = disease_associated_targets(efo, size=30)
-    print(f"\nassociated targets for {res['disease']} ({res['efo_id']}), top by genetic_association:")
+    print(f"associated targets for {res['disease']} ({res['efo_id']}), top by genetic_association:")
     found = []
     for r in res["rows"][:15]:
         mark = "  <-- complement" if r["symbol"] in COMPLEMENT else ""
         if r["symbol"] in COMPLEMENT:
             found.append(r["symbol"])
         print(f"  {r['symbol']:10} genetic={r['genetic']:.3f}  overall={r['overall']:.3f}{mark}")
-    ok = bool(found)
-    print(f"\n{'PASS' if ok else 'FAIL'}: complement in top-15 by genetics = {found}")
+    print(f"complement in top-15 by genetics = {found}")
+
+    print("\n--- target_profile(CFH) ---")
+    tp = target_profile("CFH")
+    print(json.dumps(tp, ensure_ascii=False, indent=2))
+
+    ok = bool(found) and bool(tp.get("target_id"))
+    print(f"\n{'PASS' if ok else 'FAIL'}: complement surfaced + target_profile populated")
     return 0 if ok else 1
 
 
