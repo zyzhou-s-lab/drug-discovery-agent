@@ -68,13 +68,9 @@ jobs:
           PR_NUMBER=${{ github.event.pull_request.number }}
           REPO=${{ github.repository }}
 
-          # Fetch PR metadata
           gh pr view "$PR_NUMBER" -R "$REPO" --json number,title,body,author,additions,deletions,changedFiles > /tmp/pr_meta.json
-
-          # Fetch diff (truncate to ~80KB to fit context window)
           gh pr diff "$PR_NUMBER" -R "$REPO" | head -c 80000 > /tmp/pr_diff.txt
 
-          # Fetch previous bot review if follow-up
           if [ "${{ steps.check_bot.outputs.is_follow_up }}" = "true" ] && [ -n "${{ steps.check_bot.outputs.latest_review_id }}" ]; then
             gh api "repos/$REPO/pulls/$PR_NUMBER/reviews/${{ steps.check_bot.outputs.latest_review_id }}" > /tmp/prev_review.json 2>/dev/null || true
             gh api "repos/$REPO/pulls/$PR_NUMBER/reviews/${{ steps.check_bot.outputs.latest_review_id }}/comments" > /tmp/prev_comments.json 2>/dev/null || true
@@ -85,19 +81,14 @@ jobs:
         id: mimo
         env:
           MIMO_API_KEY: ${{ secrets.MIMO_API_KEY }}
-          MIMO_BASE_URL: ${{ secrets.MIMO_BASE_URL || 'https://api.xiaomimimo.com' }}
+          MIMO_BASE_URL: ${{ vars.MIMO_BASE_URL || 'https://token-plan-cn.xiaomimimo.com/anthropic' }}
         run: |
-          # Load prompt
           PROMPT=$(cat .github/prompts/mimo-pr-review.md)
-
-          # Load PR context
           PR_META=$(cat /tmp/pr_meta.json)
           PR_DIFF=$(cat /tmp/pr_diff.txt)
 
-          # Build system message
           SYSTEM="You are a code review assistant. Follow the instructions in the prompt exactly."
 
-          # Build user message with PR context
           USER_MSG="## PR Metadata
           \`\`\`json
           ${PR_META}
@@ -114,7 +105,6 @@ jobs:
 
           Please review this PR following the instructions in the system prompt."
 
-          # Call MiMo via Anthropic-compatible API
           RESPONSE=$(curl -s -X POST "${MIMO_BASE_URL}/v1/messages" \
             -H "Content-Type: application/json" \
             -H "x-api-key: ${MIMO_API_KEY}" \
@@ -129,7 +119,6 @@ jobs:
                 messages: [{role: "user", content: $user}]
               }')")
 
-          # Extract text from response
           REVIEW_TEXT=$(echo "$RESPONSE" | jq -r '.content[] | select(.type=="text") | .text' 2>/dev/null)
 
           if [ -z "$REVIEW_TEXT" ] || [ "$REVIEW_TEXT" = "null" ]; then
@@ -138,7 +127,6 @@ jobs:
             exit 1
           fi
 
-          # Save review text
           echo "$REVIEW_TEXT" > /tmp/review_text.md
           echo "Review generated successfully ($(wc -c < /tmp/review_text.md) bytes)"
 
@@ -151,7 +139,6 @@ jobs:
           REPO=${{ github.repository }}
           CURRENT_SHA=${{ steps.check_bot.outputs.current_head_sha }}
 
-          # Verify PR head hasn't moved
           LIVE_SHA=$(gh pr view "$PR_NUMBER" -R "$REPO" --json headRefOid -q .headRefOid)
           if [ "$LIVE_SHA" != "$CURRENT_SHA" ]; then
             echo "PR head moved from $CURRENT_SHA to $LIVE_SHA; skip stale review."
@@ -160,7 +147,6 @@ jobs:
 
           REVIEW_BODY=$(cat /tmp/review_text.md)
 
-          # Post as review comment
           PAYLOAD=$(jq -n \
             --arg body "$REVIEW_BODY" \
             --arg sha "$CURRENT_SHA" \
