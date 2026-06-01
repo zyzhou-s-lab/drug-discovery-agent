@@ -34,8 +34,20 @@ def api_judge(stage, output: NodeOutput) -> Verdict:
 
     import anthropic
 
-    client = anthropic.Anthropic(api_key=os.environ["DD_JUDGE_API_KEY"])
-    model = os.environ.get("DD_JUDGE_MODEL", "claude-sonnet-4-5")
+    # Reuse whatever the box's claude code is configured with; DD_JUDGE_* overrides.
+    # Supports x-api-key (api_key) or Bearer (auth_token), custom base_url (relays).
+    key = os.environ.get("DD_JUDGE_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
+    token = os.environ.get("ANTHROPIC_AUTH_TOKEN")
+    base_url = os.environ.get("DD_JUDGE_BASE_URL") or os.environ.get("ANTHROPIC_BASE_URL")
+    kw: dict = {}
+    if base_url:
+        kw["base_url"] = base_url
+    if key:
+        kw["api_key"] = key
+    elif token:
+        kw["auth_token"] = token
+    client = anthropic.Anthropic(**kw)
+    model = os.environ.get("DD_JUDGE_MODEL") or os.environ.get("ANTHROPIC_MODEL") or "claude-sonnet-4-5"
 
     verdict_tool = {
         "name": "emit_verdict",
