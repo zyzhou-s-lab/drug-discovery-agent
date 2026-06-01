@@ -51,7 +51,7 @@ query Assoc($efoId: String!, $size: Int!) {
 _TARGET_SEARCH_Q = """
 query TS($q: String!) {
   search(queryString: $q, entityNames: ["target"], page: {index: 0, size: 1}) {
-    hits { id approvedSymbol }
+    hits { id name entity }
   }
 }
 """
