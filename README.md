@@ -109,6 +109,7 @@ python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 - [ ] **Phase A 实现**：据逻辑链条填 stage1-3 `DOMAIN-FILL` + `schemas.py` + 接 Open Targets/GWAS Catalog/Europe PMC（anchor 发现端 ground-truth = 补体 CFH/C3）
 - [ ] **Phase B（设计）**：qiaoy1 访问手段已具备（凭据 + remote `sshpass`）→ wrap AlphaFold3/Vina/GROMACS/RDKit/ORCA（建议迁共享 `/data`）
 - [x] **M0 骨架（dummy，零 API）跑通**（gpu 验证：状态机 stage 1-4 全 done + 断点续跳过已 done + scatter-gather 聚合）→ `src/dd_agent/`、`docs/phase-a-plan.md`
-- [ ] **M1**：stage-1 真实切片（OpenTargets MCP + Agent SDK worker + `messages.parse` judge → dry-AMD 遗传角度出补体 CFH/C3）
+- [x] **M1（2026-06-01）stage-1 真实切片端到端跑通**：Agent SDK worker 自主调 OpenTargets（in-process MCP）出候选含补体 C3(0.71)/CFH(0.67)；judge（forced-tool typed Verdict）converged=true、score=0.9。后端实证 = DeepSeek Anthropic 兼容层（详见 `docs/phase-a-plan.md`「M1 完成记录」）
+- [ ] **M2**：恢复 scatter（遗传/表达/网络/文献 4 角度并行）+ pubmed/gtex/string MCP
 
 详见 [DETAILED-DESIGN §路线图](docs/DETAILED-DESIGN.md#路线图) + [DOMAIN §7 落地顺序](docs/DOMAIN.md)。

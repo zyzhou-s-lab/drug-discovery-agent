@@ -49,3 +49,13 @@ drug-discovery-agent/
 
 ## M0 完成定义
 `dd-agent run --campaign dummy --disease "dry AMD"` 跑通 stage1–4（dummy worker/judge，零 API）→ `state.sqlite` 有 4 阶段记录 → 再跑（或 kill 后重跑）= 全 done 跳过（durable resume）→ scatter 阶段并行+确定性聚合正确。
+
+## M1 完成记录（2026-06-01）
+**DoD 达成**：`dd-agent run --real --only target-hypothesis --disease "dry AMD"` 端到端跑通——worker（Agent SDK）自主选 `MONDO_0100114`(dry AMD) 并调 OpenTargets，候选含补体 **C3(genetic 0.71) / CFH(0.67)**（+CFI 提及）及 ARMS2/HTRA1/LIPC/APOE 等经典位点，每条 evidence 含 `source=OpenTargets`+genetic 分值可追溯；judge（typed Verdict）`converged=true, score=0.9`，missing 指出 CFI 未进 top10、CORO2B/COL10A1 功能注释薄弱——校准合理。
+
+**对原计划的三处实现偏离**（更简单/更兼容，等价或更优）：
+1. **in-process SDK MCP** 替代独立 stdio `mcp/opentargets_server.py`：用 `claude_agent_sdk.create_sdk_mcp_server`+`@tool`，无子进程；纯查询函数留在 `src/dd_agent/tools/opentargets.py`（urllib，可脱离 SDK/key 自检）。
+2. **judge forced-tool** 替代 `messages.parse`：anthropic SDK 无 `.parse`；强制单 `emit_verdict` tool（`tool_choice`）是等价的 typed 结构化输出标准做法。
+3. **real deps 改 optional extra `[real]`**：dummy 层 + OT 工具保持仅 `pydantic` 依赖。
+
+**运行后端实证**：gpu 的 claude code 后端 = **DeepSeek（Anthropic 兼容层）**，`base_url=https://api.deepseek.com/anthropic`、`model=deepseek-chat`，token 在 `~/.claude/settings.json` 的 `env`、非 shell env → 运行时注入 `os.environ`。**DeepSeek 兼容层成功驱动了 Agent SDK 的 MCP 工具循环 + judge 的 forced-tool 结构化输出** → M2-M4 可沿用此后端，不必额外 Claude key。
