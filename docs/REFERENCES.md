@@ -6,7 +6,7 @@
 
 ## Agent architecture manifesto（内部笔记，强对齐）
 
-来源：`zhouy1@gpu-zhouy1:/data1/home/zhouy1/Documents/notes/agent_architecture_manifesto.md`（《长程 AI Agent 架构设计：状态机优于编排器》）。
+来源：`zhouy1@gpu-zhouy1:/data1/home/zhouy1/Documents/notes/agent_architecture_manifesto.md`（《长程 AI Agent 架构设计：状态机优于编排器》）。**已 copy 进本 repo：[`docs/refs/agent-architecture-manifesto.md`](refs/agent-architecture-manifesto.md)**（单机备份 + 版本化，repo 自包含）。
 
 核心句：**"给 AI 设起止点和边界，边界之外程序化，边界之间靠路由。"** —— 与本项目的 imperative shell / functional core **几乎同构**，是对架构方向的强背书。已吸收进各文档的点：
 - **状态机 > orchestrator**、AI 判断"在哪"/程序决定"去哪"、任务即状态、文件即信号、故障隔离 —— ARCHITECTURE / CONCEPTS（早已对齐）。
