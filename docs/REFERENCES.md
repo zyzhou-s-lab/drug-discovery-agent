@@ -18,6 +18,17 @@
 
 一处刻意分歧：manifesto 用 agent 自写 `can_do_next` 文件做路由信号；本项目额外加**独立 judge** 做质量验收（不信 in-session 自评）。`can_do_next` 类信号可作**路由提示**，但**完成与否拍板权在外层 judge**。
 
+## PL 源笔记（harness）
+
+[`docs/refs/pl-driven-agent-harness-design.txt`](refs/pl-driven-agent-harness-design.txt) —— 用 PL/代数效应思想设计 harness 的**原始笔记**（原文 + 逐句解读），是 [CONCEPTS.md](CONCEPTS.md) 的来源。CONCEPTS.md 是蒸馏后的**规范版**；本文件是 raw 源 + 备份（与 manifesto 互补：manifesto 偏"状态机 vs 编排器"，本文件偏"纯函数/副作用/Koka"）。
+
+## 计算药物发现工具链与参考流程（domain）
+
+见 [`docs/refs/drug-design/`](refs/drug-design/)（来源 `gpu-zhouy1:~/Documents/notes/multiagents_ref/`，2026-05-13）：集群**实际安装**的药物设计软件调查（AlphaFold3 / AutoDock Vina / GROMACS / RDKit / ORCA / 扩散模型 已装）+ **小分子 & 多肽**计算设计 3 阶段参考流程（图+PDF）+ AI 编排愿景图。
+- **关键发现**：这是计算药物**设计（下游）**，与本项目当前的**靶点发现（上游）相邻但不同**——如何并入 scope **待定**。一种接法：设计流程对应本项目下游阶段（candidate-generation ← 对接/生成；data-analysis ← MD/QM），AlphaFold3 结构准备是发现→设计的桥接，「统一数据底座」≈ 本项目 index。
+- **⚠️ 访问约束**：工具链装在协作者 `qiaoy1` 账户下，`zhouy1` 可能无权激活其 conda/读其 home；共享 `/data`(401T) 可用。**落地前需解决工具访问**（协作 / 迁共享 /data / 自装）。
+- 详见 [`docs/refs/drug-design/README.md`](refs/drug-design/README.md)。
+
 ---
 
 ## pi / oh-my-pi（harness 学习对象）
