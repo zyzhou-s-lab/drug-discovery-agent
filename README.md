@@ -43,6 +43,7 @@
 | [docs/DETAILED-DESIGN.md](docs/DETAILED-DESIGN.md) | 细节设计：节点 I/O 契约、Runner、judge schema、index、CC 原生资产、headless 配置、prompt caching、领域阶段流程、目录结构 |
 | [docs/DOMAIN.md](docs/DOMAIN.md) | **领域落地**：**发现→设计全链路（7 阶段）**；anchor 复现 dry-AMD→ROCK→ripasudil（两端 ground truth）；领域↔harness 绑定、真实 schema、stage-1 切片、工具层+访问约束、数据底座、落地顺序（Phase A 发现 / B 设计） |
 | [docs/discovery-logic-chain.md](docs/discovery-logic-chain.md) | **发现段调研报告**：完整靶点发现逻辑链条（文献支撑）+ 各步数据需求 + gpu/cpu 数据可得性调研 + 缺口分析；anchor 纠偏（genetics→补体, ROCK=repurposing）。原始日志见 `docs/refs/discovery-*` |
+| [docs/target-validation.md](docs/target-validation.md) | **靶点验证（新增 stage 4）**：多角度计算实验验证（TWAS/GWAS/coloc/MR/in-silico 基因扰动/表达/网络）→ 本地工具映射（cpu FUSION/LDSC/ANNOVAR、gpu GRN_transfer/iRIGS/CellOracle/扰动模型、/data PrediXcan/DRKG）+ 缺口（coloc/MR 待补）+ judge 收敛规则。日志见 `docs/refs/validation-*` |
 | [docs/REFERENCES.md](docs/REFERENCES.md) | 参考项目分析：Robin、Biomni、pi/oh-my-pi、paper-agent；开源现状（含内部 manifesto 副本 `docs/refs/`） |
 
 ---
@@ -52,10 +53,11 @@
 - [x] 架构方向确定（三层 + index + observer）
 - [x] 节点执行器选型确定（worker = CC harness headless；judge = raw API 结构化输出）
 - [x] 锚定场景：**复现 dry-AMD→ROCK→ripasudil**（两端 ground truth，可校准 judge）→ `docs/DOMAIN.md`
-- [x] scope 定为**发现→设计全链路**（7 阶段：发现 1-3 / 桥接 4 structure-prep / 设计 5-6 / report）
+- [x] scope 定为**发现→设计全链路**（**8 阶段**：发现 1-3 / **验证 4 target-validation** / 桥接 5 / 设计 6-7 / report）
 - [x] 参考文档集中：manifesto + PL 源笔记 + 药物设计工具链调查 收进 `docs/refs/`
 - [~] stage-1（target-hypothesis）领域资产 scaffold（待从 Robin `prompts.py` 挖科学内容填 `DOMAIN-FILL`）
 - [x] **Phase A 调研**：文献梳理逻辑链条 + 数据可得性调研完成（`docs/discovery-logic-chain.md`）——发现段资源充足、无阻塞（本地 OpenTargets 25.03 + GTEx/GO/KEGG/L1000，在线 API 全可达，`iRIGS` env）
+- [x] **发现段补入 `target-validation` 阶段**（TWAS/GWAS/coloc/MR/in-silico 扰动/表达/网络）→ `docs/target-validation.md`；本地工具映射完成（最强项=基因扰动 GRN_transfer 等已跑、TWAS=FUSION/iRIGS；缺口=coloc/MR，R 易补）
 - [ ] **Phase A 实现**：据逻辑链条填 stage1-3 `DOMAIN-FILL` + `schemas.py` + 接 Open Targets/GWAS Catalog/Europe PMC（anchor 发现端 ground-truth = 补体 CFH/C3）
 - [ ] **Phase B（设计）**：qiaoy1 访问手段已具备（凭据 + remote `sshpass`）→ wrap AlphaFold3/Vina/GROMACS/RDKit/ORCA（建议迁共享 `/data`）
 - [ ] Runner + judge + index 最小骨架（路线图 Step 1）

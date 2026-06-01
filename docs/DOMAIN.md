@@ -84,15 +84,17 @@ class DesignArtifact(BaseModel):
 
 | # | 阶段 | 段 | 做什么 | 工具 | anchor 期望（dry AMD） |
 |---|---|---|---|---|---|
-| 1 | `target-hypothesis` | 发现 | 疾病→候选靶点+证据（§4） | OpenTargets / PubMed / 表达图谱 | ROCK 进 top-N |
-| 2 | `literature-evidence` | 发现 | 候选靶点带引用证据综述 | PubMed/Europe PMC、PaperQA2 | ROCK–AMD 机制证据、真实引用 |
-| 3 | `target-selection` | 发现 | 排序并**选定要推进的靶点** | judge + 规则 | 选定 ROCK |
-| 4 | `structure-prep` | 桥接 | 选定靶点 3D 结构获取/预测 + 配体准备 | RCSB PDB/UniProt；★AlphaFold3(`af333`)；Swiss-Model；(肽)PEP-FOLD4/AF2-Multimer | 拿到 ROCK 结构 |
-| 5 | `molecule-design-docking` | 设计 | 按 modality 生成/筛选 + 对接 | 小分子：★Vina、★RDKit、★扩散(MolDiff/dmcg/sddiffusion)、(缺)DiffDock/REINVENT；肽：RFdiffusion/ProteinMPNN/ClusPro/ADCP/环化 | ROCK 抑制剂候选 / ripasudil 对接 ROCK |
-| 6 | `simulation-validation` | 设计 | MD/QM 验证 top hits | ★GROMACS、★ORCA、★MDAnalysis、★PyMOL；增强采样 Metadynamics/REMD；力场 AMBER14SB/CHARMM36m | 结合稳定性被 MD 支撑 |
-| 7 | `report` | — | 汇总发现→设计报告 | — | 端到端复现已知结论 |
+| 1 | `target-hypothesis` | 发现 | 疾病→候选靶点+证据（§4） | OpenTargets(本地25.03+API) / GWAS Catalog / 表达图谱 | 补体(CFH/C3) 进 top-N（ROCK 为机制候选） |
+| 2 | `literature-evidence` | 发现 | 候选靶点带引用证据综述 | paper-fetch(OpenAlex/S2) / Europe PMC | 补体/ROCK 机制证据、真实引用 |
+| 3 | `target-selection` | 发现 | 排序并**选定要推进的靶点** | OpenTargets 打分 + 三联评估(ChEMBL/gnomAD/GTEx) | 选定靶点 |
+| 4 | `target-validation` 🆕 | 发现/验证 | **多角度计算实验验证**（TWAS/GWAS/coloc/MR/in-silico 扰动/表达/网络）→ [target-validation.md](target-validation.md) | 遗传：FUSION-TWAS/PrediXcan/iRIGS、LDSC、coloc/MR(待补 R)；扰动：GRN_transfer/CellOracle/scTenifoldKnk/GEARS；表达/网络 | 靶点过 ≥N 正交角度（补体强遗传+表达；ROCK 走扰动/机制） |
+| 5 | `structure-prep` | 桥接 | 选定靶点 3D 结构获取/预测 + 配体准备 | RCSB PDB/UniProt；★AlphaFold3(`af333`)；Swiss-Model；(肽)PEP-FOLD4/AF2-Multimer | 拿到靶点结构 |
+| 6 | `molecule-design-docking` | 设计 | 按 modality 生成/筛选 + 对接 | 小分子：★Vina、★RDKit、★扩散(MolDiff/dmcg/sddiffusion)、(缺)DiffDock/REINVENT；肽：RFdiffusion/ProteinMPNN/ClusPro/ADCP/环化 | ROCK 抑制剂候选 / ripasudil 对接 ROCK |
+| 7 | `simulation-validation` | 设计 | MD/QM 验证 top hits | ★GROMACS、★ORCA、★MDAnalysis、★PyMOL；增强采样 Metadynamics/REMD；力场 AMBER14SB/CHARMM36m | 结合稳定性被 MD 支撑 |
+| 8 | `report` | — | 汇总发现→设计报告 | — | 端到端复现已知结论 |
 
-- **modality 分叉**：stage 4–6 按 `TargetCandidate.modality`（小分子 / 多肽）走两条工具链（见 [refs/drug-design](refs/drug-design/README.md)）。
+- **modality 分叉**：stage 5–7 按 `TargetCandidate.modality`（小分子 / 多肽）走两条工具链（见 [refs/drug-design](refs/drug-design/README.md)）。
+- **验证段（stage 4 `target-validation`）= 发现段新增的实验验证**：多角度交叉确认（TWAS/GWAS/coloc/MR/in-silico 基因扰动/表达/网络），本地最强项是**基因扰动**（GRN_transfer 自建基准 + 一整套扰动模型，已跑）。详见 [target-validation.md](target-validation.md)。
 - **anchor 端到端**：发现段→ROCK；设计段→拿 ripasudil（已知 ROCK 抑制剂）做对接/MD 正对照。两端都可校准。
 - 每阶段 rubric/prompt 雏形：发现段挖 `robin/prompts.py`；设计段参考 `refs/drug-design/`。
 
@@ -107,10 +109,10 @@ class DesignArtifact(BaseModel):
 **数据底座（index）** —— 采用 qiaoy1 推荐布局，落在 **zhouy1 可访问的共享 `/data`**：
 ```
 /data/drug-discovery/projects/{campaign_id}/
-  ├── 01_discovery/    # targets.jsonl + evidence/      (stage 1-3)
-  ├── 02_structure/    # 靶点/配体 3D 结构              (stage 4)
-  ├── 03_docking/      # 候选 + 对接 pose/打分          (stage 5)
-  ├── 04_simulation/   # MD/QM 轨迹与分析               (stage 6)
+  ├── 01_discovery/    # targets.jsonl + evidence/ + validation/  (stage 1-4，含验证)
+  ├── 02_structure/    # 靶点/配体 3D 结构              (stage 5)
+  ├── 03_docking/      # 候选 + 对接 pose/打分          (stage 6)
+  ├── 04_simulation/   # MD/QM 轨迹与分析               (stage 7)
   ├── reports/
   └── manifest.json    # 状态 + 各阶段 verdict（权威源）
 ```
@@ -125,7 +127,7 @@ class DesignArtifact(BaseModel):
 2. **填 schema**：`TargetCandidate` 字段/阈值定稿 → `src/dd_agent/schemas.py`。
 3. **接发现工具**：`mcp/opentargets_server.py` + `mcp/pubmed_server.py`（参考 Biomni）。
 4. **跑 stage 1**：`disease="dry AMD"`，看 ROCK 是否进 top-N → 校准 judge。
-5. 铺 stage 2–3（`literature-evidence` / `target-selection`）。
+5. 铺 stage 2–4（`literature-evidence` / `target-selection` / **`target-validation`**，见 [target-validation.md](target-validation.md)）；把 TWAS(FUSION/iRIGS)/in-silico 扰动(GRN_transfer/CellOracle)/coloc·MR 封装为 MCP 工具供验证节点调用（coloc/MR 需先在 R 装 `coloc`/`TwoSampleMR`/`SMR`）。
 
 **Phase B — 设计段（先解决 `qiaoy1` 工具访问）**
 6. 解决工具访问（协作 / 迁共享 `/data` / 自装）。
