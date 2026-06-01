@@ -65,7 +65,6 @@ query T($id: String!) {
     tractability { modality value label }
     geneticConstraint { constraintType score oe upperBin }
     safetyLiabilities { event datasource }
-    knownDrugs { count }
   }
 }
 """
@@ -148,7 +147,8 @@ def target_profile(symbol: str) -> dict:
         "sm_tractability": sm_tract,
         "genetic_constraint": constraint,
         "safety_liabilities": [s2.get("event") for s2 in (t.get("safetyLiabilities") or [])],
-        "known_drugs_count": (t.get("knownDrugs") or {}).get("count", 0),
+        "has_known_drug": any("approved" in (lbl or "").lower() or "clinical" in (lbl or "").lower()
+                              for lbl in sm_tract),
     }
 
 
