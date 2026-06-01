@@ -81,3 +81,15 @@ M3 拆成 **M3a**（stage 间数据流 + stage 2 literature-evidence）+ **M3b**
 - **stage 2 literature-evidence**：worker（`_literature_worker`）读 10 个上游候选 → Europe PMC（`tools/europepmc.py`，stdlib）查**真实文献** → 每候选附真实 PMID（ARMS2:42180516 与工具自检结果复现一致，证明未编造）→ judge `converged=true, score=0.85`。worker 重构为按 stage 分发（`_hypothesis_worker`/`_literature_worker`/共享 `_run_session`）。
 - **修复 bug**：`--only` 原先过滤 pipeline list，害 `_build_input` 看不到上游 → 改为 Runner 始终持完整 pipeline，`--only` 仅限制执行哪个 stage（`run(only=...)`）。
 - **可观察性教训**：artifact 是 content-addressed（hash 命名），`glob[-1]` 非最新；**查产出认 index 的 `stage_state.output_json`（权威），别按 artifact 文件名排序**（印证 index-as-authoritative-source）。
+
+### M3b 完成记录（2026-06-01）
+完整发现链 **1→2→3 端到端跑通**（durable：stage1/2 复用，stage3 新跑）：
+- **stage-3 target-selection**：worker 读 stage-2 的 10 候选 → 逐个 OT `target_profile`（tractability + gnomAD 约束 + safety，**一个 OT 源替代 ChEMBL/gnomAD/GTEx 三个 API**）→ **选定**：
+  - **C3 = Top**（遗传 0.85 + 机制 0.9 + 小分子可成药 0.8 + 临床验证 pegcetacoplan/avacincaptad）
+  - **CFH = 保留 + modality 分支**：worker 正确识别 AMD 风险变异是**功能减弱型 → 需增强而非抑制 → 推荐 antibody/AAV**（避开"CFH 小分子抑制剂"错误方向）
+  - **HTRA1 = 次选**（蛋白酶抑制、可成药 0.75，缺临床验证）；其余 7 个按证据弱/不可成药/安全淘汰
+  - judge `converged=true, score=0.85`
+- **OT schema 踩坑**（自检逐个修正）：search hits 无 `approvedSymbol`；Target 无 `knownDrugs` 字段（`has_known_drug` 改从 tractability label 推断）。
+- **stage-1 独立源（GTEx/STRING）= M3 剩余项**，延后（不阻塞发现链；M2 暴露的 expression/network 空转是质量问题，非链路问题）。
+
+**发现段 stage 1-3 至此全部真实跑通**（提名 → 文献 → 选定）。
