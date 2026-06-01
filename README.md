@@ -15,21 +15,24 @@
 > 外层只编码**药物靶点发现这一个场景的固定阶段流程**：阶段序列 + 类型化边界 + **独立 judge 验收** + 共享 **index（权威数据源）**。
 
 ```
-外层  确定性 Runner / 状态机  (imperative shell, 纯代码, 愚蠢而确定)
-      定义阶段 + 类型契约 + 路由 + 副作用收敛 + loop/terminate
-      ├─ 调度: 为每个节点 spawn 全新 CC session, 收一次性产出
-      ├─ 验收: 调「无状态 judge 节点」(raw API 结构化输出) 拿 typed verdict
-      └─ 更新: 把结果写进外部 index / 权威数据源
-                │
-中层  节点 = boxed agent (agent-as-tool)         ← "聪明"只放在这里
-      一次性 `claude -p` / Agent SDK 自主跑完一个有界阶段
-      内部任意 fan-out 子 agent / 调 skill / 用 tool / 自跟踪 todo
-      固定 input/output schema, 全新 context, 跑完即弃, 一次性工作区
-                │
-底层  tools / MCP / 外部 index
-      节点通过检索工具够到知识 (信息索引化)
-                │
-旁路  read-only observer (CQRS) —— 人类只读 index/事件流, 不能写进程
+                          人类（仅在边界）   设计期→config↓    观察期→读 index(只读/CQRS)↑
+═══════════════════════════════════════════════════════════════════════════
+ 外层 │ RUNNER ＝ 确定性状态机（纯代码，imperative shell）—— 不是节点
+      │ 定义阶段·类型契约·路由·副作用收敛·loop/terminate（愚蠢而确定，不推理）
+      │ spawn 节点 → 收 typed 产出 → 写 index → 据 verdict 做确定性转移
+═══════════════════════════════════════════════════════════════════════════
+ 中层 │ 8 阶段 pipeline（boxed agent 节点 ＝ functional core，每阶段全新 session）
+      │  发现段(per disease；stage 2–4 per 候选靶点)         桥接      设计段
+      │  [1假设]→[2文献]→[3选定]→[4验证]  →  [5结构]→[6生成·对接]→[7模拟]→[8报告]
+      │    └SG·固定          └SG·动态planner      · 每阶段挂 1 个 [judge 节点]
+      │  SG = scatter-gather：planner → 并行角度节点 → 聚合(代码) → judge
+═══════════════════════════════════════════════════════════════════════════
+ 底层 │ tools/MCP（封装算法：OpenTargets·FUSION·iRIGS·GRN_transfer·Vina·GROMACS·AF3…）
+      │ INDEX ＝ 权威数据源（共享 /data）：context 每节点可丢，知识/状态持久累积
+═══════════════════════════════════════════════════════════════════════════
+
+[…节点]=boxed agent（worker/planner/judge，需验收）；Runner·聚合=确定性代码（不是节点）
+完整总览(含 scatter-gather 放大)见 docs/ARCHITECTURE.md §0；发现段节点清单见 docs/DOMAIN.md §5.1
 ```
 
 ---

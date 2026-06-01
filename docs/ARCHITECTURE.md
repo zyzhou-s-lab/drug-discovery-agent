@@ -4,6 +4,66 @@
 
 ---
 
+## 0. 总览图
+
+图例：`[…节点]` = boxed agent session（worker / planner / judge）；**RUNNER 与聚合 = 确定性代码，不是节点**；箭头 = 数据流。
+
+```
+                              人类（仅在系统边界）
+    设计期 ─ 把需求“编译”成 config  ↓             观察期 ─ 读 index（只读 / CQRS，不能写进程）↑
+═══════════════════════════════════════════════════════════════════════════════════
+ 外层 │ RUNNER ＝ 确定性状态机（纯代码，imperative shell）── 【不是节点】
+      │   职责：定义阶段 · 类型契约 · 路由 · 副作用收敛 · loop/terminate（愚蠢而确定，自己不推理）
+      │   循环：spawn 节点 → 收 typed 产出 → 写 index → 据 verdict 做【确定性转移】
+═══════════════════════════════════════════════════════════════════════════════════
+ 中层 │ 8 阶段 pipeline（boxed agent 节点 ＝ functional core；每阶段一个全新 session）
+      │
+      │   ┌────── 发现段 (per disease；stage 2–4 per 候选靶点) ──────┐   桥接      ┌──── 设计段 ────┐
+      │    [1 假设] → [2 文献] → [3 选定] → [4 验证]            →   [5 结构] → [6 生成·对接] → [7 模拟] → [8 报告]
+      │      └SG·角度固定              └SG·动态 planner
+      │   · 每个阶段都挂 1 个 [judge 节点]（验收 → verdict）
+      │   · SG ＝ scatter-gather（stage 1 与 4，↓ 放大）；其余为单 worker
+═══════════════════════════════════════════════════════════════════════════════════
+ 底层 │ tools / MCP（封装算法：OpenTargets · FUSION · iRIGS · GRN_transfer · Vina · GROMACS · AF3 …）
+      │ INDEX ＝ 权威数据源（落共享 /data）：context 每节点可丢弃，知识/状态持久累积于此
+═══════════════════════════════════════════════════════════════════════════════════
+```
+
+**scatter-gather 阶段放大（以 stage 4 `target-validation` 为例；stage 1 同构但角度固定、无 planner）：**
+
+```
+   Runner（代码）
+     │
+     │ ① 规划
+     ▼
+   [planner 节点] ── 出类型化 plan：选哪些角度 + 每角度【工具集 & 策略】，记入 index
+     │                关键角度=consensus（2+工具取一致）· 其余=best · 失败/缺数据→fallback
+     │ ② Runner 并行 fan-out（一个角度 = 一个顶层 worker 节点）
+     ├─→ [遗传 worker]   TWAS(FUSION/iRIGS) + coloc/MR     （consensus 多工具 = 节点内调用，不算多节点）
+     ├─→ [扰动 worker]   in-silico KO(GRN_transfer/CellOracle/scTenifoldKnk) + 对照(负=随机基因/正=已知靶点)
+     ├─→ [表达 worker]   单细胞 / GTEx                       （长算 GPU/MD：submit → resume，跨 session 挂起）
+     ├─→ [网络 worker]   STRING / DRKG
+     └─→ [安全 worker]   gnomAD / GTEx
+     │ ③ barrier：等全部角度到齐
+     ▼
+   [聚合 gather] ＝ 确定性代码  ── 【不是节点】，并合各 ValidationResult
+     │ ④
+     ▼
+   [judge 节点] ── verdict：加权(因果遗传 > 相关) · 冲突(一等输出) · robustness(leave-one-out，仅“通过边缘”靶点)
+     │ ⑤
+     ▼
+   Runner（代码）：通过 → 下一阶段；不足/冲突/脆弱 → 回 stage 1/3 重排·补证据
+```
+
+**一眼要点：**
+- **两类东西**：`[…节点]` = 智能/不确定，需装箱 + fresh context + judge 验收；**Runner 与聚合 = 确定性代码**（编排者，不验收、不计为节点）。
+- **judge 出裁决、Runner 做转移**：状态机不在节点里。
+- **scatter-gather** 在 stage 1（证据提名）与 stage 4（验证）复用；barrier 在此正确。
+- **粒度**：算法 = 被节点调用的工具（不单开 session）；一个节点 = 一个角度/完整工作流。
+- **两层 fan-out**：纵向 over 候选靶点（stage 2–4），横向 over 验证角度（stage 4 内）。
+
+> 组件职责见 §2，关键设计决定见 §3，发现段节点清单见 [DOMAIN §5.1](DOMAIN.md)。
+
 ## 1. 三层 + index + observer
 
 ```
