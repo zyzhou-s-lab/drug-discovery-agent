@@ -92,28 +92,46 @@ class Verdict(BaseModel):             # judge 的 typed 裁决
     retry_hint: str | None = None
 ```
 
-**验证段 schema（scatter-gather，stage 4；见 ARCHITECTURE §3.7）：**
+**验证段 schema（scatter-gather + 工具选择 + 消融，stage 4；见 ARCHITECTURE §3.7）：**
 
 ```python
-class ValidationAngle(BaseModel):     # planner 选出的一个角度（模式 a：tool 取自已封装菜单）
-    angle: str                        # genetic | perturbation | expression | network | safety
-    tool: str                         # 已封装工具名（如 fusion_twas / cell_oracle_ko / coloc）
+class ToolChoice(BaseModel):          # 同一角度的一个候选工具（模式 a：取自已封装菜单）
+    tool: str                         # fusion_twas / predixcan / cell_oracle_ko / sctenifoldknk ...
     params: dict[str, Any] = {}
+    priority: int = 1                 # fallback 链顺序（小=先用）
+    fit: dict[str, Any] = {}          # 选择判据：数据可用 / 组织·modality 匹配 / 成本 / 可靠性
+
+class ValidationAngle(BaseModel):     # planner 为一个角度选的【工具集 + 策略】
+    angle: str                        # genetic | perturbation | expression | network | safety
+    tools: list[ToolChoice]           # best=1；consensus≥2；fallback 按 priority
+    strategy: str = "best"            # "best" | "consensus" | "fallback"
+    is_key: bool = False              # 关键角度（遗传/扰动）默认 consensus
     tier: int = 1                     # 1=便宜先跑(gate)  2=贵(GPU/MD, submit→resume)
     rationale: str
 
-class ValidationPlan(BaseModel):      # planner 节点输出（记入 index，可复现、有界）
+class ValidationPlan(BaseModel):      # planner 输出（记入 index，可复现、有界）
     target_symbol: str
     angles: list[ValidationAngle]
 
-class ValidationResult(BaseModel):    # 每个角度节点输出
-    angle: str
+class ToolRun(BaseModel):             # 单工具的一次运行
     tool: str
     metric: dict[str, float]          # 如 {twas_p: 1e-6, ko_signature_shift: 0.42}
-    direction: str | None = None      # 与疾病方向是否一致
+    direction: str | None = None
+    passed: bool
+
+class ValidationResult(BaseModel):    # 一个角度节点输出（可含多工具）
+    angle: str
+    runs: list[ToolRun]               # consensus 时多条
+    tool_consensus: float | None = None    # 多工具一致度 0..1
+    controls: dict[str, Any] = {}     # in-silico 消融对照 {pos, neg}（效应须相对对照特异）
     passed: bool
     confidence: float
     evidence_refs: list[str]
+
+class ValidationVerdict(Verdict):     # 验证段 judge 在通用 Verdict 上追加
+    weighted_score: float             # 加权（因果遗传 > 相关），非计票
+    conflicts: list[str] = []         # 角度互斥（如遗传 no、扰动 yes）
+    robustness: str | None = None     # leave-one-angle-out：robust | fragile（仅对"通过边缘"靶点算）
 ```
 
 类型即契约：固定的是 schema 形状，内部内容动态（CONCEPTS §5）。

@@ -42,14 +42,14 @@
 
 **位置**：`target-selection`(stage 3) 之后、`structure-prep` 之前（DOMAIN §5 stage 4）。**结构 = fan-out / 聚合 / 判定**（审计采用并行 worker 节点，非单节点内 fan-out；理由见 [ARCHITECTURE §3.7](ARCHITECTURE.md)）：
 
-1. **规划（planner 节点，无状态）**：输入 = 选定靶点 + 疾病 + stage 2 文献证据；输出 = 类型化 `ValidationPlan`——按本靶点**动态选**哪些角度 + 每角度用菜单里哪个工具。**模式 (a)**：只从「已封装工具菜单」里选（(b) 自动封装未接工具 / (c) 安装新工具算法 = 未来规划）。plan **记入 index**（可复现），且**有界**（角度数/预算上限 + 每角度理由）。
-2. **分层 fan-out（并行角度节点）**：Runner 据 plan 并行起 worker 节点，**一个角度 = 一个节点工作流**（算法封装为工具调用，**不为单个工具单开 session**——见 ARCHITECTURE §3.7B）。**Cost-aware 两段**：先跑便宜角度（遗传/表达/网络，API/本地，分钟级）作廉价 gate；过了再跑贵的（in-silico 扰动 GPU、MD，小时级，长算用 submit→resume）。每节点输出类型化 `ValidationResult`。
+1. **规划（planner 节点，无状态）**：输入 = 选定靶点 + 疾病 + stage 2 文献证据；输出 = 类型化 `ValidationPlan`——按本靶点**动态选**哪些角度，且**每角度给【工具集 + 策略】**：`best`(选一个) / `consensus`(2+ 同类并跑取一致) / `fallback`(按 priority，失败或数据缺则降级)。**关键角度（遗传、扰动）默认 `consensus`，其余 `best`**。**模式 (a)**：工具只从「已封装菜单」里选（(b)/(c) 未来）。工具选择判据：数据可用 / 组织·modality 匹配 / 成本 / 历史可靠性。plan **记入 index**（可复现），且**有界**（角度数/预算上限 + 每角度+每工具理由）。
+2. **分层 fan-out（并行角度节点）**：Runner 据 plan 并行起 worker 节点，**一个角度 = 一个节点工作流**（算法封装为工具调用，**不为单个工具单开 session**——见 ARCHITECTURE §3.7B）。**Cost-aware 两段**：先跑便宜角度（遗传/表达/网络，API/本地，分钟级）作廉价 gate；过了再跑贵的（in-silico 扰动 GPU、MD，小时级，长算用 submit→resume）。角度节点按 `strategy` 执行（`best`/`consensus`/`fallback`）；**in-silico 消融(KO) 强制带对照**（负=随机/无关基因、正=已知靶点）→ 效应须**相对对照特异**而非伪影。每节点输出 `ValidationResult`（含多工具 `runs` + `tool_consensus` + `controls`）。
 3. **聚合（gather）**：确定性代码（`index.converge`）把各 `ValidationResult` 并成一个结构；仅当需推理调和矛盾时才用一个 synthesis 节点。
 4. **判定 + 转移**：**无状态 judge** 出类型化 verdict；**状态机转移留在 Runner**（judge 只出裁决，不在节点里跑状态机——§3.6/§3.4）。
 
 **角度节点（从菜单按需选，非全跑）**：`genetics-validator`(TWAS FUSION/iRIGS + coloc/MR) · `perturbation-validator`(in-silico KO GRN_transfer/CellOracle/scTenifoldKnk + GEARS) · `expression-validator`(单细胞/GTEx) · `network-validator`(STRING/DRKG) · `safety-validator`(gnomAD/GTEx)。
 
-**judge rubric（验证段）**：**证据加权**（因果遗传 A/B/C > 相关性），**非简单计票**；通过 ⟺ 加权分 ≥ 阈值且 ≥1 因果遗传 + ≥1 功能(E/H) 同向；**冲突是一等输出**（如遗传 no、扰动 yes → 标低置信 / 经 index 上报，不强行多数决）；不足或冲突 → `missing`/`conflicts` 驱动回 stage 1/3 重排或补证据。
+**judge rubric（验证段）**：**证据加权**（因果遗传 A/B/C > 相关性），**非简单计票**；通过 ⟺ 加权分 ≥ 阈值且 ≥1 因果遗传 + ≥1 功能(E/H) 同向；**冲突是一等输出**（如遗传 no、扰动 yes → 标低置信 / 经 index 上报，不强行多数决）；不足或冲突 → `missing`/`conflicts` 驱动回 stage 1/3 重排或补证据。**敏感性消融**：对**通过边缘**的靶点（明显通过/明显失败跳过，省算力）做 **leave-one-angle-out**——去掉任一角度若结论翻转 → `robustness=fragile`（需补证据再判）；同角度 `tool_consensus` 低同样降置信。
 
 ---
 

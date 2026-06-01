@@ -59,6 +59,7 @@
 - [x] **Phase A 调研**：文献梳理逻辑链条 + 数据可得性调研完成（`docs/discovery-logic-chain.md`）——发现段资源充足、无阻塞（本地 OpenTargets 25.03 + GTEx/GO/KEGG/L1000，在线 API 全可达，`iRIGS` env）
 - [x] **发现段补入 `target-validation` 阶段**（TWAS/GWAS/coloc/MR/in-silico 扰动/表达/网络）→ `docs/target-validation.md`；本地工具映射完成（最强项=基因扰动 GRN_transfer 等已跑、TWAS=FUSION/iRIGS；缺口=coloc/MR，R 易补）
 - [x] **验证结构 = scatter-gather**（planner 动态选角度[模式 a：菜单] → 并行角度节点[分层] → 聚合 → 加权/冲突 judge）+ **节点/工具粒度原则**（算法=封装工具调用、不单开 session；session=1角度工作流）→ ARCHITECTURE §3.7。动态加工具 (b)/(c) 列为未来规划
+- [x] **工具选择 + 消融判断**：同角度工具集+策略（**关键角度 consensus / 否则 best / fallback**）+ 选择判据；in-silico 消融**强制对照**（正/负）；judge **leave-one-angle-out 敏感性**（仅对"通过边缘"靶点，省算力）→ ARCHITECTURE §3.7C
 - [ ] **Phase A 实现**：据逻辑链条填 stage1-3 `DOMAIN-FILL` + `schemas.py` + 接 Open Targets/GWAS Catalog/Europe PMC（anchor 发现端 ground-truth = 补体 CFH/C3）
 - [ ] **Phase B（设计）**：qiaoy1 访问手段已具备（凭据 + remote `sshpass`）→ wrap AlphaFold3/Vina/GROMACS/RDKit/ORCA（建议迁共享 `/data`）
 - [ ] Runner + judge + index 最小骨架（路线图 Step 1）
