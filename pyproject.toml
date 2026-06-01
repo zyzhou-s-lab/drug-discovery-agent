@@ -4,14 +4,11 @@ version = "0.0.1"
 description = "Drug target-discovery agent harness (Phase A)"
 requires-python = ">=3.11"
 dependencies = [
-    "pydantic>=2",
-    # M1+ (uncomment when wiring real worker/judge/tools):
-    # "claude-agent-sdk",
-    # "anthropic",
-    # "mcp",
+    "pydantic>=2",          # M0/dummy + OpenTargets tool (stdlib) need only this
 ]
 
 [project.optional-dependencies]
+real = ["claude-agent-sdk", "anthropic"]   # M1+: Agent SDK worker + Messages API judge
 dev = ["pytest", "pytest-asyncio"]
 
 [project.scripts]

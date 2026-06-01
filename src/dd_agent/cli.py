@@ -7,12 +7,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from dataclasses import replace
 
 from .index import Index
-from .judge import dummy_judge
+from .judge import api_judge, dummy_judge
 from .pipeline import DISCOVERY_PIPELINE
 from .runner import Runner
-from .worker import dummy_worker
+from .worker import dummy_worker, sdk_worker
 
 
 def _print_states(idx: Index, campaign: str) -> None:
@@ -29,6 +30,10 @@ def main(argv=None) -> None:
         p.add_argument("--campaign", default="dummy")
         p.add_argument("--db", default="/tmp/dd/state.sqlite")
         p.add_argument("--artifacts", default="/tmp/dd/artifacts")
+        p.add_argument("--real", action="store_true",
+                       help="use sdk_worker + api_judge (real LLM/tools) instead of dummy")
+        p.add_argument("--only", default=None,
+                       help="run a single stage by name (M1 vertical slice)")
     st = sub.add_parser("status")
     st.add_argument("--campaign", default="dummy")
     st.add_argument("--db", default="/tmp/dd/state.sqlite")
@@ -42,9 +47,23 @@ def main(argv=None) -> None:
         _print_states(idx, args.campaign)
         return
 
-    runner = Runner(idx, dummy_worker, dummy_judge, DISCOVERY_PIPELINE)
+    real = getattr(args, "real", False)
+    worker_fn = sdk_worker if real else dummy_worker
+    judge_fn = api_judge if real else dummy_judge
+
+    pipe = DISCOVERY_PIPELINE
+    if getattr(args, "only", None):
+        pipe = [s for s in pipe if s.name == args.only]
+        if not pipe:
+            ap.error(f"--only: unknown stage '{args.only}' "
+                     f"(have: {', '.join(s.name for s in DISCOVERY_PIPELINE)})")
+    if real:
+        # M1: real worker runs a single genetic angle, no fan-out (M2 re-enables scatter).
+        pipe = [replace(s, scatter=False, angles=[]) if s.scatter else s for s in pipe]
+
+    runner = Runner(idx, worker_fn, judge_fn, pipe)
     res = asyncio.run(runner.run(args.campaign, args.disease))
-    print(f"[{res['campaign']}] {args.cmd} done. state:")
+    print(f"[{res['campaign']}] {args.cmd} done{' [real]' if real else ''}. state:")
     _print_states(idx, args.campaign)
 
 
