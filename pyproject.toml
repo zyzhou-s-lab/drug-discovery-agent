@@ -1,0 +1,28 @@
+[project]
+name = "dd-agent"
+version = "0.0.1"
+description = "Drug target-discovery agent harness (Phase A)"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2",
+    # M1+ (uncomment when wiring real worker/judge/tools):
+    # "claude-agent-sdk",
+    # "anthropic",
+    # "mcp",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio"]
+
+[project.scripts]
+dd-agent = "dd_agent.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dd_agent"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
