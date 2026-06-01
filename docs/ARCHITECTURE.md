@@ -256,6 +256,20 @@
 - **一接 GPU/slurm 长算就上 (a) 手写轻量**：idempotency key + 记 jobid + 重连而非重交（上面模式）。
 - **(b) Temporal** 留到将来多用户/生产化（它不强加 agent 抽象，与"哑 Runner + 隔离 session"哲学对齐）。
 
+**(a) 手写轻量 durable 的实现 ＝ 三件套（互补，缺一不可）：**
+
+1. **恢复编排 ＝ daemon watchdog**（节点外的看守进程；比 hook 强在子进程崩了它还活着）：
+   - subprocess 起每个节点 `claude -p --output-format stream-json --verbose`，拿 OS pid；从 stream-json 提取 `session_id`（init/result 消息）；
+   - 监控会话流的 **API 错误码（如 524）/ 进程非零退出**；命中 transient → `claude --resume <session_id>` + 发"继续"自动续跑；
+   - **重试上限 + 退避 + 区分 transient（524/网络 → 重试）vs terminal（逻辑卡死/judge 不过 → 不重试）**，防 524 无限 resume 死循环。
+2. **幂等 / 不重复副作用 ＝ `PreToolUse`/`PostToolUse` hook + index 对账**（⚠️ 没它，上面的 resume 会**重复副作用**——**524 最危险：超时但作业可能已提交**）：
+   - `PreToolUse`：`key=hash(node_id+tool+规范化params)` 查 index，已执行 → block + 返回已存的结果/jobid（确定性 gate、对 agent 透明，合 §3.7B/§12）；
+   - `PostToolUse`：把副作用结果/jobid 持久化进 index；
+   - 长作业 resume 后**先 `squeue/sacct` 查 key 是否已提交、重连 jobid，而非重交**；`PreToolUse 放行 → 执行 → PostToolUse 记录` 之间崩溃的残留窗口，靠此查重兜底。
+3. **跨节点 pipeline + 进度 ＝ Runner/index**：index 存 pipeline 状态（已完成节点、产出、各节点 `session_id`）+ content-addressed 工件，崩了从第一个未完成节点续；daemon 自身状态也落 index（机器整崩则由 systemd/Runner 从 index 重建——"谁看守看守者"）。
+
+> **一句话分工**：**daemon** 管"挂了自动接着跑"；**hook/index** 管"接着跑时别重复已发生的副作用"；**Runner/index** 管"跨节点进度与崩溃重建"。三者合起来才是完整的 (a)。
+
 ## 4. 一次请求的生命周期
 
 ```
