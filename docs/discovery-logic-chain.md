@@ -2,7 +2,7 @@
 
 > 调研方法：用 `gpu-zhouy1:~/.agents/skills/paper-fetch`（OpenAlex + Semantic Scholar + Europe PMC 聚合检索）做文献检索梳理逻辑链条；在 gpu-zhouy1 / cpu-zhouy1 / 共享 `/data` 上调研所需数据。原始检索日志见 [`refs/discovery-literature-search.md`](refs/discovery-literature-search.md)，原始数据调研见 [`refs/cluster-data-survey.md`](refs/cluster-data-survey.md)。日期 2026-05-31。
 >
-> 本报告填充 [DOMAIN.md](DOMAIN.md) 发现段（stage 1-3）的 `DOMAIN-FILL`。生物学阈值仍需领域专家最终核定。
+> 本报告填充 [DOMAIN.md](DOMAIN.md) 发现段（stage 1-4，含 `target-validation`）的 `DOMAIN-FILL`。验证段的多角度工具映射与 scatter-gather 结构另见 [target-validation.md](target-validation.md)。生物学阈值仍需领域专家最终核定。
 
 ---
 
@@ -134,9 +134,10 @@ Step 5  交付            优先排序 + 已验证靶点 + 可追溯证据档案
 
 ---
 
-## 六、回填 DOMAIN（发现段 stage 1-3）
+## 六、回填 DOMAIN（发现段 stage 1-4）
 
-- **stage 1 `target-hypothesis`** = 逻辑链条 Step 1（多证据并行：1a 遗传 / 1c 表达 / 1e 网络 / 1f 文献，各一个子 agent）+ Step 2 整合。证据/工具：Open Targets(本地 25.03 + API)、GWAS Catalog、GTEx、STRING、KEGG/GO、L1000、`iRIGS`、paper-fetch。
+- **stage 1 `target-hypothesis`** = 逻辑链条 Step 1（多证据并行：1a 遗传 / 1c 表达 / 1e 网络 / 1f 文献）+ Step 2 整合。**多证据提名同样用 scatter-gather**（ARCHITECTURE §3.7：各证据 = 一个并行节点 → 聚合）。证据/工具：Open Targets(本地 25.03 + API)、GWAS Catalog、GTEx、STRING、KEGG/GO、L1000、`iRIGS`、paper-fetch。
 - **stage 2 `literature-evidence`** = Step 1f + 证据档案：paper-fetch（OpenAlex/S2）+ Europe PMC，按靶点出带引用综述。
-- **stage 3 `target-selection`** = Step 3 三联评估（临床先例 / tractability / 安全性，用 Open Targets + ChEMBL + gnomAD + GTEx）+ Step 4 验证证据 → 选定。
-- **judge rubric（发现段）校准**：① 多证据正交覆盖；② 证据可追溯(真实 DOI/OT 分值)；③ genetics-first → **补体应进 dry-AMD top-N**（anchor 校准）；④ 给可证伪下一步(指向验证/结构)。
+- **stage 3 `target-selection`** = Step 3 三联评估（临床先例 / tractability / 安全性，用 Open Targets + ChEMBL + gnomAD + GTEx）→ 选定要推进的靶点。
+- **stage 4 `target-validation`** = 逻辑链条 **Step 4 验证**（**已独立成 stage，不再并入 stage 3**）：多角度计算实验验证（TWAS/GWAS/coloc/MR/in-silico 扰动/表达/网络），scatter-gather 结构 + 本地工具映射详见 **[target-validation.md](target-validation.md)**。
+- **judge rubric（发现段）校准**：① 多证据正交覆盖；② 证据可追溯(真实 DOI/OT 分值)；③ genetics-first → **补体应进 dry-AMD top-N**（anchor 校准）；④ stage 4 按**加权/冲突**判定（见 target-validation.md），给可证伪下一步。
