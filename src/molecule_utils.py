@@ -37,3 +37,9 @@ def count_hba(mol) -> int:
 
 def count_hbd(mol) -> int:
     return 0
+
+
+# Added: batch processing with no size limit (potential memory issue)
+def batch_process(all_smiles: list[str]) -> list[dict]:
+    """Process all molecules in one batch."""
+    return process_molecules(all_smiles)
