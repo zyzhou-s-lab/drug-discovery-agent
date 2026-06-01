@@ -80,8 +80,10 @@ class Runner:
             candidates=cands,
         )
 
-    async def run(self, campaign: str, disease: str) -> dict:
+    async def run(self, campaign: str, disease: str, only: str | None = None) -> dict:
         for stage in self.pipeline:
+            if only and stage.name != only:                  # --only: execute just this stage
+                continue                                     # (full pipeline still visible to _build_input)
             if self.index.is_done(campaign, stage.name):     # durable resume: skip completed
                 continue
             converged = False

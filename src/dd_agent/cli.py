@@ -50,16 +50,16 @@ def main(argv=None) -> None:
     worker_fn = sdk_worker if real else dummy_worker
     judge_fn = api_judge if real else dummy_judge
 
-    pipe = DISCOVERY_PIPELINE
-    if getattr(args, "only", None):
-        pipe = [s for s in pipe if s.name == args.only]
-        if not pipe:
-            ap.error(f"--only: unknown stage '{args.only}' "
-                     f"(have: {', '.join(s.name for s in DISCOVERY_PIPELINE)})")
+    only = getattr(args, "only", None)
+    if only and only not in {s.name for s in DISCOVERY_PIPELINE}:
+        ap.error(f"--only: unknown stage '{only}' "
+                 f"(have: {', '.join(s.name for s in DISCOVERY_PIPELINE)})")
+    # Runner always gets the FULL pipeline so _build_input can see upstream stages;
+    # --only just restricts which stage actually executes this run.
     # M2+: --real fans out the stage's scatter angles (M1's single-angle downgrade removed).
 
-    runner = Runner(idx, worker_fn, judge_fn, pipe)
-    res = asyncio.run(runner.run(args.campaign, args.disease))
+    runner = Runner(idx, worker_fn, judge_fn, DISCOVERY_PIPELINE)
+    res = asyncio.run(runner.run(args.campaign, args.disease, only=only))
     print(f"[{res['campaign']}] {args.cmd} done{' [real]' if real else ''}. state:")
     _print_states(idx, args.campaign)
 
