@@ -227,6 +227,14 @@
 - **边界**：**做不做哪一步（阶段/角度）= harness 钉死**（领域逻辑链固化 → 不漏、可复现，否则退化成自由对话 agent）；**怎么完成这一步（用哪些工具）= 模型自主**。
 - **演进**：(a) 菜单固定（Phase A）→ (b) 模型动态增删工具 → (c) 模型即时写工具（未来，见本节 (A)）。
 
+**(E) 角度集的决策归属**（stage 1 固定 / stage 4 planner——审计补强）：
+"调哪些工具"由模型自主((D))，但"跑哪些角度"在两个发现阶段**故意不同**：
+- **stage 1 提名 = 固定角度（无 planner）**：遗传/表达/网络/文献是疾病/靶点**无关**的标准证据普查维度（发现逻辑链 1a–1f）。此刻还没有具体靶点可供"因材施教"，且提名角度都便宜（API 查询）、漏一个=漏证据（无省算力动机）→ **固定 = 不漏 + 可复现**；planner 在此收益小、漏证据风险高。
+- **stage 4 验证 = planner 动态选角度**（见 (A)）：已有选定靶点，验证角度依赖**靶点特异性质**（有无 eQTL→可否 coloc/TWAS、是否 TF→in-silico KO 选型、组织特异性、安全侧写）→ 必须 planner 看具体靶点+文献后定。
+- **本质差异**：stage 1 是"普查"（标准项目人人查），stage 4 是"定制实验"（看病情定检查）。
+- **可演进（统一 planner）**：把 planner 做成通用"角度规划"节点，两阶段共用——`stage1-planner(disease)` 从提名菜单选（默认全选，可按疾病裁剪/加权/加角度）；`stage4-planner(target+文献)` 从验证菜单选（靶点特异）。固定 4 角度退化成 planner 的默认值。
+- **决定（2026-06-01）**：M2 先固定角度把 scatter-gather 机制跑通，**stage-1 planner 延到 M4 建 planner 时回填**（避免 scatter 与 planner 两个新机制耦合调试）。
+
 ### 3.8 持久化与恢复（CC 边界 + Runner 的 durable 责任）
 
 **调研结论（2026，见 [REFERENCES](REFERENCES.md)）**：所有本地/SDK 编码 agent（Claude Code、Codex、Aider、Amp、Devin）只做到 **session 级恢复**（重放 transcript + 文件快照）；**唯一做到 workflow 级 durable execution 的是 Cursor 云端，且靠外挂 Temporal**。→ **durable 是独立引擎，agent 不自带；我们必须在 Runner/index 层自建。** 语言：**Python**（同类科学 agent 全 Python + 领域工具生态；Agent SDK 双语成熟，不构成 TS 理由）。

@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 
 from .index import Index
-from .schemas import NodeInput, NodeOutput
+from .schemas import NodeInput, NodeOutput, TargetCandidate
 
 
 class Runner:
@@ -31,14 +31,33 @@ class Runner:
             return await self.worker_fn(stage, node_input, angle)
 
     async def _scatter_gather(self, stage, node_input) -> NodeOutput:
-        # parallel angle worker nodes -> barrier -> deterministic gather (NOT a node)
+        # parallel angle worker nodes -> barrier -> deterministic gather (NOT a node).
+        # gather merges candidates by symbol: union evidence, merge per-angle scores
+        # (ARCHITECTURE §3.7 A — aggregation is deterministic code, not a node).
         results = await asyncio.gather(
             *[self._run_angle(stage, node_input, a) for a in stage.angles]
         )
+        merged: dict[str, TargetCandidate] = {}
+        for r in results:
+            for c in r.candidates:
+                if c.symbol not in merged:
+                    merged[c.symbol] = c.model_copy(deep=True)
+                    continue
+                m = merged[c.symbol]
+                m.evidence.extend(c.evidence)
+                m.scores.update(c.scores)
+                if c.rationale and c.rationale not in m.rationale:
+                    m.rationale = f"{m.rationale} | {c.rationale}".strip(" |")
+                if not m.modality and c.modality:
+                    m.modality = c.modality
+        # rank by how many distinct angles support each candidate (cross-angle corroboration)
+        cands = sorted(merged.values(),
+                       key=lambda c: len({e.kind for e in c.evidence}), reverse=True)
         return NodeOutput(
             stage=stage.name,
-            summary=f"[scatter] {len(results)} angles: {', '.join(stage.angles)}",
-            candidates=[c for r in results for c in r.candidates],
+            summary=(f"[scatter] {len(results)} angles ({', '.join(stage.angles)}) "
+                     f"-> {len(cands)} merged candidates"),
+            candidates=cands,
         )
 
     async def run(self, campaign: str, disease: str) -> dict:

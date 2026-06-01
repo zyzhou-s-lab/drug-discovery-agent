@@ -59,3 +59,10 @@ drug-discovery-agent/
 3. **real deps 改 optional extra `[real]`**：dummy 层 + OT 工具保持仅 `pydantic` 依赖。
 
 **运行后端实证**：gpu 的 claude code 后端 = **DeepSeek（Anthropic 兼容层）**，`base_url=https://api.deepseek.com/anthropic`、`model=deepseek-chat`，token 在 `~/.claude/settings.json` 的 `env`、非 shell env → 运行时注入 `os.environ`。**DeepSeek 兼容层成功驱动了 Agent SDK 的 MCP 工具循环 + judge 的 forced-tool 结构化输出** → M2-M4 可沿用此后端，不必额外 Claude key。
+
+## M2 切法（决定 2026-06-01，路线 (i)）
+**先把 scatter-gather 机制用真实 worker 跑通，不引入 planner**（角度集决策归属见 ARCHITECTURE §3.7(E)：stage-1 角度固定，planner 延到 M4 回填）：
+1. **角度暂用 OpenTargets 的 4 个 datatype 切分**：genetic→`genetic_association`、expression→`rna_expression`、network→`affected_pathway`、literature→`literature`。最小新代码、聚焦验证**并行机制**（4 个独立 boxed-agent session 并行 → 确定性去重合并 → judge）。
+2. **独立证据源**（GTEx / STRING / Europe PMC）= 证据质量增强，延到 M2 后段或 M3（原 M2「加 pubmed/gtex/string MCP」据此推迟；datatype 切分先行）。
+3. **确定性 gather 去重合并**：多角度提同一 symbol（如 CFH 在 genetic+expression 都出）→ 按 symbol 聚合 evidence + 合并各角度 scores（聚合=确定性代码，非节点）。
+4. **DoD**：`--real` 跑 target-hypothesis 时 4 角度并行 fan-out → 合并候选（补体应多角度命中）→ judge 过；scatter 在真实 worker 下并行+barrier 正确。

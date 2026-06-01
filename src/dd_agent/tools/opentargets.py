@@ -72,11 +72,16 @@ def search_disease(name: str, size: int = 5) -> list[dict]:
     return [{"id": h["id"], "name": h["name"]} for h in data.get("search", {}).get("hits", [])]
 
 
-def disease_associated_targets(efo_id: str, size: int = 25) -> dict:
+def disease_associated_targets(efo_id: str, size: int = 50,
+                               sort_by: str = "genetic_association") -> dict:
     """Targets associated with a disease, each with overall + per-datatype scores.
 
-    Returns {disease, efo_id, rows: [{symbol, name, target_id, overall, genetic, ...}]}
-    sorted by the `genetic_association` datatype score (desc) — the genetic angle.
+    Returns {disease, efo_id, sort_by, rows: [{symbol, name, target_id, overall,
+    genetic, sort_score, datatypes}]} sorted by the `sort_by` datatype score (desc).
+    sort_by selects the evidence angle: genetic_association | rna_expression |
+    affected_pathway | literature | animal_model | somatic_mutation | known_drug.
+    NOTE: the API returns the top-`size` by OVERALL score, then we re-rank by
+    sort_by locally — use a generous size so a datatype's leaders aren't truncated.
     """
     data = _gql(_ASSOC_Q, {"efoId": efo_id, "size": size})
     disease = data.get("disease") or {}
@@ -90,10 +95,12 @@ def disease_associated_targets(efo_id: str, size: int = 25) -> dict:
             "target_id": tgt.get("id"),
             "overall": round(r.get("score", 0.0), 4),
             "genetic": round(dts.get("genetic_association", 0.0), 4),
+            "sort_score": round(dts.get(sort_by, 0.0), 4),
             "datatypes": {k: round(v, 4) for k, v in dts.items()},
         })
-    rows.sort(key=lambda x: x["genetic"], reverse=True)
-    return {"disease": disease.get("name"), "efo_id": disease.get("id"), "rows": rows}
+    rows.sort(key=lambda x: x["sort_score"], reverse=True)
+    return {"disease": disease.get("name"), "efo_id": disease.get("id"),
+            "sort_by": sort_by, "rows": rows}
 
 
 def _selfcheck() -> int:

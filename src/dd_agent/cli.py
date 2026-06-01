@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from dataclasses import replace
 
 from .index import Index
 from .judge import api_judge, dummy_judge
@@ -57,9 +56,7 @@ def main(argv=None) -> None:
         if not pipe:
             ap.error(f"--only: unknown stage '{args.only}' "
                      f"(have: {', '.join(s.name for s in DISCOVERY_PIPELINE)})")
-    if real:
-        # M1: real worker runs a single genetic angle, no fan-out (M2 re-enables scatter).
-        pipe = [replace(s, scatter=False, angles=[]) if s.scatter else s for s in pipe]
+    # M2+: --real fans out the stage's scatter angles (M1's single-angle downgrade removed).
 
     runner = Runner(idx, worker_fn, judge_fn, pipe)
     res = asyncio.run(runner.run(args.campaign, args.disease))
