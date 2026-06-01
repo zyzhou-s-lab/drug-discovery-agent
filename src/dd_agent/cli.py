@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 
+from .events import events_dir_var
 from .index import Index
 from .judge import api_judge, dummy_judge
 from .pipeline import DISCOVERY_PIPELINE
@@ -59,6 +61,9 @@ def main(argv=None) -> None:
     # M2+: --real fans out the stage's scatter angles (M1's single-angle downgrade removed).
 
     from .planner import plan_validation
+    # step events for the observer: events.emit() no-ops unless events_dir_var is set,
+    # so a cli run is observable in the web UI just like an api-triggered run.
+    events_dir_var.set(os.path.join(args.artifacts, args.campaign, "events"))
     runner = Runner(idx, worker_fn, judge_fn, DISCOVERY_PIPELINE,
                     planner_fn=(plan_validation if real else None))
     res = asyncio.run(runner.run(args.campaign, args.disease, only=only))
