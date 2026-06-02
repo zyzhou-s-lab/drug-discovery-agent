@@ -178,6 +178,19 @@
   - ~~"DeepSeek 不适合当 judge"~~ → **半错**。不稳的根是 **raw API 形态**（一次性 forced-tool 拍脑袋打分）不是模型：同一 brief，**raw judge std≈0.2**（0.95/0.733/0.533），**claude -p judge std=0.025**（0.9-1.0，9 次）——**agentic（有 thinking/多轮深思）让同一个 DeepSeek 评分稳 ~10×**。
 - **设计经验 + 参数**：需要**稳定判断**的任务，**agentic 形态 > raw 一次性 forced-tool**（同模型亦然）。`DD_JUDGE_VOTES` 默认 **1**（claude -p 单票就稳，far from 0.6）；consensus（N 票 mean score）留作降噪手段。成本 ~$0.156/次（~27k ctx + agentic），`DD_JUDGE_VOTES`/`DD_JUDGE_PASS`/`DD_JUDGE_MAX_TURNS` 均 env 可调。代码：`judge.py`（`_gate`/`_verdict_server`/`_judge_once_claude`/`api_judge`），commits `a34c930`(gate)/`4f11783`(claude -p)。
 
+**通用模式：`gate + claude -p + typed 出口`（2026-06-02 提炼，全项目同构）**——judge 的三层其实是项目里**所有"LLM 出 typed 结构"节点的统一形态**，不止验收：
+
+| 节点 | 角色 | gate（脚本，先跑） | claude -p（语义） | typed 出口 | 外部工具 |
+|---|---|---|---|---|---|
+| **judge** `api_judge` | 验收 | `_gate` 业务规则 | 评 rubric | `submit_verdict`→Verdict | 无（评判不行动） |
+| **planner** `plan_validation` | 规划 | 菜单 clamp（角度∈菜单） | 选验证角度 | `submit_plan`→ValidationPlan | 无 |
+| **intake** `validate_disease` | 守门 | 空/超长/纯符号 | 翻译+判是否真疾病 | `submit_intake`→DiseaseIntake | **仅** OT `search_disease`（命中 EFO=证据） |
+| worker `sdk_worker`（执行变体） | 执行 | —（产出交 judge 验收） | 推理+调工具+产出 | `submit_result`→NodeOutput | **多**（OT/EuropePMC，要真做事） |
+
+- **三个判断/决策节点（judge/planner/intake）现已全部 = 脚本 gate + claude -p + in-process typed tool**，且全部 `disallowed_tools` 禁 CC 内置工具（否则会用 WebSearch 越权"核查"——见 literature judge 教训）。**planner 此前是最后一个 raw forced-tool 节点**（std≈0.2 不稳、无 gate、无 submit 时校验），2026-06-02 统一到 claude -p（拿 std 0.025 稳定性 + submit 时菜单 clamp）。
+- **worker 是同构变体**：同样 claude -p + typed，但**执行**节点——无 gate、**挂多个外部工具**（真查 OT/文献）。**判断节点禁工具（评判/规划/守门不行动）、执行节点给工具（做事）**——工具归属区分见 §3.7(D)；intake 是例外中的例外（守门需 1 个只读工具 search_disease 作判据，但 EFO 命中本身是证据，非"行动"）。
+- **intake = pipeline 前的 input 守门**（cli 入口、`--real` only；dummy 跑控制流不调 LLM）：用户输入翻译成英文 + 查 OT EFO，**只放真实疾病进流程**（中文/别名归一化成 OT 标准英文名 + EFO 喂下游），非疾病/恶意输入挡门外。实测放行 `老年黄斑变性`→`age-related macular degeneration`(EFO_0001365)、`type 2 diabetes`→`…mellitus`(MONDO_0005148)；拒 `帮我写首诗`、`'; DROP TABLE --`(识别为注入串)。代码 `intake.py`/`planner.py`，commit `6f7ca23`。
+
 ### 3.5 headless 无人值守的硬要求
 - 必须**预授权**（`permission_mode="bypassPermissions"` 或 `can_use_tool` 回调 / `--allowedTools`），否则节点卡在等人确认。
 - `max_turns` 定终止；fresh session 每节点；一次性 cwd 当脏堆。

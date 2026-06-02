@@ -113,6 +113,11 @@ M4 两块正交：① 机制（planner 动态选角度 + 动态 scatter + 加权
 - **验证（`fc5fef0`）**：stage-4 **1 次过 score 0.80**（148s，原 exhausted 3/3 耗 672s）。裁决：**C3(genetic 0.88)/HTRA1(0.66) PASS**、C9(0.58) WEAK、**C5/CFD(genetic 0.0) FAIL** 并标 `CONFLICT: genetic-null vs safety-ok`——synthesis 正确区分"**药理验证 ≠ 遗传验证**"（C5 有获批药 Izervay、CFD 限速步骤，但 dry AMD 遗传信号空 → 按 rubric 不通过）。**完整发现段 stage 0-4 端到端 1 次连跑通**。
 - **附：literature judge 三层修复**：完整链中 stage-2 曾 exhausted，三层根因依次修——① full JSON 太大 judge 不调 submit_verdict（精简 `_summarize_output`，`92c5e4c`）② judge turn 耗尽（`max_turns` 8→25，`b40ab03`）③ **judge 越权用 WebSearch 查 PubMed 误判真 EuropePMC PMID**（2026 新文献 PubMed 未收录）→ `disallowed_tools` 禁 CC 内置工具（`722982f`）。score 0.25→0.75。**设计确认**：judge 纯评判、禁内置工具、不自核查；真实性由 worker 真工具产出时保证（§3.4）。
 
+### 输入守门 + judge 结构统一（2026-06-02）
+1. **疾病 input gate**（`intake.py` + cli 接线，`--real` only）：用户输入疾病名先过守门——脚本 gate（空/超长/纯符号）→ claude -p（翻译成英文 + 调 OT `search_disease` 查 EFO，禁 CC 内置工具）→ typed `DiseaseIntake`（accepted/normalized_en/efo_id/reason）。**只放真实疾病进流程**，归一化的英文名喂下游。实测：`老年黄斑变性`→`age-related macular degeneration`(EFO_0001365)、`type 2 diabetes`→`…mellitus`(MONDO_0005148) 放行；`帮我写首诗`、`'; DROP TABLE --` 拒（后者识别为注入串）。
+2. **planner 统一到 claude -p**（审计发现的不一致）：`plan_validation` 从 raw `messages.create` forced-tool 迁到 claude -p + `submit_plan` in-process tool（typed）+ 脚本 gate（角度菜单 clamp）。**消除最后一个 raw-forced-tool 节点**（std≈0.2 → 0.025），与 judge/worker 形态一致。`plan_validation` 改 async，runner `await planner_fn`；`llm.py` 现无引用（保留备用）。
+3. **提炼通用模式**（ARCHITECTURE §3.4 表）：`gate + claude -p + typed 出口` 是全项目"LLM 出 typed 结构"节点的统一形态——judge（验收）/ planner（规划）/ intake（守门）三处同构 + worker（执行变体，无 gate、挂多工具）。**判断节点禁工具、执行节点给工具**。commit `6f7ca23`。
+
 ### M5 observer 已并行起步（HAPI，2026-06-01）
 gpu 上由 **HAPI** 做出 M5 observer 并合并入主线（`cfa49d0`，与 M4a 在 worker.py 正交、零冲突）：`api.py`（Index 之上 CQRS 只读 HTTP/SSE + run trigger，**非节点，Runner 仍是唯一 writer**）+ `events.py`（Agent SDK 消息流 → per-stage JSONL step cards）+ `web/`（vite/tailwind/radix/mermaid 前端）+ worker `_emit_stream` + pyproject `api` extra + `scripts/seed_demo.py`。**待对接**：events 落盘的 `DD_ARTIFACTS`/path（本次 stage-4 未生成 events 目录，emit 被 worker 的 try 静默吞掉）。
 

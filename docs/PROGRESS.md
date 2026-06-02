@@ -42,6 +42,7 @@ PL 设计哲学在对话中确定，落入 `docs/{CONCEPTS,ARCHITECTURE,DETAILED
 | 06-02 | **stage-0** disease-overview（split-and-merge 疾病 brief 喂下游聚焦）+ **judge 终态**（C2 脚本 gate + claude -p `submit_verdict` typed + consensus + score 阈值；判语义、禁内置工具） | ✅ stage-0 judge 0.97；claude -p judge std 0.025（vs raw ~0.2） | （见 §3.4） |
 | 06-02 | literature judge 三层修复：精简 input / `max_turns` 25 / `disallowed_tools` 禁越权 PubMed 核查 | ✅ 0.25→0.75；judge 不再误判真 EuropePMC PMID（2026 新文献 PubMed 未收录） | `92c5e4c` `b40ab03` `722982f` |
 | 06-02 | **stage-4 synthesis 节点**（union 后加权裁决+冲突标注，补"缺综合判定"缺口）→ **完整 5-stage 链端到端 1 次跑通** | ✅ stage-4 exhausted 3/3 → 1 次过 0.80；**裁决**：C3/HTRA1 PASS、C9 WEAK、C5/CFD FAIL（genetic=0，标 CONFLICT；正确区分"药理 vs 遗传验证"） | `fc5fef0` |
+| 06-02 | **疾病 input gate**（cli 入口守门：翻译→OT EFO→typed `DiseaseIntake`）+ **planner 统一到 claude -p**（迁最后一个 raw-forced-tool 节点）| ✅ intake：中文/英文病名归一化+EFO 放行、非疾病/注入串拒；planner typed plan（引用具体变异）；**`gate+claude-p+typed` 三处同构**（judge/planner/intake） | `6f7ca23` |
 
 **完整发现段 stage 0-4 端到端 1 次连跑通**（2026-06-02）：`dry AMD` → 疾病 brief(stage-0) → 提名(scatter 4 角度) → 文献(真 PMID) → 三联评估选定 → 多角度验证 + **synthesis 加权裁决**。最终推进：**C3、HTRA1（PASS）**；C9（WEAK）；C5、CFD（遗传信号空→FAIL，虽有药理先例 Izervay/danicopan）。
 
