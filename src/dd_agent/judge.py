@@ -2,10 +2,12 @@
 
 Protocol: judge_fn(stage, NodeOutput) -> Verdict.
 - dummy_judge: zero-API stand-in (M0).
-- api_judge:   M1 — raw Messages API with forced-tool structured output → typed
-               Verdict (the design's `messages.parse`; anthropic has no .parse, so
-               we force a single `emit_verdict` tool, which is the canonical typed
-               structured-output pattern). Uses a per-stage rubric_prompt.
+- api_judge:   raw Messages API with forced-tool structured output → typed Verdict
+               (NOT an agentic session — single shot, no tool loop, no transcript;
+               cf. worker which IS a Claude Agent SDK session). Per-stage rubric.
+               CONSENSUS: runs the judge N times (DD_JUDGE_VOTES, default 3) and
+               takes majority-converged + mean-score, to damp the relay's
+               non-determinism (§3.7C consensus applied to the judge).
 """
 from __future__ import annotations
 
@@ -26,16 +28,35 @@ def dummy_judge(stage, output: NodeOutput) -> Verdict:
     )
 
 
+def _judge_once(client, model, rubric: str, user: str, verdict_tool: dict) -> Verdict:
+    """One forced-tool judge call → typed Verdict (tolerates empty/partial tool input)."""
+    resp = client.messages.create(
+        model=model, max_tokens=1024, system=rubric,
+        messages=[{"role": "user", "content": user}],
+        tools=[verdict_tool], tool_choice={"type": "tool", "name": "emit_verdict"},
+    )
+    for block in resp.content:
+        if getattr(block, "type", None) == "tool_use" and block.name == "emit_verdict":
+            try:
+                return Verdict.model_validate(block.input)
+            except Exception as e:                          # relay may return empty/partial input
+                return Verdict(converged=False, score=0.0,
+                               reasons=[f"judge verdict malformed: {e}"],
+                               missing=["verdict"], retry_hint="re-emit a complete emit_verdict")
+    return Verdict(converged=False, score=0.0,
+                   reasons=["judge returned no emit_verdict tool_use"], missing=["verdict"])
+
+
 def api_judge(stage, output: NodeOutput) -> Verdict:
-    """M1 real judge for stages that carry a rubric_prompt; else fall back to dummy."""
+    """Real judge for stages with a rubric_prompt; else dummy. Consensus over N votes."""
     rubric = getattr(stage, "rubric_prompt", "") or ""
     if not rubric:                                  # not wired for this stage yet → dummy
         return dummy_judge(stage, output)
 
     from .llm import anthropic_client_and_model
 
+    votes = max(1, int(os.environ.get("DD_JUDGE_VOTES", "3")))
     client, model = anthropic_client_and_model()
-
     verdict_tool = {
         "name": "emit_verdict",
         "description": "Emit the structured verdict for this stage output.",
@@ -48,21 +69,21 @@ def api_judge(stage, output: NodeOutput) -> Verdict:
         "用 emit_verdict 工具输出：converged(是否过)、score(0-1)、reasons、"
         "missing(缺什么，驱动下一次重试)、retry_hint。"
     )
-    resp = client.messages.create(
-        model=model,
-        max_tokens=1024,
-        system=rubric,
-        messages=[{"role": "user", "content": user}],
-        tools=[verdict_tool],
-        tool_choice={"type": "tool", "name": "emit_verdict"},
+
+    verdicts = [_judge_once(client, model, rubric, user, verdict_tool) for _ in range(votes)]
+    if len(verdicts) == 1:
+        return verdicts[0]
+
+    # consensus: majority-converged, mean score, merged reasons/missing (§3.7C on the judge)
+    yes = sum(1 for v in verdicts if v.converged)
+    converged = yes * 2 > len(verdicts)
+    score = round(sum(v.score for v in verdicts) / len(verdicts), 3)
+    detail = [f"[vote {i + 1}:{'✓' if v.converged else '✗'} {v.score}] "
+              f"{(v.reasons[0] if v.reasons else '')[:90]}" for i, v in enumerate(verdicts)]
+    missing = sorted({m for v in verdicts for m in v.missing})
+    retry_hint = next((v.retry_hint for v in verdicts if not v.converged and v.retry_hint), None)
+    return Verdict(
+        converged=converged, score=score,
+        reasons=[f"consensus {yes}/{len(verdicts)} converged (votes={votes})", *detail],
+        missing=missing, retry_hint=retry_hint,
     )
-    for block in resp.content:
-        if getattr(block, "type", None) == "tool_use" and block.name == "emit_verdict":
-            try:
-                return Verdict.model_validate(block.input)
-            except Exception as e:                          # relay may return empty/partial tool input
-                return Verdict(converged=False, score=0.0,
-                               reasons=[f"judge verdict malformed: {e}"],
-                               missing=["verdict"], retry_hint="re-emit a complete emit_verdict")
-    return Verdict(converged=False, score=0.0,
-                   reasons=["judge returned no emit_verdict tool_use"], missing=["verdict"])
