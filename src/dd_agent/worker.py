@@ -357,6 +357,65 @@ async def _validation_worker(stage, node_input: NodeInput, angle: str | None) ->
                               f"validate/{target}/{angle}", node_input)
 
 
+def _synth_material(raw: list[dict]) -> str:
+    """Compact per-target view of the merged per-angle validation results for the synthesis node."""
+    lines = []
+    for c in raw:
+        scores = c.get("scores") or {}
+        evk = sorted({e.get("kind") for e in c.get("evidence", []) if e.get("kind")})
+        srcs = sorted({e.get("source") for e in c.get("evidence", []) if e.get("source")})[:4]
+        lines.append(f"- {c.get('symbol')}: scores={scores} angles={evk} sources={srcs}\n"
+                     f"    rationale: {(c.get('rationale') or '')[:300]}")
+    return "\n".join(lines)
+
+
+async def _validation_synthesis(stage, node_input: NodeInput) -> NodeOutput:
+    """Gather-side adjudication node — fills the structural gap behind stage-4 exhaustion.
+
+    The per-(target×angle) workers are blind across angles (genetic session can't see
+    safety) and the deterministic union (_merge_by_symbol) doesn't decide — so the
+    rubric's *weighted verdict (genetic-causal primary) + explicit genetic-vs-safety
+    conflict flags* had no producer, and the summary mechanically said "N validated".
+    This node adjudicates over the merged results, and is the correct sink for the
+    judge's retry_feedback (it sees all angles). cf. stage-0 split-and-merge; §3.7."""
+    captured: dict = {}
+    role = _load_role(stage.name)
+    raw = node_input.constraints.get("to_synthesize") or []
+    if not raw:
+        return NodeOutput(stage=stage.name, summary="[validate:synthesis] no merged results to adjudicate")
+    system = (
+        role
+        + "\n\n## 本次运行（综合判定 / gather-side adjudication）\n"
+        "你收到每个选定靶点**已完成**的多角度验证结果（genetic + safety，材料已齐，**不要再去查工具**）。"
+        "按验证 rubric 做**加权裁决**（非投票）：\n"
+        "1) 靶点 **PASS 当且仅当因果向（genetic）稳健支持**（genetic≥0.6 量级）；genetic 弱/为 0 的"
+        "标 **WEAK** 或 **NOT-VALIDATED**，**不得**因 safety 好就笼统算通过；\n"
+        "2) **显式标注 genetic-safety 冲突**：如 genetic≈0 但 safety 高，写 "
+        "'CONFLICT: genetic-null vs safety-ok'；\n"
+        "3) 权重反映证据强度，不是简单多数。\n"
+        "完成后**必须** submit_result：candidates 含**全部**靶点（保留各自 evidence），每个 rationale 以 "
+        "'VERDICT=PASS|WEAK|FAIL；' 开头写加权理由+冲突标注；scores 至少含 genetic、safety、verdict"
+        "（PASS=1.0 / WEAK=0.5 / FAIL=0.0）；summary 给分级结论（哪些 PASS、哪些 WEAK/CONFLICT 及原因）。"
+    )
+    prompt = (
+        f"疾病：{node_input.disease}\n"
+        f"选定靶点的多角度验证结果（待综合裁决）：\n{_synth_material(raw)}\n\n"
+        "对每个靶点做加权裁决（genetic 主导）、标注冲突，然后 submit_result。"
+    )
+    out = await _run_session(
+        stage, system, prompt,
+        {"result": _result_server(captured, stage.name)},
+        ["mcp__result__submit_result"],
+        captured, "synthesis", node_input)
+    if not out.candidates:                  # synthesis didn't submit → fall back to union (no worse)
+        cands = [TargetCandidate.model_validate(c) for c in raw]
+        return NodeOutput(
+            stage=stage.name, candidates=cands,
+            summary=f"[validate:synthesis-fallback] {len(cands)} targets (union, unadjudicated)",
+            open_questions=["synthesis node did not submit_result"])
+    return out
+
+
 # ----------------------------------------------------------------------------
 # stage-0: disease-overview (single session split-and-merge; LLM synthesizes a brief)
 # ----------------------------------------------------------------------------
@@ -396,5 +455,7 @@ async def sdk_worker(stage, node_input: NodeInput, angle: str | None = None) -> 
     if stage.name == "target-selection":
         return await _selection_worker(stage, node_input)
     if stage.name == "target-validation":
+        if angle == "synthesis":                       # gather-side adjudication node
+            return await _validation_synthesis(stage, node_input)
         return await _validation_worker(stage, node_input, angle)
     return await dummy_worker(stage, node_input, angle)

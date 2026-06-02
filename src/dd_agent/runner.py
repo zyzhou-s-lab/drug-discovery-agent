@@ -115,11 +115,19 @@ class Runner:
         )
         cands = _merge_by_symbol(results)
         plan_txt = "; ".join(f"{p.target}:[{'+'.join(p.angles)}]" for p in plan.plans)
-        return NodeOutput(
-            stage=stage.name,
-            summary=f"[validate] plan {{{plan_txt}}} -> {len(cands)} validated targets",
-            candidates=cands,
-        )
+        # gather-side adjudication: the per-(target×angle) workers are blind across angles and
+        # the union doesn't decide — a synthesis node does the rubric's weighted verdict +
+        # conflict flags, and is the correct sink for judge retry_feedback. ARCHITECTURE §3.7.
+        synth_input = node_input.model_copy(deep=True)
+        synth_input.constraints = {**synth_input.constraints,
+                                   "to_synthesize": [c.model_dump() for c in cands],
+                                   "plan_summary": plan_txt}
+        synth = await self.worker_fn(stage, synth_input, "synthesis")
+        if not synth.candidates:                      # synthesis unavailable (e.g. dummy) → keep union
+            synth.candidates = cands
+            if not synth.summary:
+                synth.summary = f"[validate] plan {{{plan_txt}}} -> {len(cands)} targets (union)"
+        return synth
 
     async def run(self, campaign: str, disease: str, only: str | None = None) -> dict:
         for stage in self.pipeline:
