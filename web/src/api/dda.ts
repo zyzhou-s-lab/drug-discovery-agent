@@ -5,6 +5,7 @@ import type {
     CampaignView,
     DdaConfig,
     PipelineStage,
+    ReferencesResponse,
     StageDetail,
     StepEvent,
 } from '@/types/dda'
@@ -24,6 +25,8 @@ export const ddaApi = {
     campaign: (c: string) => getJson<CampaignView>(`/campaigns/${encodeURIComponent(c)}`),
     stage: (c: string, s: string) =>
         getJson<StageDetail>(`/campaigns/${encodeURIComponent(c)}/stages/${encodeURIComponent(s)}`),
+    references: (c: string) =>
+        getJson<ReferencesResponse>(`/campaigns/${encodeURIComponent(c)}/references`),
 
     startRun: (body: { disease: string; campaign: string; real?: boolean }) =>
         fetch(`${BASE}/campaigns`, {
@@ -110,8 +113,8 @@ export const ddaApi = {
     },
 }
 
-/** Resolve a PubMed id from an evidence ref/source like "PMID:15761122" or "PubMed:15761122". */
-export function pubmedId(ref: string, source: string): string | null {
-    const m = `${ref} ${source}`.match(/(?:PMID|PubMed)[:\s]?(\d{5,9})/i)
-    return m ? m[1] : null
+/** Extract a bare DOI from an evidence ref/source ("10.x", "doi:10.x", or a doi.org URL). */
+export function doiRef(ref: string, source: string): string | null {
+    const m = `${ref} ${source}`.match(/10\.\d{4,9}\/[^\s"]+/)
+    return m ? m[0].toLowerCase().replace(/[.,;]+$/, '') : null
 }

@@ -242,6 +242,55 @@ async def stage_detail(campaign: str, stage: str) -> dict:
     }
 
 
+def _ref_to_doi(ref: str) -> str:
+    """Extract a bare lowercase DOI from a literature-evidence ref (10.x / doi:10.x / url)."""
+    s = (ref or "").strip()
+    for p in ("https://doi.org/", "http://doi.org/", "doi:"):
+        if s.lower().startswith(p):
+            s = s[len(p):]
+    s = s.strip().lower()
+    return s if s.startswith("10.") else ""
+
+
+def _campaign_dois(idx: Index, campaign: str) -> list[str]:
+    """Deduped, first-seen-ordered DOIs from every literature evidence across all stages."""
+    seen: set[str] = set()
+    order: list[str] = []
+    for s in DISCOVERY_PIPELINE:
+        out = idx.output(campaign, s.name)
+        if not out:
+            continue
+        for c in (out.get("candidates") or []):
+            for e in (c.get("evidence") or []):
+                if e.get("kind") != "literature":
+                    continue
+                doi = _ref_to_doi(e.get("ref", ""))
+                if doi and doi not in seen:
+                    seen.add(doi)
+                    order.append(doi)
+    return order
+
+
+@app.get("/api/campaigns/{campaign}/references")
+def campaign_references(campaign: str) -> dict:
+    """Campaign-level APA7 bibliography: every literature-evidence DOI across all stages,
+    deduped and resolved to an APA7 reference via OpenAlex. Sync def → Starlette runs it
+    in a threadpool, so the blocking DOI lookups don't stall the event loop."""
+    from .tools.paperfetch import cite_by_doi
+
+    dois = _campaign_dois(get_index(), campaign)
+    references: list[dict] = []
+    unresolved: list[str] = []
+    for doi in dois:
+        apa7 = cite_by_doi(doi)
+        if apa7:
+            references.append({"n": len(references) + 1, "doi": doi, "apa7": apa7})
+        else:
+            unresolved.append(doi)
+    return {"campaign": campaign, "count": len(references),
+            "references": references, "unresolved": unresolved}
+
+
 @app.get("/api/campaigns/{campaign}/stages/{stage}/events")
 async def stage_events(campaign: str, stage: str) -> dict:
     """The captured Agent SDK step stream (thinking / tool_use / tool_result / …)."""
