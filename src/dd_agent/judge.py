@@ -28,6 +28,24 @@ def dummy_judge(stage, output: NodeOutput) -> Verdict:
     )
 
 
+def _gate(stage, output: NodeOutput) -> str | None:
+    """C2 deterministic business-rule gate — runs before any LLM, zero API cost.
+    Format/completeness belongs in script, not the LLM judge. None=pass, str=fail reason."""
+    if stage.name == "disease-overview":
+        if not (output.summary or "").strip():
+            return "empty brief summary"
+        if output.candidates:
+            return "disease-overview must not nominate targets (candidates non-empty)"
+        return None
+    # nomination / literature / selection / validation: need traceable candidates
+    if not output.candidates:
+        return "no candidates produced"
+    unsourced = [c.symbol for c in output.candidates if not any(e.source for e in c.evidence)]
+    if unsourced:
+        return f"candidates without any sourced evidence: {unsourced[:5]}"
+    return None
+
+
 def _judge_once(client, model, rubric: str, user: str, verdict_tool: dict) -> Verdict:
     """One forced-tool judge call → typed Verdict (tolerates empty/partial tool input)."""
     resp = client.messages.create(
@@ -49,6 +67,12 @@ def _judge_once(client, model, rubric: str, user: str, verdict_tool: dict) -> Ve
 
 def api_judge(stage, output: NodeOutput) -> Verdict:
     """Real judge for stages with a rubric_prompt; else dummy. Consensus over N votes."""
+    gate_fail = _gate(stage, output)                # C2: deterministic gate first (no LLM cost)
+    if gate_fail:
+        return Verdict(converged=False, score=0.0,
+                       reasons=[f"gate (deterministic): {gate_fail}"],
+                       missing=["format/completeness"])
+
     rubric = getattr(stage, "rubric_prompt", "") or ""
     if not rubric:                                  # not wired for this stage yet → dummy
         return dummy_judge(stage, output)
