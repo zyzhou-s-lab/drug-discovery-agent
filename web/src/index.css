@@ -21,6 +21,7 @@
     --app-tool-card-bg: #f2f4f6;
     --app-tool-group-bg: var(--app-tool-card-bg);
     --app-tool-card-hover-bg: #e9edf2;
+    --app-tool-card-border: rgba(15, 23, 42, 0.14);
     --app-tool-card-accent: #7b8491;
     --app-tool-card-muted-action-fg: #aeb4bd;
     --app-tool-card-subtitle: #6b7280;
@@ -101,6 +102,7 @@
     --app-tool-card-bg: #2b2f34;
     --app-tool-group-bg: var(--app-tool-card-bg);
     --app-tool-card-hover-bg: #343a41;
+    --app-tool-card-border: rgba(255, 255, 255, 0.16);
     --app-tool-card-accent: #b8c0cb;
     --app-tool-card-muted-action-fg: #7f8792;
     --app-tool-card-subtitle: #b3bac5;

@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
-import { RawOutput } from '@/components/RawOutput'
 import { LoadingState } from '@/components/LoadingState'
 import { StepCards } from '@/components/StepCards'
 import { Sidebar } from '@/components/Sidebar'
@@ -179,10 +178,6 @@ function StageRail(props: {
 function StageDetail(props: { campaign: string; stage: string }) {
     const { detail, loading } = useStageDetail(props.campaign, props.stage)
     const { events } = useStageEvents(props.campaign, props.stage)
-    const rawJson = useMemo(
-        () => (detail?.output ? JSON.stringify(detail.output, null, 2) : ''),
-        [detail]
-    )
     if (loading && !detail) return <LoadingState label={`正在加载 ${stageLabel(props.stage)}…`} />
     if (!detail) return null
 
@@ -243,7 +238,6 @@ function StageDetail(props: { campaign: string; stage: string }) {
                             </ul>
                         </Card>
                     )}
-                    <RawOutput title={`${stageLabel(props.stage)} · 原始 NodeOutput`} code={rawJson} />
                 </>
             ) : events.length === 0 ? (
                 <Card className="p-4 text-sm text-[var(--app-hint)]">

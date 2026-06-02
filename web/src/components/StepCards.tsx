@@ -267,11 +267,24 @@ function ToolGroup(props: { kind: string; items: ToolItem[] }) {
     const anyError = items.some((it) => it.result?.is_error)
     const allDone = items.every((it) => it.result)
     const title = KIND_TITLE[props.kind] ?? snakeToTitle(props.kind)
+    // same grey frame (p-2, no border) as a single tool call; the header is a
+    // white inner card identical in border/radius/inset to a ToolCall so the
+    // collapsed group bar lines up exactly with single-tool cards.
     return (
-        <Card className="overflow-hidden rounded-[20px] bg-[var(--app-tool-group-bg,var(--app-subtle-bg))] shadow-none">
-            <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-2 px-3 py-3 text-left">
+        <div
+            className={
+                'rounded-[20px] bg-[var(--app-tool-group-bg,var(--app-subtle-bg))] p-2 ' +
+                // when expanded, an enclosing border wraps the child tool cards;
+                // collapsed it's just the white header card (aligned with single tools)
+                (open ? 'border border-[var(--app-tool-card-border,var(--app-border))]' : '')
+            }
+        >
+            <button
+                onClick={() => setOpen((v) => !v)}
+                className="flex w-full items-center gap-2 rounded-[16px] border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
+            >
                 <GroupChevron open={open} />
-                <span className="text-[var(--app-tool-card-accent,var(--app-hint))]">
+                <span className="shrink-0 text-[var(--app-tool-card-accent,var(--app-hint))]">
                     <SvgWrench />
                 </span>
                 <span className="truncate text-sm font-medium">{title}</span>
@@ -285,13 +298,13 @@ function ToolGroup(props: { kind: string; items: ToolItem[] }) {
                 </span>
             </button>
             {open && (
-                <div className="flex flex-col gap-2 px-3 pb-3">
+                <div className="flex flex-col gap-2 pt-2">
                     {items.map((it) => (
                         <ToolCall key={it.use.seq} item={it} />
                     ))}
                 </div>
             )}
-        </Card>
+        </div>
     )
 }
 
@@ -328,7 +341,14 @@ function timelineNodes(events: StepEvent[]): ReactNode[] {
                 i += 1
             }
             if (run.length >= 2) nodes.push(<ToolGroup key={`g-${run[0].use.seq}`} kind={k} items={run} />)
-            else nodes.push(<ToolCall key={run[0].use.seq} item={run[0]} />)
+            else
+                // single tool call: wrap in the same grey frame as a group so it
+                // reads as a card (grey frame + white interior), like TaskUpdate
+                nodes.push(
+                    <div key={run[0].use.seq} className="rounded-[20px] bg-[var(--app-tool-group-bg,var(--app-subtle-bg))] p-2">
+                        <ToolCall item={run[0]} />
+                    </div>
+                )
         } else if (it.kind === 'thinking') {
             nodes.push(<Reasoning key={it.ev.seq} ev={it.ev} />)
             i += 1
