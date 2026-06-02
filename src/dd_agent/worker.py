@@ -46,7 +46,8 @@ def _emit_stream(stage_name: str, label: str, msg) -> None:
                         emit(stage_name, label, "tool_result", tool_id=b.tool_use_id,
                              content=b.content, is_error=bool(getattr(b, "is_error", False)))
         elif isinstance(msg, ResultMessage):
-            emit(stage_name, label, "result", is_error=bool(getattr(msg, "is_error", False)),
+            emit(stage_name, label, "result", session_id=getattr(msg, "session_id", None),
+                 is_error=bool(getattr(msg, "is_error", False)),
                  cost=getattr(msg, "total_cost_usd", None), num_turns=getattr(msg, "num_turns", None))
     except Exception:
         pass  # telemetry must never break the run
