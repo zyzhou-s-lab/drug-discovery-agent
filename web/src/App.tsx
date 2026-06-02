@@ -7,7 +7,8 @@ import { LoadingState } from '@/components/LoadingState'
 import { StepCards } from '@/components/StepCards'
 import { Sidebar } from '@/components/Sidebar'
 import { SessionHeader } from '@/components/SessionHeader'
-import { OutlinePanel } from '@/components/OutlinePanel'
+import { ChatPanel } from '@/components/ChatPanel'
+import { SelectionPopup } from '@/components/SelectionPopup'
 import { FilesPage } from '@/components/FilesDialog'
 
 import { ddaApi, pubmedId } from '@/api/dda'
@@ -30,10 +31,24 @@ const STATUS_LABEL: Record<StageStatus, string> = {
 }
 
 const STAGE_LABEL: Record<string, string> = {
+    'disease-overview': '0 · 疾病总览',
     'target-hypothesis': '1 · 靶点假设',
     'literature-evidence': '2 · 文献证据',
     'target-selection': '3 · 靶点选定',
     'target-validation': '4 · 靶点验证',
+}
+
+const STAGE_DESC: Record<string, string> = {
+    'disease-overview':
+        '对目标疾病做规范化(EFO 映射)、子型分类与关键基因家族梳理,为后续靶点提名建立背景。',
+    'target-hypothesis':
+        '多角度(遗传 / 表达 / 网络 / 文献)并行从 OpenTargets 提名候选靶点(scatter-gather),按跨角度证据强度合并去重并排序。',
+    'literature-evidence':
+        '对上游候选用 Europe PMC 检索真实文献(可追溯 PMID),为每个候选补充文献支撑,严禁编造引用。',
+    'target-selection':
+        '对候选做三联评估(可成药性 / 遗传约束 / 安全性)+ 文献,综合打分选出最值得推进的靶点,并给出淘汰理由。',
+    'target-validation':
+        '多角度(遗传 / 扰动 / 表达 / 网络 / 安全)验证选定靶点。属 M4(本地重型计算),目前尚未实现。',
 }
 
 const MODALITY_LABEL: Record<string, string> = {
@@ -173,6 +188,12 @@ function StageDetail(props: { campaign: string; stage: string }) {
 
     return (
         <div className="flex flex-col gap-4">
+            {STAGE_DESC[props.stage] && (
+                <Card className="p-4">
+                    <div className="mb-1 text-sm font-medium">{stageLabel(props.stage)}</div>
+                    <p className="text-sm leading-relaxed text-[var(--app-hint)]">{STAGE_DESC[props.stage]}</p>
+                </Card>
+            )}
             {detail.status === 'in_progress' && (
                 <div className="flex items-center gap-2 text-sm text-[var(--app-hint)]">
                     <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--app-git-unstaged-color,#FF9500)]" />
@@ -249,8 +270,13 @@ export function App() {
 
     const { view, error: vErr } = useCampaignView(campaign)
     const [selected, setSelected] = useState<string | null>(null)
-    const [outlineOpen, setOutlineOpen] = useState(true)
+    const [chatOpen, setChatOpen] = useState(true)
     const [filesOpen, setFilesOpen] = useState<string | null>(null)
+    const [pendingRefs, setPendingRefs] = useState<string[]>([])
+    const addRef = (text: string) => {
+        setPendingRefs((p) => [...p, text])
+        setChatOpen(true)
+    }
     useEffect(() => {
         if (!view) return
         const done = view.stages.filter((s) => s.status === 'done')
@@ -317,11 +343,11 @@ export function App() {
                         }}
                         onMutate={handleMutate}
                         onOpenFiles={() => setFilesOpen(campaign)}
-                        onToggleOutline={() => setOutlineOpen((v) => !v)}
+                        onToggleChat={() => setChatOpen((v) => !v)}
                     />
                 )}
 
-                <div className="mx-auto flex max-w-content flex-col gap-5 p-6">
+                <div id="dd-main" className="mx-auto flex max-w-content flex-col gap-5 p-6">
                     {!campaign && (
                         <Card className="p-6 text-sm text-[var(--app-hint)]">
                             从左侧选择一个运行,或点右上 ＋ 新建一个疾病项目并运行。
@@ -334,18 +360,18 @@ export function App() {
                 </div>
             </main>
 
-            {outlineOpen && selectedRun && view && (
-                <OutlinePanel
-                    stages={view.stages}
-                    selected={selected}
-                    onSelectStage={setSelected}
-                    onScrollToSession={(label) =>
-                        document.getElementById(`dd-session-${label}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-                    }
-                    onClose={() => setOutlineOpen(false)}
+            {chatOpen && campaign && (
+                <ChatPanel
+                    key={campaign}
+                    campaign={campaign}
+                    onClose={() => setChatOpen(false)}
+                    attachments={pendingRefs}
+                    onRemoveAttachment={(i) => setPendingRefs((p) => p.filter((_, j) => j !== i))}
+                    onClearAttachments={() => setPendingRefs([])}
                 />
             )}
 
+            <SelectionPopup onAdd={addRef} />
             <FilesPage campaign={filesOpen} onClose={() => setFilesOpen(null)} />
         </div>
     )

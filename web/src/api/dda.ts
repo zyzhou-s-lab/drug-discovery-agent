@@ -50,6 +50,30 @@ export const ddaApi = {
             `/campaigns/${encodeURIComponent(c)}/files/raw?path=${encodeURIComponent(path)}`
         ),
 
+    // streaming /btw chat: POST + read the text/plain body incrementally
+    chatStream: async (
+        c: string,
+        messages: { role: string; content: string }[],
+        onChunk: (text: string) => void
+    ): Promise<void> => {
+        const res = await fetch(`${BASE}/campaigns/${encodeURIComponent(c)}/chat`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ messages }),
+        })
+        if (!res.body) {
+            onChunk(await res.text())
+            return
+        }
+        const reader = res.body.getReader()
+        const dec = new TextDecoder()
+        for (;;) {
+            const { done, value } = await reader.read()
+            if (done) break
+            if (value) onChunk(dec.decode(value, { stream: true }))
+        }
+    },
+
     // SSE: pushes a fresh CampaignView on every stage_state change; auto-closes on `done`.
     subscribe: (c: string, onView: (v: CampaignView) => void): EventSource => {
         const es = new EventSource(`${BASE}/campaigns/${encodeURIComponent(c)}/events`)
