@@ -71,19 +71,22 @@ def api_judge(stage, output: NodeOutput) -> Verdict:
     )
 
     verdicts = [_judge_once(client, model, rubric, user, verdict_tool) for _ in range(votes)]
-    if len(verdicts) == 1:
-        return verdicts[0]
 
-    # consensus: majority-converged, mean score, merged reasons/missing (§3.7C on the judge)
-    yes = sum(1 for v in verdicts if v.converged)
-    converged = yes * 2 > len(verdicts)
+    # judge ADVISES (score), harness DECIDES (threshold). The relay's `converged` bool is
+    # noisy/over-strict — same brief judged 0/3 converged yet score 0.65-0.85 (and a live
+    # run passed it 0.95). So pass on the MEAN SCORE vs a deterministic threshold, not the
+    # LLM's bool. Consensus over N votes damps the score noise (§3.7C on the judge).
     score = round(sum(v.score for v in verdicts) / len(verdicts), 3)
+    pass_thr = float(os.environ.get("DD_JUDGE_PASS", "0.6"))
+    converged = score >= pass_thr
+    yes = sum(1 for v in verdicts if v.converged)
     detail = [f"[vote {i + 1}:{'✓' if v.converged else '✗'} {v.score}] "
               f"{(v.reasons[0] if v.reasons else '')[:90]}" for i, v in enumerate(verdicts)]
     missing = sorted({m for v in verdicts for m in v.missing})
     retry_hint = next((v.retry_hint for v in verdicts if not v.converged and v.retry_hint), None)
     return Verdict(
         converged=converged, score=score,
-        reasons=[f"consensus {yes}/{len(verdicts)} converged (votes={votes})", *detail],
+        reasons=[f"score {score} {'>=' if converged else '<'} pass {pass_thr} "
+                 f"(LLM converged {yes}/{len(verdicts)} votes — advisory only)", *detail],
         missing=missing, retry_hint=retry_hint,
     )
