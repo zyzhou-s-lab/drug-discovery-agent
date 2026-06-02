@@ -101,6 +101,10 @@ async def _judge_once_claude(rubric: str, user: str, max_turns: int) -> Verdict:
         system_prompt=system,
         mcp_servers={"verdict": _verdict_server(captured)},
         allowed_tools=["mcp__verdict__submit_verdict"],   # judges, doesn't act/verify (§3.4)
+        # ban CC built-ins (allowed_tools doesn't exclude them) — otherwise the judge uses
+        # WebSearch to "verify" PMIDs against PubMed and mis-fails real EuropePMC PMIDs.
+        disallowed_tools=["WebSearch", "WebFetch", "Bash", "Read", "Write", "Edit",
+                          "Glob", "Grep", "Task", "TodoWrite", "NotebookEdit"],
         permission_mode="bypassPermissions",
         max_turns=max_turns,
     )
