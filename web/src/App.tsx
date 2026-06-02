@@ -10,10 +10,17 @@ import { ChatPanel } from '@/components/ChatPanel'
 import { SelectionPopup } from '@/components/SelectionPopup'
 import { FilesPage } from '@/components/FilesDialog'
 
-import { ddaApi, pubmedId } from '@/api/dda'
+import { ddaApi, doiRef } from '@/api/dda'
 import { useTheme } from '@/lib/settings'
 import { useCampaigns, useCampaignView, useStageDetail, useStageEvents } from '@/hooks/useDda'
-import type { CampaignStage, Evidence, StageStatus, TargetCandidate } from '@/types/dda'
+import type {
+    CampaignStage,
+    Evidence,
+    Reference,
+    ReferencesResponse,
+    StageStatus,
+    TargetCandidate,
+} from '@/types/dda'
 
 const STATUS_VARIANT: Record<StageStatus, 'default' | 'success' | 'warning' | 'destructive'> = {
     queued: 'default',
@@ -91,17 +98,17 @@ function ScoreBar(props: { label: string; value: number }) {
 
 function EvidenceChip(props: { ev: Evidence }) {
     const { ev } = props
-    const pmid = pubmedId(ev.ref, ev.source)
+    const doi = doiRef(ev.ref, ev.source)
     const kind = KIND_LABEL[ev.kind] ?? ev.kind
     const body = (
         <span className="inline-flex items-center gap-1 rounded-md border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-2 py-0.5 text-xs">
             <span className="font-medium">{kind}</span>
-            <span className="text-[var(--app-hint)]">· {pmid ? `PMID:${pmid}` : ev.source}</span>
+            <span className="text-[var(--app-hint)]">· {doi ? `doi:${doi}` : ev.source}</span>
         </span>
     )
-    return pmid ? (
+    return doi ? (
         <a
-            href={`https://pubmed.ncbi.nlm.nih.gov/${pmid}/`}
+            href={`https://doi.org/${doi}`}
             target="_blank"
             rel="noreferrer"
             title={ev.detail || ev.source}
@@ -253,6 +260,72 @@ function StageDetail(props: { campaign: string; stage: string }) {
     )
 }
 
+function ApaText(props: { s: string }) {
+    // the venue is the only *italicised* span in an APA7 string — split on '*' pairs
+    return (
+        <>
+            {props.s.split('*').map((p, i) => (i % 2 === 1 ? <em key={i}>{p}</em> : <span key={i}>{p}</span>))}
+        </>
+    )
+}
+
+function ReferenceItem(props: { r: Reference }) {
+    const { r } = props
+    const url = `https://doi.org/${r.doi}`
+    const cut = r.apa7.lastIndexOf(url)
+    const head = cut >= 0 ? r.apa7.slice(0, cut) : r.apa7
+    return (
+        <li className="flex gap-2 text-sm leading-relaxed">
+            <span className="shrink-0 text-[var(--app-hint)]">{r.n}.</span>
+            <span>
+                <ApaText s={head} />
+                {cut >= 0 && (
+                    <a
+                        href={url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[var(--app-link,#2563eb)] hover:underline"
+                    >
+                        {url}
+                    </a>
+                )}
+            </span>
+        </li>
+    )
+}
+
+function Bibliography(props: { campaign: string }) {
+    const [data, setData] = useState<ReferencesResponse | null>(null)
+    useEffect(() => {
+        let alive = true
+        setData(null)
+        ddaApi
+            .references(props.campaign)
+            .then((d) => alive && setData(d))
+            .catch(() => alive && setData(null))
+        return () => {
+            alive = false
+        }
+    }, [props.campaign])
+
+    if (!data || data.count === 0) return null
+    return (
+        <Card className="p-4">
+            <div className="mb-2 text-sm font-medium">参考文献 (APA7) · {data.count} 篇</div>
+            <ol className="space-y-2">
+                {data.references.map((r) => (
+                    <ReferenceItem key={r.doi} r={r} />
+                ))}
+            </ol>
+            {data.unresolved.length > 0 && (
+                <p className="mt-2 text-xs text-[var(--app-hint)]">
+                    {data.unresolved.length} 个 DOI 未能解析:{data.unresolved.join(', ')}
+                </p>
+            )}
+        </Card>
+    )
+}
+
 export function App() {
     useTheme() // apply persisted theme on load
 
@@ -351,6 +424,8 @@ export function App() {
                     {view && <StageRail stages={view.stages} selected={selected} onSelect={setSelected} />}
 
                     {campaign && selected && <StageDetail campaign={campaign} stage={selected} />}
+
+                    {campaign && <Bibliography campaign={campaign} />}
                 </div>
             </main>
 

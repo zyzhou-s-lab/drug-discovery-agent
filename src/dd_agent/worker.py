@@ -5,7 +5,7 @@ Protocol: async worker_fn(stage, NodeInput, angle: str | None) -> NodeOutput.
 - sdk_worker:   M1/M2/M3 — Claude Agent SDK session(s) that CALL in-process MCP
                 tools and return a typed NodeOutput. Dispatches per stage:
                   target-hypothesis   -> _hypothesis_worker (angle-aware, OpenTargets)
-                  literature-evidence -> _literature_worker (Europe PMC, real PMIDs)
+                  literature-evidence -> _literature_worker (OpenAlex + S2, real DOIs)
                   target-selection    -> _selection_worker  (OT target_profile triage)
                   (others)            -> dummy until M4.
                 The node's LLM decides whether/how to call tools; the harness only
@@ -18,8 +18,8 @@ from pathlib import Path
 
 from .events import emit
 from .schemas import Evidence, NodeInput, NodeOutput, TargetCandidate
-from .tools.europepmc import search_literature
 from .tools.opentargets import disease_associated_targets, search_disease, target_profile
+from .tools.paperfetch import get_citations, get_references, search_literature_multi
 
 
 def _emit_stream(stage_name: str, label: str, msg) -> None:
@@ -119,19 +119,58 @@ def _ot_server():
     return create_sdk_mcp_server("opentargets", "1.0.0", [_search, _assoc])
 
 
-def _europepmc_server():
-    """In-process SDK MCP server: Europe PMC search (stage-2)."""
+# Stateless → build once, reuse across every session (cf. _result_server, which holds
+# per-session state and must be rebuilt each call). Tool names listed once here so the
+# stage allow-lists don't re-type the mcp__paperfetch__* strings.
+PAPERFETCH_TOOLS = [
+    "mcp__paperfetch__search_literature_multi",
+    "mcp__paperfetch__get_references",
+    "mcp__paperfetch__get_citations",
+]
+
+
+def _build_paperfetch_server():
+    """In-process SDK MCP server: multi-source literature search + citation snowball."""
     from claude_agent_sdk import create_sdk_mcp_server, tool
 
-    @tool("search_literature",
-          "Search Europe PMC for REAL papers. Returns JSON [{pmid,doi,title,year,journal}]. "
-          "Use the returned pmid as the evidence ref; never invent one.",
+    @tool("search_literature_multi",
+          "Multi-source literature search (OpenAlex + Semantic Scholar, deduped, OA-tagged). "
+          "Returns JSON [{doi,pmid,title,year,venue,authors,citation_count,is_oa,source}]. "
+          "Use the returned doi as the evidence ref; never invent one.",
           {"query": str, "size": int})
     async def _search(args):
-        res = search_literature(args["query"], int(args.get("size") or 5))
+        res = search_literature_multi(args["query"], int(args.get("size") or 10))
         return {"content": [{"type": "text", "text": json.dumps(res)}]}
 
-    return create_sdk_mcp_server("europepmc", "1.0.0", [_search])
+    @tool("get_references",
+          "Papers cited BY a given DOI (backward citation snowball). "
+          "Returns JSON [{doi,pmid,title,year,venue,authors,citation_count,is_oa,source}].",
+          {"doi": str, "size": int})
+    async def _refs(args):
+        res = get_references(args["doi"], int(args.get("size") or 20))
+        return {"content": [{"type": "text", "text": json.dumps(res)}]}
+
+    @tool("get_citations",
+          "Papers that CITE a given DOI (forward citation snowball). "
+          "Returns JSON [{doi,pmid,title,year,venue,authors,citation_count,is_oa,source}].",
+          {"doi": str, "size": int})
+    async def _cites(args):
+        res = get_citations(args["doi"], int(args.get("size") or 20))
+        return {"content": [{"type": "text", "text": json.dumps(res)}]}
+
+    return create_sdk_mcp_server("paperfetch", "1.0.0", [_search, _refs, _cites])
+
+
+_PAPERFETCH_SERVER = None
+
+
+def _paperfetch_server():
+    """Lazy cached singleton — built on first use (keeps module import SDK-free, like the
+    other _*_server factories), then reused across all sessions since it's stateless."""
+    global _PAPERFETCH_SERVER
+    if _PAPERFETCH_SERVER is None:
+        _PAPERFETCH_SERVER = _build_paperfetch_server()
+    return _PAPERFETCH_SERVER
 
 
 def _profile_server():
@@ -252,7 +291,7 @@ async def _hypothesis_worker(stage, node_input: NodeInput, angle: str | None) ->
 
 
 # ----------------------------------------------------------------------------
-# M3a: stage-2 literature-evidence (Europe PMC, real PMIDs)
+# M3a: stage-2 literature-evidence (OpenAlex + Semantic Scholar, real DOIs)
 # ----------------------------------------------------------------------------
 async def _literature_worker(stage, node_input: NodeInput) -> NodeOutput:
     captured: dict = {}
@@ -263,22 +302,25 @@ async def _literature_worker(stage, node_input: NodeInput) -> NodeOutput:
     system = (
         role
         + "\n\n## 本次运行\n"
-        "对上游提名的候选靶点做文献综述：用 `mcp__europepmc__search_literature` 查**真实**文献，"
-        "每个候选至少 1 条 literature evidence——evidence 的 ref 必须填工具返回的**真实 PMID**、"
-        "kind='literature'、source 形如 'EuropePMC' 或 'PubMed:<pmid>'、detail 写论文标题/结论要点。"
-        "**禁止编造 PMID 或引用**；查不到就如实标注证据不足。保留上游候选集，给它们补文献证据。"
+        "对上游提名的候选靶点做文献综述：用 `mcp__paperfetch__search_literature_multi` 查**真实**文献"
+        "（OpenAlex + Semantic Scholar 多源，已去重、标 OA）；需要顺藤摸瓜时用 "
+        "`mcp__paperfetch__get_references`（该文引了谁）/ `mcp__paperfetch__get_citations`（谁引了该文）。"
+        "每个候选至少 1 条 literature evidence——evidence 的 ref 必须填工具返回的**真实 DOI**、"
+        "kind='literature'、source 形如 'doi:<doi>'、detail 写论文标题/结论要点。"
+        "**禁止编造 DOI 或引用**；查不到就如实标注证据不足。保留上游候选集，给它们补文献证据。"
         "完成后**必须**调用 `mcp__result__submit_result`。"
     )
     prompt = (
         f"疾病：{node_input.disease}\n"
         f"候选靶点（来自上游 target-hypothesis）：{prior_txt}\n"
-        f"建议流程：对每个候选 `search_literature(query='<symbol> AND {node_input.disease}')` "
-        f"→ 挑相关真实文献记 PMID → 汇总进各候选的 evidence → submit_result。"
+        f"建议流程：对每个候选 `search_literature_multi(query='<symbol> AND {node_input.disease}')` "
+        f"→ 挑相关真实文献记 DOI（必要时用 get_references/get_citations 扩展）"
+        f"→ 汇总进各候选的 evidence → submit_result。"
     )
     return await _run_session(
         stage, system, prompt,
-        {"europepmc": _europepmc_server(), "result": _result_server(captured, stage.name)},
-        ["mcp__europepmc__search_literature", "mcp__result__submit_result"],
+        {"paperfetch": _paperfetch_server(), "result": _result_server(captured, stage.name)},
+        [*PAPERFETCH_TOOLS, "mcp__result__submit_result"],
         captured, "literature", node_input)
 
 
@@ -435,9 +477,9 @@ async def _overview_worker(stage, node_input: NodeInput) -> NodeOutput:
     prompt = f"疾病：{node_input.disease}。产出 disease brief。"
     return await _run_session(
         stage, system, prompt,
-        {"opentargets": _ot_server(), "europepmc": _europepmc_server(),
+        {"opentargets": _ot_server(), "paperfetch": _paperfetch_server(),
          "result": _result_server(captured, stage.name)},
-        ["mcp__opentargets__search_disease", "mcp__europepmc__search_literature",
+        ["mcp__opentargets__search_disease", *PAPERFETCH_TOOLS,
          "mcp__result__submit_result"],
         captured, "overview", node_input)
 

@@ -5,9 +5,9 @@ export type StageStatus = 'queued' | 'in_progress' | 'done' | 'exhausted'
 
 export interface Evidence {
     kind: string // genetic | expression | network | literature | ...
-    source: string // OpenTargets | PubMed:<pmid> | ...
+    source: string // OpenTargets | OpenAlex | Semantic Scholar | ...
     detail: string
-    ref: string // e.g. "PMID:15761122"
+    ref: string // literature -> DOI ("10.1038/s41586-021-03819-2"); else index id/link
 }
 
 export interface TargetCandidate {
@@ -80,6 +80,20 @@ export interface StageDetail {
     attempts: number
     output: NodeOutput | null
     verdict: Verdict | null
+}
+
+// Campaign-level APA7 bibliography (api.py /campaigns/{c}/references)
+export interface Reference {
+    n: number // 1-based citation number
+    doi: string
+    apa7: string // APA7 reference string; venue is *italicised* (markdown)
+}
+
+export interface ReferencesResponse {
+    campaign: string
+    count: number
+    references: Reference[]
+    unresolved: string[] // DOIs OpenAlex could not resolve
 }
 
 // One captured Agent SDK step (events.py / worker._emit_stream)

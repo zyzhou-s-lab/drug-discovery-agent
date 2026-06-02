@@ -24,9 +24,9 @@ class NodeInput(BaseModel):
 
 class Evidence(BaseModel):
     kind: str            # genetic | expression | pathway | literature | animal_model
-    source: str          # OpenTargets | PubMed:<pmid> | GTEx | ...
+    source: str          # OpenTargets | OpenAlex | Semantic Scholar | GTEx | ...
     detail: str = ""
-    ref: str = ""        # index id or external traceable link
+    ref: str = ""        # traceable id: literature -> DOI (10.xxxx/...); else index id/link
 
 
 class TargetCandidate(BaseModel):
