@@ -105,7 +105,7 @@ class Runner:
     async def _planner_validate(self, stage, node_input) -> NodeOutput:
         # planner picks angles per target (dynamic, mode a) -> fan out one worker per
         # (target, angle) -> deterministic gather per target. ARCHITECTURE §3.7 A/E.
-        plan = self.planner_fn(stage, node_input) if self.planner_fn else self._default_plan(node_input)
+        plan = (await self.planner_fn(stage, node_input)) if self.planner_fn else self._default_plan(node_input)
         pairs = [(p.target, a) for p in plan.plans for a in p.angles]
         if not pairs:
             return NodeOutput(stage=stage.name,
