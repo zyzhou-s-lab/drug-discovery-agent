@@ -178,7 +178,7 @@ async def _run_session(stage, system: str, prompt: str, mcp_servers: dict, allow
     from claude_agent_sdk import ClaudeAgentOptions, query
 
     if node_input is not None:
-        system = system + _brief_block(node_input)   # inject stage-0 disease brief (focus context)
+        system = system + _brief_block(node_input) + _retry_block(node_input)   # focus brief + retry feedback
 
     opts = ClaudeAgentOptions(
         cwd=str(STAGE_DIR / stage.name),
@@ -201,6 +201,13 @@ def _brief_block(node_input: NodeInput) -> str:
     """stage-0 disease brief, injected into downstream worker prompts for focus."""
     b = (getattr(node_input, "disease_brief", "") or "").strip()
     return f"\n\n## 疾病背景（来自 stage-0 disease-overview，供聚焦）\n{b}\n" if b else ""
+
+
+def _retry_block(node_input: NodeInput) -> str:
+    """judge feedback from the last failed attempt — injected so the retry improves targetedly."""
+    fb = (getattr(node_input, "retry_feedback", "") or "").strip()
+    return (f"\n\n## ⚠️ 这是重试（上次未通过 judge）\n{fb}\n"
+            "请针对性改进上述问题，不要原样重复上次的产出。\n") if fb else ""
 
 
 def _prior_brief(prior: list[dict]) -> str:
@@ -373,7 +380,7 @@ async def _overview_worker(stage, node_input: NodeInput) -> NodeOutput:
          "result": _result_server(captured, stage.name)},
         ["mcp__opentargets__search_disease", "mcp__europepmc__search_literature",
          "mcp__result__submit_result"],
-        captured, "overview")
+        captured, "overview", node_input)
 
 
 # ----------------------------------------------------------------------------

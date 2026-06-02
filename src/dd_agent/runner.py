@@ -128,9 +128,19 @@ class Runner:
             if self.index.is_done(campaign, stage.name):     # durable resume: skip completed
                 continue
             converged = False
+            last_verdict = None
             for _ in range(stage.max_attempts):
                 self.index.record_attempt(campaign, stage.name)
                 node_input = self._build_input(campaign, disease, stage)
+                if last_verdict is not None:                  # retry: feed judge's missing/retry_hint back
+                    fb = []
+                    if last_verdict.missing:
+                        fb.append("缺少：" + "；".join(last_verdict.missing))
+                    if last_verdict.retry_hint:
+                        fb.append("改进建议：" + last_verdict.retry_hint)
+                    elif last_verdict.reasons:
+                        fb.append("上次判定：" + last_verdict.reasons[0])
+                    node_input.retry_feedback = "；".join(fb)
                 if getattr(stage, "planner", False):
                     out = await self._planner_validate(stage, node_input)
                 elif stage.scatter:
@@ -144,6 +154,7 @@ class Runner:
                     self.index.mark_done(campaign, stage.name, out.model_dump(), verdict.model_dump())
                     converged = True
                     break
+                last_verdict = verdict                        # carry feedback into next attempt
             if not converged:
                 self.index.mark_exhausted(campaign, stage.name)
                 break

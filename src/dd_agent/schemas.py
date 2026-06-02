@@ -19,6 +19,7 @@ class NodeInput(BaseModel):
     constraints: dict[str, Any] = Field(default_factory=dict)
     prior_candidates: list[dict[str, Any]] = Field(default_factory=list)  # upstream stage candidates (chain)
     disease_brief: str = ""                                  # stage-0 overview brief (focus context)
+    retry_feedback: str = ""                                 # judge's missing/retry_hint, fed into a retry
 
 
 class Evidence(BaseModel):
