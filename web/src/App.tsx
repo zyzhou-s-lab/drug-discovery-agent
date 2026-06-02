@@ -33,7 +33,7 @@ const STATUS_LABEL: Record<StageStatus, string> = {
     queued: '排队中',
     in_progress: '进行中',
     done: '完成',
-    exhausted: '已耗尽',
+    exhausted: '未通过',
 }
 
 const STAGE_LABEL: Record<string, string> = {
