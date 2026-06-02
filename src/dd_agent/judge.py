@@ -51,15 +51,15 @@ def _summarize_output(output: NodeOutput) -> str:
     """Compact summary for the judge — full model_dump_json of many candidates can be
     huge and makes claude -p judge lose track / skip submit_verdict. Evidence is reduced
     to kind:source:ref (no full detail), rationale truncated."""
-    lines = [f"summary: {(output.summary or '')[:600]}"]
+    lines = [f"summary: {(output.summary or '')[:350]}"]
     if output.candidates:
         lines.append(f"candidates ({len(output.candidates)}):")
-        for c in output.candidates[:20]:
-            ev = [f"{e.kind}:{e.source or ''}:{e.ref or ''}" for e in c.evidence[:4]]
+        for c in output.candidates[:15]:
+            ev = [f"{e.kind}:{e.source or ''}:{e.ref or ''}" for e in c.evidence[:2]]
             lines.append(f"  - {c.symbol} ({c.modality or ''}) scores={c.scores} "
-                         f"evidence={ev} rationale={(c.rationale or '')[:120]}")
-        if len(output.candidates) > 20:
-            lines.append(f"  ... (+{len(output.candidates) - 20} more)")
+                         f"ev={ev} rat={(c.rationale or '')[:50]}")
+        if len(output.candidates) > 15:
+            lines.append(f"  ... (+{len(output.candidates) - 15} more)")
     if output.open_questions:
         lines.append(f"open_questions: {output.open_questions[:3]}")
     return "\n".join(lines)
@@ -133,7 +133,7 @@ async def api_judge(stage, output: NodeOutput) -> Verdict:
         "评估其语义质量，然后**务必调用 `mcp__verdict__submit_verdict`** 提交 verdict（不要只用文字回答）。"
     )
     votes = max(1, int(os.environ.get("DD_JUDGE_VOTES", "1")))   # claude -p ~$0.15/call → default 1
-    max_turns = int(os.environ.get("DD_JUDGE_MAX_TURNS", "8"))
+    max_turns = int(os.environ.get("DD_JUDGE_MAX_TURNS", "25"))   # claude -p judge can burn turns thinking
 
     verdicts = [await _judge_once_claude(rubric, user, max_turns) for _ in range(votes)]
 
