@@ -356,19 +356,17 @@ async def _validation_worker(stage, node_input: NodeInput, angle: str | None) ->
 async def _overview_worker(stage, node_input: NodeInput) -> NodeOutput:
     captured: dict = {}
     role = _load_role(stage.name)
+    # 最精简（ARCHITECTURE §3.7 D）：不列工具、不规定流程。工具的"是什么/怎么调/何时收尾"
+    # 全在各自 tool description 里（随 schema 给 LLM）；这里只给目标 + 约束，编排交给模型、
+    # 达标与否交给 judge rubric。
     system = (
         role
         + "\n\n## 本次运行\n"
-        "对该疾病做总体调研:用 `mcp__opentargets__search_disease` 拿规范名/EFO,用 "
-        "`mcp__europepmc__search_literature` 查疾病的子型、相关组织/细胞、已知核心机制、"
-        "关键通路与基因家族。综合成一份**简明 disease brief**(给下游靶点提名/验证提供聚焦背景)。"
-        "完成后**必须** `mcp__result__submit_result`:summary 写 brief,candidates **留空**(本阶段不提名靶点)。"
+        "产出一份覆盖【子型 / 相关组织·细胞 / 已知核心机制 / 关键通路·基因家族】的 disease brief，"
+        "作为下游靶点提名/验证的聚焦背景。每条信息都要可追溯（基于查到的真实数据，别凭记忆），"
+        "本阶段不提名靶点。"
     )
-    prompt = (
-        f"疾病:{node_input.disease}\n"
-        "建议流程:search_disease 找 EFO/规范名 → search_literature 查子型/组织/机制/通路 → "
-        "综合 disease brief → submit_result(summary=brief, candidates=[])。"
-    )
+    prompt = f"疾病：{node_input.disease}。产出 disease brief。"
     return await _run_session(
         stage, system, prompt,
         {"opentargets": _ot_server(), "europepmc": _europepmc_server(),
