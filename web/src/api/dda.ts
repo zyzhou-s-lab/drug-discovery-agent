@@ -4,6 +4,7 @@ import type {
     CampaignSummary,
     CampaignView,
     DdaConfig,
+    IntakeResult,
     PipelineStage,
     ReferencesResponse,
     StageDetail,
@@ -28,7 +29,19 @@ export const ddaApi = {
     references: (c: string) =>
         getJson<ReferencesResponse>(`/campaigns/${encodeURIComponent(c)}/references`),
 
-    startRun: (body: { disease: string; campaign: string; real?: boolean }) =>
+    // Pre-flight disease validation (intake gate) — called on dialog submit so junk /
+    // non-disease input is rejected BEFORE a run is created.
+    intakeCheck: (disease: string): Promise<IntakeResult> =>
+        fetch(`${BASE}/intake/check`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ disease }),
+        }).then((r) => {
+            if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
+            return r.json() as Promise<IntakeResult>
+        }),
+
+    startRun: (body: { disease: string; campaign: string; real?: boolean; skip_intake?: boolean }) =>
         fetch(`${BASE}/campaigns`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },

@@ -96,6 +96,14 @@ export interface ReferencesResponse {
     unresolved: string[] // DOIs OpenAlex could not resolve
 }
 
+// Disease intake pre-check (api.py POST /intake/check -> intake.validate_disease)
+export interface IntakeResult {
+    accepted: boolean
+    normalized_en: string // English, OpenTargets-aligned disease name
+    efo_id: string // resolved EFO id (evidence it's a real disease), or ''
+    reason: string // rejection reason when accepted=false
+}
+
 // One captured Agent SDK step (events.py / worker._emit_stream)
 export type StepEventType = 'session_start' | 'thinking' | 'text' | 'tool_use' | 'tool_result' | 'result'
 

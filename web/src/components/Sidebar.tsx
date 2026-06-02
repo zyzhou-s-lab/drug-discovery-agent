@@ -4,7 +4,6 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Settings } from '@/components/Settings'
 import { RenameDialog } from '@/components/RenameDialog'
-import { useDefaultReal } from '@/lib/settings'
 import { runDisplayName } from '@/lib/runLabel'
 import { useResizable } from '@/hooks/useResizable'
 import { ddaApi } from '@/api/dda'
@@ -64,25 +63,40 @@ function NewRunDialog(props: {
     open: boolean
     onOpenChange: (v: boolean) => void
     initialDisease: string
-    onStart: (disease: string, real: boolean) => void
+    onStart: (disease: string) => void
 }) {
-    const [defaultReal] = useDefaultReal()
     const [disease, setDisease] = useState(props.initialDisease)
-    const [real, setReal] = useState(defaultReal)
     const [seen, setSeen] = useState(props.initialDisease)
+    const [checking, setChecking] = useState(false)
+    const [error, setError] = useState<string | null>(null)
     if (props.open && seen !== props.initialDisease) {
         setSeen(props.initialDisease)
         setDisease(props.initialDisease)
-        setReal(defaultReal)
+        setError(null)
     }
-    const submit = () => {
+    // Validate the disease at submit time (intake gate): reject junk/non-disease input
+    // here, BEFORE creating a run — instead of letting it enter the pipeline and exhaust.
+    const submit = async () => {
         const d = disease.trim()
-        if (!d) return
-        props.onStart(d, real)
-        props.onOpenChange(false)
+        if (!d || checking) return
+        setChecking(true)
+        setError(null)
+        try {
+            const res = await ddaApi.intakeCheck(d)
+            if (!res.accepted) {
+                setError(res.reason || '该输入不是可识别的疾病/适应症,请换一个真实疾病名。')
+                return
+            }
+            props.onStart(d)
+            props.onOpenChange(false)
+        } catch {
+            setError('疾病名校验失败,请稍后重试。')
+        } finally {
+            setChecking(false)
+        }
     }
     return (
-        <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+        <Dialog open={props.open} onOpenChange={(v) => !checking && props.onOpenChange(v)}>
             <DialogContent className="max-w-md">
                 <DialogHeader>
                     <DialogTitle>新建项目 / 运行</DialogTitle>
@@ -93,19 +107,23 @@ function NewRunDialog(props: {
                         <input
                             autoFocus
                             value={disease}
-                            onChange={(e) => setDisease(e.target.value)}
+                            onChange={(e) => {
+                                setDisease(e.target.value)
+                                if (error) setError(null)
+                            }}
                             onKeyDown={(e) => e.key === 'Enter' && submit()}
                             placeholder="例如 dry AMD"
-                            className="rounded-md border border-[var(--app-border)] bg-transparent px-2 py-1.5 text-sm outline-none focus:border-[var(--app-button)]"
+                            disabled={checking}
+                            className="rounded-md border border-[var(--app-border)] bg-transparent px-2 py-1.5 text-sm outline-none focus:border-[var(--app-button)] disabled:opacity-60"
                         />
                     </label>
-                    <label className="flex items-center gap-1.5 text-sm text-[var(--app-hint)]">
-                        <input type="checkbox" checked={real} onChange={(e) => setReal(e.target.checked)} />
-                        实时(调用 LLM + OpenTargets/EuropePMC,数分钟、有费用)
-                    </label>
-                    <div className="flex justify-end gap-2">
-                        <Button variant="outline" size="sm" onClick={() => props.onOpenChange(false)}>取消</Button>
-                        <Button size="sm" onClick={submit}>创建并运行</Button>
+                    {error && (
+                        <p className="text-sm text-[var(--app-badge-error-text,#dc2626)]">{error}</p>
+                    )}
+                    <div className="flex items-center justify-end gap-2">
+                        {checking && <span className="text-xs text-[var(--app-hint)]">正在校验疾病名…</span>}
+                        <Button variant="outline" size="sm" onClick={() => props.onOpenChange(false)} disabled={checking}>取消</Button>
+                        <Button size="sm" onClick={submit} disabled={checking}>{checking ? '校验中…' : '创建并运行'}</Button>
                     </div>
                 </div>
             </DialogContent>
@@ -120,7 +138,7 @@ export function Sidebar(props: {
     apiDown: boolean
     selected: string | null
     onSelect: (campaign: string) => void
-    onStartRun: (disease: string, real: boolean) => void
+    onStartRun: (disease: string) => void
     onMutate: (deleted?: string) => void
 }) {
     const { width, onPointerDown: onResize } = useResizable({ key: 'dd-left-w', def: 320, min: 240, max: 520, side: 'left' })

@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { useDefaultReal, useTheme, type Theme } from '@/lib/settings'
+import { useTheme, type Theme } from '@/lib/settings'
 import { useTranslation } from '@/lib/use-translation'
 import { ddaApi } from '@/api/dda'
 import type { DdaConfig } from '@/types/dda'
@@ -48,7 +48,6 @@ function Row(props: { label: string; hint?: string; children: ReactNode }) {
 
 export function Settings(props: { open: boolean; onOpenChange: (v: boolean) => void }) {
     const [theme, setTheme] = useTheme()
-    const [defaultReal, setDefaultReal] = useDefaultReal()
     const { locale, setLocale } = useTranslation()
     const [config, setConfig] = useState<DdaConfig | null>(null)
 
@@ -81,16 +80,6 @@ export function Settings(props: { open: boolean; onOpenChange: (v: boolean) => v
                             options={[
                                 { value: 'zh-CN', label: '中文' },
                                 { value: 'en', label: 'English' },
-                            ]}
-                        />
-                    </Row>
-                    <Row label="默认运行模式" hint="新建运行时是否默认调用 LLM(实时)">
-                        <Segment<boolean>
-                            value={defaultReal}
-                            onChange={setDefaultReal}
-                            options={[
-                                { value: true, label: '实时' },
-                                { value: false, label: 'dummy' },
                             ]}
                         />
                     </Row>

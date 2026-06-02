@@ -173,7 +173,7 @@ function StageRail(props: {
                         <span className="text-sm font-medium">{stageLabel(s.name)}</span>
                         <span className="flex items-center gap-1.5">
                             <Badge variant={STATUS_VARIANT[s.status]}>{STATUS_LABEL[s.status]}</Badge>
-                            {s.scatter && <span className="text-[10px] text-[var(--app-hint)]">扇出 ×{s.angles.length}</span>}
+                            {s.scatter && <span className="text-[10px] text-[var(--app-hint)]">并行 ×{s.angles.length}</span>}
                         </span>
                     </button>
                 )
@@ -206,7 +206,7 @@ function StageDetail(props: { campaign: string; stage: string }) {
                 <Card className="p-4">
                     <div className="mb-2 flex items-center gap-2">
                         <Badge variant={detail.verdict.converged ? 'success' : 'destructive'}>
-                            {detail.verdict.converged ? '已收敛' : '未收敛'}
+                            {detail.verdict.converged ? '已通过' : '未通过'}
                         </Badge>
                         <span className="text-sm text-[var(--app-hint)]">
                             评审分 {detail.verdict.score.toFixed(2)} · {detail.attempts} 次尝试
@@ -251,7 +251,7 @@ function StageDetail(props: { campaign: string; stage: string }) {
                     {detail.status === 'in_progress'
                         ? '正在运行中,执行步骤会实时出现…'
                         : detail.status === 'exhausted'
-                          ? '多次尝试后未收敛(查看 uvicorn 日志排查)。'
+                          ? '多次尝试后仍未通过评审(查看 uvicorn 日志排查)。'
                           : '暂无产出。靶点验证为 M4,尚未实现。'}
                     (状态:{STATUS_LABEL[detail.status]})
                 </Card>
@@ -373,11 +373,13 @@ export function App() {
         refetch()
     }
 
-    const startRun = (disease: string, real: boolean) => {
+    // real is always true now (the "实时" toggle was removed); the disease has already
+    // passed the intake pre-check in the dialog, so skip_intake avoids a redundant gate.
+    const startRun = (disease: string) => {
         const slug = disease.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'run'
         const id = `${slug}-${Date.now().toString(36)}`
         ddaApi
-            .startRun({ disease, campaign: id, real })
+            .startRun({ disease, campaign: id, real: true, skip_intake: true })
             .then(() => {
                 setSelected(null)
                 setCampaign(id)

@@ -114,7 +114,7 @@ export function ChatPanel(props: {
                     <div className="text-xs leading-relaxed text-[var(--app-hint)]">
                         针对当前运行提问,例如:
                         <div className="mt-1 space-y-0.5">
-                            <div>· 为什么这个阶段没收敛?</div>
+                            <div>· 为什么这个阶段没通过?</div>
                             <div>· 哪个候选靶点更值得推进?为什么?</div>
                         </div>
                         <div className="mt-2">选中页面上的文字 → 点「加入对话」可作为引用。</div>

@@ -11,14 +11,20 @@ export const DialogContent = React.forwardRef<
 >(({ className, ...props }, ref) => (
     <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50" />
-        <DialogPrimitive.Content
-            ref={ref}
-            className={cn(
-                'fixed left-1/2 top-1/2 z-50 w-[calc(100vw-24px)] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-xl bg-[var(--app-dialog-bg)] p-4 shadow-2xl',
-                className
-            )}
-            {...props}
-        />
+        {/* grid-centering wrapper: robust against ancestor transforms/filters that would
+            capture a `fixed`+translate-centered panel and push it off-center. The wrapper
+            is pointer-events-none so backdrop clicks still reach the Overlay (Radix dismiss);
+            the panel itself re-enables pointer events. */}
+        <div className="pointer-events-none fixed inset-0 z-50 grid place-items-center overflow-y-auto p-3">
+            <DialogPrimitive.Content
+                ref={ref}
+                className={cn(
+                    'pointer-events-auto relative w-full max-w-lg rounded-xl bg-[var(--app-dialog-bg)] p-4 shadow-2xl',
+                    className
+                )}
+                {...props}
+            />
+        </div>
     </DialogPrimitive.Portal>
 ))
 DialogContent.displayName = 'DialogContent'

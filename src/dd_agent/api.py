@@ -359,9 +359,14 @@ class RunRequest(BaseModel):
     disease: str
     campaign: str = "demo"
     real: bool = False
+    skip_intake: bool = False   # set by the web dialog after a successful POST /intake/check
 
 
-def _run_pipeline(campaign: str, disease: str, real: bool) -> None:
+class IntakeRequest(BaseModel):
+    disease: str
+
+
+def _run_pipeline(campaign: str, disease: str, real: bool, skip_intake: bool = False) -> None:
     """Run the whole pipeline in a dedicated thread with its OWN event loop and its
     OWN Index connection (WAL-safe alongside the API's read connection). This keeps
     the server's event loop free — a real run's synchronous LLM judge call would
@@ -383,11 +388,16 @@ def _run_pipeline(campaign: str, disease: str, real: bool) -> None:
     # disease input and plans stage-4 identically (real only). Runner.run is the single
     # pipeline start → both entrypoints pass through the same gate (was missing here:
     # web-UI runs bypassed the cli-only gate, e.g. "帮我写首诗" entered the pipeline).
+    # skip_intake: the web dialog already ran the intake gate (POST /intake/check) before
+    # creating this run, so re-gating here would just repeat the same LLM call. Direct API
+    # callers (no pre-check) still get gated. planner is unaffected.
     intake_fn = planner_fn = None
     if real:
-        from .intake import validate_disease
         from .planner import plan_validation
-        intake_fn, planner_fn = validate_disease, plan_validation
+        planner_fn = plan_validation
+        if not skip_intake:
+            from .intake import validate_disease
+            intake_fn = validate_disease
     try:
         runner = Runner(run_idx, worker_fn, judge_fn, DISCOVERY_PIPELINE,
                         planner_fn=planner_fn, intake_fn=intake_fn)
@@ -406,6 +416,26 @@ async def start_run(req: RunRequest) -> dict:
     Progress is observed via GET /campaigns/{c} or the SSE /events stream."""
     get_index().record_campaign(req.campaign, req.disease)  # so it groups by disease immediately
     threading.Thread(
-        target=_run_pipeline, args=(req.campaign, req.disease, req.real), daemon=True
+        target=_run_pipeline,
+        args=(req.campaign, req.disease, req.real, req.skip_intake),
+        daemon=True,
     ).start()
     return {"campaign": req.campaign, "disease": req.disease, "real": req.real, "started": True}
+
+
+@app.post("/api/intake/check")
+def intake_check(req: IntakeRequest) -> dict:
+    """Pre-flight disease validation for the web dialog: run the intake gate
+    (deterministic check + claude -p translate/EFO lookup) and return the typed
+    decision, so junk / non-disease input is rejected BEFORE a run is created.
+    Sync def → Starlette threadpool; asyncio.run gives the SDK session its own
+    loop (same pattern as _run_pipeline)."""
+    from .intake import validate_disease
+
+    intake = asyncio.run(validate_disease(req.disease))
+    return {
+        "accepted": intake.accepted,
+        "normalized_en": intake.normalized_en,
+        "efo_id": intake.efo_id,
+        "reason": intake.reason,
+    }
