@@ -123,7 +123,7 @@ function EvidenceChip(props: { ev: Evidence }) {
 
 function CandidateCard(props: { c: TargetCandidate }) {
     const { c } = props
-    const scoreKeys = Object.keys(c.scores)
+    const scoreKeys = Object.keys(c.scores ?? {})
     return (
         <Card className="p-4">
             <div className="mb-1 flex items-center gap-2">
@@ -138,7 +138,7 @@ function CandidateCard(props: { c: TargetCandidate }) {
                     ))}
                 </div>
             )}
-            {c.evidence.length > 0 && (
+            {c.evidence && c.evidence.length > 0 && (
                 <div className="mb-2 flex flex-wrap gap-1">
                     {c.evidence.map((ev, i) => (
                         <EvidenceChip key={i} ev={ev} />
@@ -231,11 +231,11 @@ function StageDetail(props: { campaign: string; stage: string }) {
                 <>
                     <p className="text-sm text-[var(--app-hint)]">{detail.output.summary}</p>
                     <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-                        {detail.output.candidates.map((c) => (
+                        {(detail.output.candidates ?? []).map((c) => (
                             <CandidateCard key={c.symbol} c={c} />
                         ))}
                     </div>
-                    {detail.output.open_questions.length > 0 && (
+                    {detail.output.open_questions && detail.output.open_questions.length > 0 && (
                         <Card className="p-4">
                             <p className="mb-1 text-sm font-medium">开放问题</p>
                             <ul className="list-disc pl-5 text-sm text-[var(--app-hint)]">
