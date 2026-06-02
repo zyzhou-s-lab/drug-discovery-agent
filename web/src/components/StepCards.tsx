@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react'
 
-import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { CodeBlock } from '@/components/CodeBlock'
 import type { StepEvent } from '@/types/dda'
 
@@ -38,6 +38,74 @@ function splitTool(name: string): { server: string | null; tool: string } {
     const m = name.match(/^mcp__([^_]+(?:_[^_]+)*?)__(.+)$/)
     if (m) return { server: m[1], tool: m[2] }
     return { server: null, tool: name }
+}
+
+function snakeToTitle(v: string): string {
+    return v.split('_').filter(Boolean).map((p) => p[0].toUpperCase() + p.slice(1)).join(' ')
+}
+
+// HAPI's getInputStringAny: first non-empty string/number among the given keys.
+function inputStr(input: unknown, keys: string[]): string | null {
+    if (!input || typeof input !== 'object') return null
+    const obj = input as Record<string, unknown>
+    for (const k of keys) {
+        const v = obj[k]
+        if (typeof v === 'string' && v.trim()) return v
+        if (typeof v === 'number') return String(v)
+    }
+    return null
+}
+
+// per-tool icons (inline SVG, mirrors HAPI's knownTools icon slot)
+const SvgSearch = () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
+)
+const SvgTarget = () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3" /></svg>
+)
+const SvgCheckSq = () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 11l3 3 8-8" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>
+)
+const SvgWrench = () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L3 18l3 3 6.5-6.3a4 4 0 0 0 5.2-5.4l-2.5 2.5-2.3-2.3 2.5-2.5z" /></svg>
+)
+
+const TOOL_ICON: Record<string, () => ReactNode> = {
+    search_disease: SvgSearch,
+    search_literature: SvgSearch,
+    disease_associated_targets: SvgTarget,
+    target_profile: SvgTarget,
+    submit_result: SvgCheckSq,
+}
+
+// dda equivalent of HAPI's getToolPresentation: {icon, title, subtitle}
+function presentation(name: string, input: unknown): { icon: ReactNode; title: string; subtitle: string | null } {
+    const { tool } = splitTool(name)
+    const arg = inputStr(input, ['name', 'symbol', 'query', 'sort_by', 'efo_id', 'pattern', 'command', 'disease', 'summary'])
+    const Icon = TOOL_ICON[tool] ?? SvgWrench
+    return {
+        icon: <Icon />,
+        title: TOOL_LABEL[tool] ?? snakeToTitle(tool),
+        subtitle: arg ? `${tool} · ${arg}` : tool,
+    }
+}
+
+// tool grouping (HAPI chat/toolGroups): consecutive same-kind calls collapse into a group
+const TOOL_KIND: Record<string, string> = {
+    search_disease: 'opentargets',
+    disease_associated_targets: 'opentargets',
+    target_profile: 'opentargets',
+    search_literature: 'literature',
+    submit_result: 'submit',
+}
+const KIND_TITLE: Record<string, string> = {
+    opentargets: '查 OpenTargets',
+    literature: '检索文献',
+    submit: '提交结果',
+}
+function toolKind(name: string): string {
+    const { server, tool } = splitTool(name)
+    return TOOL_KIND[tool] ?? server ?? 'tool'
 }
 
 function toText(content: unknown): string {
@@ -93,9 +161,8 @@ function Reasoning(props: { ev: StepEvent }) {
 function ToolCall(props: { item: ToolItem }) {
     const { use, result } = props.item
     const [open, setOpen] = useState(false)
-    const { server, tool } = splitTool(use.name ?? '')
-    const label = TOOL_LABEL[tool]
-    const inputStr = useMemo(
+    const pres = useMemo(() => presentation(use.name ?? '', use.input), [use.name, use.input])
+    const inputJson = useMemo(
         () => (use.input == null ? '' : typeof use.input === 'string' ? use.input : JSON.stringify(use.input, null, 2)),
         [use.input]
     )
@@ -105,22 +172,41 @@ function ToolCall(props: { item: ToolItem }) {
     const statusColor = !result ? 'var(--app-hint)' : isError ? RED : GREEN
 
     return (
-        <Card className="overflow-hidden">
-            <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
-                <span style={{ color: statusColor }} className="w-3 shrink-0 text-center text-xs">
-                    {status}
-                </span>
-                {server && <Badge>{server}</Badge>}
-                <span className="font-mono text-sm">{tool}</span>
-                {label && <span className="text-xs text-[var(--app-hint)]">{label}</span>}
-                <span className="ml-auto text-xs text-[var(--app-hint)]">{open ? '▾' : '▸'}</span>
-            </button>
-            {open && (
-                <div className="space-y-2 px-3 pb-3">
-                    {inputStr && (
+        // click the whole card -> modal with full params/result (HAPI ToolCard pattern)
+        <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+                <button className="flex w-full items-start gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--app-tool-card-bg,transparent)] px-3 py-2 text-left transition-colors hover:bg-[var(--app-tool-card-hover-bg,var(--app-subtle-bg))]">
+                    <span className="mt-0.5 shrink-0 text-[var(--app-tool-card-accent,var(--app-hint))]">{pres.icon}</span>
+                    <span className="min-w-0 flex-1">
+                        <span className="block break-words text-sm font-medium">{pres.title}</span>
+                        {pres.subtitle && (
+                            <span className="block truncate font-mono text-xs text-[var(--app-tool-card-subtitle,var(--app-hint))]">
+                                {pres.subtitle}
+                            </span>
+                        )}
+                    </span>
+                    <span style={{ color: statusColor }} className="mt-0.5 w-3 shrink-0 text-center text-xs">
+                        {status}
+                    </span>
+                    <span className="mt-0.5 shrink-0 text-[var(--app-hint)]" aria-hidden>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M15 3h6v6M21 3l-8 8M9 21H3v-6M3 21l8-8" />
+                        </svg>
+                    </span>
+                </button>
+            </DialogTrigger>
+            <DialogContent className="max-w-2xl">
+                <DialogHeader>
+                    <DialogTitle>{pres.title}</DialogTitle>
+                </DialogHeader>
+                <div className="max-h-[70vh] space-y-3 overflow-y-auto">
+                    {pres.subtitle && (
+                        <div className="font-mono text-xs text-[var(--app-tool-card-subtitle,var(--app-hint))]">{pres.subtitle}</div>
+                    )}
+                    {inputJson && (
                         <div>
                             <div className="mb-1 text-xs text-[var(--app-hint)]">参数</div>
-                            <CodeBlock code={inputStr} language="json" maxHeight={220} scrollY />
+                            <CodeBlock code={inputJson} language="json" maxHeight={300} scrollY />
                         </div>
                     )}
                     {result && (
@@ -128,9 +214,41 @@ function ToolCall(props: { item: ToolItem }) {
                             <div className="mb-1 text-xs" style={{ color: isError ? statusColor : 'var(--app-hint)' }}>
                                 {isError ? '错误' : '结果'}
                             </div>
-                            <CodeBlock code={resultStr || '(空)'} language={looksJson(resultStr) ? 'json' : 'text'} maxHeight={260} scrollY />
+                            <CodeBlock code={resultStr || '(空)'} language={looksJson(resultStr) ? 'json' : 'text'} maxHeight={400} scrollY />
                         </div>
                     )}
+                </div>
+            </DialogContent>
+        </Dialog>
+    )
+}
+
+function ToolGroup(props: { kind: string; items: ToolItem[] }) {
+    const [open, setOpen] = useState(false)
+    const { items } = props
+    const n = items.length
+    const anyError = items.some((it) => it.result?.is_error)
+    const allDone = items.every((it) => it.result)
+    const dotColor = anyError ? RED : allDone ? GREEN : ORANGE
+    const title = KIND_TITLE[props.kind] ?? snakeToTitle(props.kind)
+    return (
+        <Card className="overflow-hidden">
+            <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
+                <span className="text-xs text-[var(--app-hint)]">{open ? '▾' : '▸'}</span>
+                <span className="text-[var(--app-tool-card-accent,var(--app-hint))]">
+                    <SvgWrench />
+                </span>
+                <span className="text-sm font-medium">{title}</span>
+                <span className="ml-auto flex items-center gap-2 text-xs text-[var(--app-hint)]">
+                    <span>{n} 个操作</span>
+                    <span className="h-2 w-2 rounded-full" style={{ background: dotColor }} />
+                </span>
+            </button>
+            {open && (
+                <div className="flex flex-col gap-1.5 border-t border-[var(--app-border)] px-3 py-2">
+                    {items.map((it) => (
+                        <ToolCall key={it.use.seq} item={it} />
+                    ))}
                 </div>
             )}
         </Card>
@@ -141,18 +259,47 @@ function timelineNodes(events: StepEvent[]): ReactNode[] {
     const results = new Map<string, StepEvent>()
     for (const e of events) if (e.type === 'tool_result' && e.tool_id) results.set(e.tool_id, e)
 
-    const nodes: ReactNode[] = []
+    // linearize to thinking / text / tool items
+    type Item =
+        | { kind: 'thinking' | 'text'; ev: StepEvent }
+        | { kind: 'tool'; tool: ToolItem }
+    const items: Item[] = []
     for (const e of events) {
-        if (e.type === 'thinking') nodes.push(<Reasoning key={e.seq} ev={e} />)
+        if (e.type === 'thinking') items.push({ kind: 'thinking', ev: e })
+        else if (e.type === 'text' && e.text?.trim()) items.push({ kind: 'text', ev: e })
         else if (e.type === 'tool_use')
-            nodes.push(<ToolCall key={e.seq} item={{ use: e, result: e.tool_id ? results.get(e.tool_id) : undefined }} />)
-        else if (e.type === 'text' && e.text?.trim())
+            items.push({ kind: 'tool', tool: { use: e, result: e.tool_id ? results.get(e.tool_id) : undefined } })
+        // session_start / result / tool_result(已并入) 不单独渲染
+    }
+
+    // group consecutive same-kind tool calls (>=2) into a ToolGroup (HAPI rule)
+    const nodes: ReactNode[] = []
+    let i = 0
+    while (i < items.length) {
+        const it = items[i]
+        if (it.kind === 'tool') {
+            const k = toolKind(it.tool.use.name ?? '')
+            const run: ToolItem[] = []
+            while (i < items.length) {
+                const cur = items[i]
+                if (cur.kind !== 'tool') break
+                if (toolKind(cur.tool.use.name ?? '') !== k) break
+                run.push(cur.tool)
+                i += 1
+            }
+            if (run.length >= 2) nodes.push(<ToolGroup key={`g-${run[0].use.seq}`} kind={k} items={run} />)
+            else nodes.push(<ToolCall key={run[0].use.seq} item={run[0]} />)
+        } else if (it.kind === 'thinking') {
+            nodes.push(<Reasoning key={it.ev.seq} ev={it.ev} />)
+            i += 1
+        } else {
             nodes.push(
-                <p key={e.seq} className="whitespace-pre-wrap px-2 text-sm">
-                    {e.text}
+                <p key={it.ev.seq} className="whitespace-pre-wrap px-2 text-sm">
+                    {it.ev.text}
                 </p>
             )
-        // session_start / result / tool_result(已并入) 不单独渲染
+            i += 1
+        }
     }
     return nodes
 }

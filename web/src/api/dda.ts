@@ -32,6 +32,15 @@ export const ddaApi = {
             body: JSON.stringify(body),
         }).then((r) => r.json()),
 
+    rename: (c: string, title: string) =>
+        fetch(`${BASE}/campaigns/${encodeURIComponent(c)}`, {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ title }),
+        }).then((r) => r.json()),
+    remove: (c: string) =>
+        fetch(`${BASE}/campaigns/${encodeURIComponent(c)}`, { method: 'DELETE' }).then((r) => r.json()),
+
     // SSE: pushes a fresh CampaignView on every stage_state change; auto-closes on `done`.
     subscribe: (c: string, onView: (v: CampaignView) => void): EventSource => {
         const es = new EventSource(`${BASE}/campaigns/${encodeURIComponent(c)}/events`)

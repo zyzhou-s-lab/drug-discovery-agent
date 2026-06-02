@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 import threading
 
 from fastapi import FastAPI, HTTPException, Request
@@ -105,6 +106,23 @@ async def campaigns() -> dict:
 @app.get("/api/campaigns/{campaign}")
 async def campaign_detail(campaign: str) -> dict:
     return _campaign_view(get_index(), campaign)
+
+
+class RenameRequest(BaseModel):
+    title: str
+
+
+@app.patch("/api/campaigns/{campaign}")
+async def rename_campaign_ep(campaign: str, req: RenameRequest) -> dict:
+    get_index().rename_campaign(campaign, req.title.strip())
+    return {"campaign": campaign, "title": req.title.strip()}
+
+
+@app.delete("/api/campaigns/{campaign}")
+async def delete_campaign_ep(campaign: str) -> dict:
+    get_index().delete_campaign(campaign)
+    shutil.rmtree(os.path.join(ARTIFACTS, campaign), ignore_errors=True)  # events + artifacts
+    return {"campaign": campaign, "deleted": True}
 
 
 @app.get("/api/campaigns/{campaign}/stages/{stage}")

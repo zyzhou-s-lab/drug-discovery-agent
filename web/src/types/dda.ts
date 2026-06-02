@@ -60,6 +60,7 @@ export interface CampaignView {
 export interface CampaignSummary {
     campaign: string
     disease: string | null
+    title: string | null
     stages: number
     done: number
     exhausted: number

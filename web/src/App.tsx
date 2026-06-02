@@ -279,6 +279,13 @@ export function App() {
                     setCampaign(c)
                 }}
                 onStartRun={startRun}
+                onMutate={(deleted) => {
+                    if (deleted && deleted === campaign) {
+                        setSelected(null)
+                        setCampaign(null)
+                    }
+                    refetch()
+                }}
             />
 
             <main className="flex-1 overflow-y-auto p-6">

@@ -53,6 +53,7 @@ class Index:
             CREATE TABLE IF NOT EXISTS campaigns(
                 campaign   TEXT PRIMARY KEY,
                 disease    TEXT,
+                title      TEXT,
                 created_at REAL
             );
             -- (a) durable hook for long external jobs (slurm); used when GPU lands.
@@ -66,6 +67,10 @@ class Index:
             );
             """
         )
+        # additive column migration (campaigns table predates `title`)
+        cols = [r[1] for r in self.db.execute("PRAGMA table_info(campaigns)").fetchall()]
+        if "title" not in cols:
+            self.db.execute("ALTER TABLE campaigns ADD COLUMN title TEXT")
         cur = self.db.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
         if cur is None:
             self.db.execute(
@@ -147,10 +152,28 @@ class Index:
         )
         self.db.commit()
 
+    def rename_campaign(self, campaign: str, title: str) -> None:
+        self.db.execute(
+            """INSERT INTO campaigns(campaign, title, created_at) VALUES(?,?,?)
+               ON CONFLICT(campaign) DO UPDATE SET title=excluded.title""",
+            (campaign, title, time.time()),
+        )
+        self.db.commit()
+
+    def delete_campaign(self, campaign: str) -> None:
+        """Drop a campaign's state-DB rows (artifact/event files are removed by the API)."""
+        self.db.execute("DELETE FROM stage_state WHERE campaign=?", (campaign,))
+        self.db.execute("DELETE FROM campaigns WHERE campaign=?", (campaign,))
+        self.db.execute("DELETE FROM jobs WHERE campaign=?", (campaign,))
+        self.db.commit()
+
     def list_campaigns(self) -> list[dict]:
-        """All campaigns with progress accounting + disease — drives the frontend run list.
+        """All campaigns with progress accounting + disease/title — drives the frontend run list.
         Unions campaigns from both tables so legacy runs (no `campaigns` row) still show."""
-        diseases = dict(self.db.execute("SELECT campaign, disease FROM campaigns").fetchall())
+        meta = {
+            c: (disease, title)
+            for (c, disease, title) in self.db.execute("SELECT campaign, disease, title FROM campaigns").fetchall()
+        }
         agg = {
             c: (s, d, e, u)
             for (c, s, d, e, u) in self.db.execute(
@@ -160,9 +183,10 @@ class Index:
             ).fetchall()
         }
         out = []
-        for c in set(diseases) | set(agg):
+        for c in set(meta) | set(agg):
             s, d, e, u = agg.get(c, (0, 0, 0, None))
-            out.append({"campaign": c, "disease": diseases.get(c),
+            disease, title = meta.get(c, (None, None))
+            out.append({"campaign": c, "disease": disease, "title": title,
                         "stages": s, "done": d or 0, "exhausted": e or 0, "updated_at": u})
         out.sort(key=lambda r: (r["updated_at"] or 0), reverse=True)
         return out
