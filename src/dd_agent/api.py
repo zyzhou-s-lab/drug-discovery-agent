@@ -125,6 +125,31 @@ async def delete_campaign_ep(campaign: str) -> dict:
     return {"campaign": campaign, "deleted": True}
 
 
+@app.get("/api/campaigns/{campaign}/files")
+async def campaign_files(campaign: str) -> dict:
+    """List the campaign's on-disk files (artifacts + event logs) for the Files panel."""
+    root = os.path.join(ARTIFACTS, campaign)
+    files = []
+    for dirpath, _dirs, names in os.walk(root):
+        for n in names:
+            p = os.path.join(dirpath, n)
+            files.append({"path": os.path.relpath(p, root), "size": os.path.getsize(p)})
+    files.sort(key=lambda f: f["path"])
+    return {"campaign": campaign, "root": root, "files": files}
+
+
+@app.get("/api/campaigns/{campaign}/files/raw")
+async def campaign_file_raw(campaign: str, path: str) -> dict:
+    root = os.path.realpath(os.path.join(ARTIFACTS, campaign))
+    full = os.path.realpath(os.path.join(root, path))
+    if full != root and not full.startswith(root + os.sep):  # path-traversal guard
+        raise HTTPException(400, "bad path")
+    if not os.path.isfile(full):
+        raise HTTPException(404, "not found")
+    with open(full, encoding="utf-8", errors="replace") as f:
+        return {"path": path, "content": f.read(200_000)}
+
+
 @app.get("/api/campaigns/{campaign}/stages/{stage}")
 async def stage_detail(campaign: str, stage: str) -> dict:
     idx = get_index()

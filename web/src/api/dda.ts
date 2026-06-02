@@ -41,6 +41,15 @@ export const ddaApi = {
     remove: (c: string) =>
         fetch(`${BASE}/campaigns/${encodeURIComponent(c)}`, { method: 'DELETE' }).then((r) => r.json()),
 
+    files: (c: string) =>
+        getJson<{ campaign: string; root: string; files: { path: string; size: number }[] }>(
+            `/campaigns/${encodeURIComponent(c)}/files`
+        ),
+    fileRaw: (c: string, path: string) =>
+        getJson<{ path: string; content: string }>(
+            `/campaigns/${encodeURIComponent(c)}/files/raw?path=${encodeURIComponent(path)}`
+        ),
+
     // SSE: pushes a fresh CampaignView on every stage_state change; auto-closes on `done`.
     subscribe: (c: string, onView: (v: CampaignView) => void): EventSource => {
         const es = new EventSource(`${BASE}/campaigns/${encodeURIComponent(c)}/events`)

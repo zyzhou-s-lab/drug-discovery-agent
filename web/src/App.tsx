@@ -2,10 +2,13 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
-import { CodeBlock } from '@/components/CodeBlock'
+import { RawOutput } from '@/components/RawOutput'
 import { LoadingState } from '@/components/LoadingState'
 import { StepCards } from '@/components/StepCards'
 import { Sidebar } from '@/components/Sidebar'
+import { SessionHeader } from '@/components/SessionHeader'
+import { OutlinePanel } from '@/components/OutlinePanel'
+import { FilesPage } from '@/components/FilesDialog'
 
 import { ddaApi, pubmedId } from '@/api/dda'
 import { useTheme } from '@/lib/settings'
@@ -219,7 +222,7 @@ function StageDetail(props: { campaign: string; stage: string }) {
                             </ul>
                         </Card>
                     )}
-                    <CodeBlock code={rawJson} language="json" title={`${stageLabel(props.stage)} · 原始 NodeOutput`} collapseLongContent />
+                    <RawOutput title={`${stageLabel(props.stage)} · 原始 NodeOutput`} code={rawJson} />
                 </>
             ) : events.length === 0 ? (
                 <Card className="p-4 text-sm text-[var(--app-hint)]">
@@ -246,6 +249,8 @@ export function App() {
 
     const { view, error: vErr } = useCampaignView(campaign)
     const [selected, setSelected] = useState<string | null>(null)
+    const [outlineOpen, setOutlineOpen] = useState(true)
+    const [filesOpen, setFilesOpen] = useState<string | null>(null)
     useEffect(() => {
         if (!view) return
         const done = view.stages.filter((s) => s.status === 'done')
@@ -254,6 +259,26 @@ export function App() {
     }, [view])
 
     const apiDown = Boolean(cErr || vErr)
+
+    const selectedRun = campaign
+        ? campaigns?.find((c) => c.campaign === campaign) ?? {
+              campaign,
+              disease: null,
+              title: null,
+              stages: 0,
+              done: 0,
+              exhausted: 0,
+              updated_at: null,
+          }
+        : null
+
+    const handleMutate = (deleted?: string) => {
+        if (deleted && deleted === campaign) {
+            setSelected(null)
+            setCampaign(null)
+        }
+        refetch()
+    }
 
     const startRun = (disease: string, real: boolean) => {
         const slug = disease.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'run'
@@ -279,24 +304,24 @@ export function App() {
                     setCampaign(c)
                 }}
                 onStartRun={startRun}
-                onMutate={(deleted) => {
-                    if (deleted && deleted === campaign) {
-                        setSelected(null)
-                        setCampaign(null)
-                    }
-                    refetch()
-                }}
+                onMutate={handleMutate}
             />
 
-            <main className="flex-1 overflow-y-auto p-6">
-                <div className="mx-auto flex max-w-content flex-col gap-5">
-                    <header>
-                        <h1 className="text-lg font-semibold">{campaign ?? '发现段流水线'}</h1>
-                        <p className="text-sm text-[var(--app-hint)]">
-                            实时模式 · 阶段 1–3 = M1–M3b,阶段 4 = M4(未实现)。点阶段查看执行过程 / 候选 / 证据 / 评审。
-                        </p>
-                    </header>
+            <main className="flex-1 overflow-y-auto">
+                {selectedRun && (
+                    <SessionHeader
+                        run={selectedRun}
+                        onBack={() => {
+                            setSelected(null)
+                            setCampaign(null)
+                        }}
+                        onMutate={handleMutate}
+                        onOpenFiles={() => setFilesOpen(campaign)}
+                        onToggleOutline={() => setOutlineOpen((v) => !v)}
+                    />
+                )}
 
+                <div className="mx-auto flex max-w-content flex-col gap-5 p-6">
                     {!campaign && (
                         <Card className="p-6 text-sm text-[var(--app-hint)]">
                             从左侧选择一个运行,或点右上 ＋ 新建一个疾病项目并运行。
@@ -308,6 +333,20 @@ export function App() {
                     {campaign && selected && <StageDetail campaign={campaign} stage={selected} />}
                 </div>
             </main>
+
+            {outlineOpen && selectedRun && view && (
+                <OutlinePanel
+                    stages={view.stages}
+                    selected={selected}
+                    onSelectStage={setSelected}
+                    onScrollToSession={(label) =>
+                        document.getElementById(`dd-session-${label}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                    }
+                    onClose={() => setOutlineOpen(false)}
+                />
+            )}
+
+            <FilesPage campaign={filesOpen} onClose={() => setFilesOpen(null)} />
         </div>
     )
 }

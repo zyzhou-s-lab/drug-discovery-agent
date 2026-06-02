@@ -3,11 +3,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Settings } from '@/components/Settings'
+import { RenameDialog } from '@/components/RenameDialog'
 import { useDefaultReal } from '@/lib/settings'
+import { runDisplayName } from '@/lib/runLabel'
+import { useResizable } from '@/hooks/useResizable'
 import { ddaApi } from '@/api/dda'
 import type { CampaignSummary } from '@/types/dda'
 
-const runLabel = (c: CampaignSummary) => c.title ?? c.campaign
+const runLabel = runDisplayName
 
 function dot(c: CampaignSummary): string {
     if (c.exhausted > 0) return 'var(--app-git-deleted-color, #FF3B30)'
@@ -110,45 +113,6 @@ function NewRunDialog(props: {
     )
 }
 
-function RenameDialog(props: { target: { campaign: string; current: string } | null; onClose: () => void; onDone: () => void }) {
-    const [name, setName] = useState('')
-    const [seen, setSeen] = useState<string | null>(null)
-    const open = props.target != null
-    if (open && seen !== props.target!.campaign) {
-        setSeen(props.target!.campaign)
-        setName(props.target!.current)
-    }
-    const save = async () => {
-        const t = name.trim()
-        if (!t || !props.target) return
-        await ddaApi.rename(props.target.campaign, t)
-        props.onDone()
-        props.onClose()
-    }
-    return (
-        <Dialog open={open} onOpenChange={(o) => !o && props.onClose()}>
-            <DialogContent className="max-w-sm">
-                <DialogHeader>
-                    <DialogTitle>重命名</DialogTitle>
-                </DialogHeader>
-                <div className="flex flex-col gap-3">
-                    <input
-                        autoFocus
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && save()}
-                        className="rounded-md border border-[var(--app-border)] bg-transparent px-2 py-1.5 text-sm outline-none focus:border-[var(--app-button)]"
-                    />
-                    <div className="flex justify-end gap-2">
-                        <Button variant="outline" size="sm" onClick={props.onClose}>取消</Button>
-                        <Button size="sm" onClick={save}>保存</Button>
-                    </div>
-                </div>
-            </DialogContent>
-        </Dialog>
-    )
-}
-
 type Menu = { campaign: string; current: string; x: number; y: number }
 
 export function Sidebar(props: {
@@ -159,6 +123,7 @@ export function Sidebar(props: {
     onStartRun: (disease: string, real: boolean) => void
     onMutate: (deleted?: string) => void
 }) {
+    const { width, onPointerDown: onResize } = useResizable({ key: 'dd-left-w', def: 320, min: 240, max: 520, side: 'left' })
     const [search, setSearch] = useState('')
     const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
     const [settingsOpen, setSettingsOpen] = useState(false)
@@ -209,7 +174,8 @@ export function Sidebar(props: {
     }
 
     return (
-        <aside className="flex w-72 shrink-0 flex-col border-r border-[var(--app-border)]">
+        <aside style={{ width }} className="relative flex shrink-0 flex-col border-r border-[var(--app-border)]">
+            <div onPointerDown={onResize} className="absolute inset-y-0 -right-0.5 z-20 w-1.5 cursor-col-resize hover:bg-[var(--app-link-muted,rgba(0,0,0,0.12))]" />
             <div className="flex items-center justify-between px-3 py-2.5">
                 <div className="text-sm">
                     <span className="font-semibold">药物靶点发现</span>

@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ddaApi } from '@/api/dda'
-import type { CampaignSummary, CampaignView, PipelineStage, StageDetail, StepEvent } from '@/types/dda'
+import type { CampaignSummary, CampaignView, DdaConfig, PipelineStage, StageDetail, StepEvent } from '@/types/dda'
+
+/** Backend config (model, real-mode availability) — for the session header / settings. */
+export function useConfig() {
+    const [config, setConfig] = useState<DdaConfig | null>(null)
+    useEffect(() => {
+        ddaApi.config().then(setConfig).catch(() => setConfig(null))
+    }, [])
+    return { config }
+}
 
 /** Pipeline metadata (static for a given backend). */
 export function usePipeline() {

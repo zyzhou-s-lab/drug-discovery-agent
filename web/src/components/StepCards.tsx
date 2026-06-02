@@ -139,6 +139,46 @@ function fmtElapsed(s: number): string {
 
 type ToolItem = { use: StepEvent; result?: StepEvent }
 
+// HAPI ToolStatusIcon: circle-check (completed) / circle-x (error) / spinner (running)
+const STATUS_COLOR: Record<'completed' | 'error' | 'running', string> = {
+    completed: 'text-emerald-600',
+    error: 'text-red-600',
+    running: 'text-amber-500',
+}
+function ToolStatusIcon(props: { state: 'completed' | 'error' | 'running' }) {
+    const cls = `h-3.5 w-3.5 shrink-0 ${STATUS_COLOR[props.state]}`
+    if (props.state === 'completed')
+        return (
+            <svg className={cls} viewBox="0 0 16 16" fill="none">
+                <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" />
+                <path d="M5.2 8.3l1.8 1.8 3.8-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+        )
+    if (props.state === 'error')
+        return (
+            <svg className={cls} viewBox="0 0 16 16" fill="none">
+                <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" />
+                <path d="M5.6 5.6l4.8 4.8M10.4 5.6l-4.8 4.8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+        )
+    return (
+        <svg className={`${cls} animate-spin`} viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" opacity="0.25" />
+            <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" opacity="0.75" />
+        </svg>
+    )
+}
+function SummaryBadge(props: { className: string; text: string }) {
+    return <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${props.className}`}>{props.text}</span>
+}
+function GroupChevron(props: { open: boolean }) {
+    return (
+        <svg className={`h-4 w-4 shrink-0 text-[var(--app-hint)] transition-transform duration-200 ${props.open ? 'rotate-90' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="9 18 15 12 9 6" />
+        </svg>
+    )
+}
+
 function Reasoning(props: { ev: StepEvent }) {
     const [open, setOpen] = useState(false)
     const text = props.ev.text ?? ''
@@ -168,27 +208,24 @@ function ToolCall(props: { item: ToolItem }) {
     )
     const resultStr = result ? toText(result.content) : ''
     const isError = result?.is_error
-    const status = !result ? '…' : isError ? '✗' : '✓'
-    const statusColor = !result ? 'var(--app-hint)' : isError ? RED : GREEN
+    const iconState: 'completed' | 'error' | 'running' = !result ? 'running' : isError ? 'error' : 'completed'
 
     return (
         // click the whole card -> modal with full params/result (HAPI ToolCard pattern)
         <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
-                <button className="flex w-full items-start gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--app-tool-card-bg,transparent)] px-3 py-2 text-left transition-colors hover:bg-[var(--app-tool-card-hover-bg,var(--app-subtle-bg))]">
-                    <span className="mt-0.5 shrink-0 text-[var(--app-tool-card-accent,var(--app-hint))]">{pres.icon}</span>
+                <button className="flex w-full items-center gap-3 rounded-[16px] border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-left transition-colors hover:bg-[var(--app-subtle-bg)]">
+                    <ToolStatusIcon state={iconState} />
+                    <span className="shrink-0 text-[var(--app-tool-card-accent,var(--app-hint))]">{pres.icon}</span>
                     <span className="min-w-0 flex-1">
-                        <span className="block break-words text-sm font-medium">{pres.title}</span>
+                        <span className="block truncate text-sm font-medium">{pres.title}</span>
                         {pres.subtitle && (
                             <span className="block truncate font-mono text-xs text-[var(--app-tool-card-subtitle,var(--app-hint))]">
                                 {pres.subtitle}
                             </span>
                         )}
                     </span>
-                    <span style={{ color: statusColor }} className="mt-0.5 w-3 shrink-0 text-center text-xs">
-                        {status}
-                    </span>
-                    <span className="mt-0.5 shrink-0 text-[var(--app-hint)]" aria-hidden>
+                    <span className="shrink-0 text-[var(--app-hint)]" aria-hidden>
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M15 3h6v6M21 3l-8 8M9 21H3v-6M3 21l8-8" />
                         </svg>
@@ -211,7 +248,7 @@ function ToolCall(props: { item: ToolItem }) {
                     )}
                     {result && (
                         <div>
-                            <div className="mb-1 text-xs" style={{ color: isError ? statusColor : 'var(--app-hint)' }}>
+                            <div className="mb-1 text-xs" style={{ color: isError ? RED : 'var(--app-hint)' }}>
                                 {isError ? '错误' : '结果'}
                             </div>
                             <CodeBlock code={resultStr || '(空)'} language={looksJson(resultStr) ? 'json' : 'text'} maxHeight={400} scrollY />
@@ -229,23 +266,26 @@ function ToolGroup(props: { kind: string; items: ToolItem[] }) {
     const n = items.length
     const anyError = items.some((it) => it.result?.is_error)
     const allDone = items.every((it) => it.result)
-    const dotColor = anyError ? RED : allDone ? GREEN : ORANGE
     const title = KIND_TITLE[props.kind] ?? snakeToTitle(props.kind)
     return (
-        <Card className="overflow-hidden">
-            <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
-                <span className="text-xs text-[var(--app-hint)]">{open ? '▾' : '▸'}</span>
+        <Card className="overflow-hidden rounded-[20px] bg-[var(--app-tool-group-bg,var(--app-subtle-bg))] shadow-none">
+            <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-2 px-3 py-3 text-left">
+                <GroupChevron open={open} />
                 <span className="text-[var(--app-tool-card-accent,var(--app-hint))]">
                     <SvgWrench />
                 </span>
-                <span className="text-sm font-medium">{title}</span>
-                <span className="ml-auto flex items-center gap-2 text-xs text-[var(--app-hint)]">
-                    <span>{n} 个操作</span>
-                    <span className="h-2 w-2 rounded-full" style={{ background: dotColor }} />
+                <span className="truncate text-sm font-medium">{title}</span>
+                <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                    {anyError ? (
+                        <SummaryBadge className="bg-red-500/10 text-red-600" text="有错误" />
+                    ) : allDone ? null : (
+                        <SummaryBadge className="bg-amber-500/10 text-amber-700" text="运行中" />
+                    )}
+                    <SummaryBadge className="bg-[var(--app-subtle-bg)] text-[var(--app-hint)]" text={`${n} 个操作`} />
                 </span>
             </button>
             {open && (
-                <div className="flex flex-col gap-1.5 border-t border-[var(--app-border)] px-3 py-2">
+                <div className="flex flex-col gap-2 px-3 pb-3">
                     {items.map((it) => (
                         <ToolCall key={it.use.seq} item={it} />
                     ))}
@@ -319,7 +359,7 @@ function SessionCard(props: { label: string; events: StepEvent[]; defaultOpen: b
     const angle = ANGLE_LABEL[props.label] ?? props.label
 
     return (
-        <Card className="overflow-hidden">
+        <Card id={`dd-session-${props.label}`} className="overflow-hidden scroll-mt-4">
             <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
                 <span
                     className={'h-2 w-2 shrink-0 rounded-full ' + (running ? 'animate-pulse' : '')}
