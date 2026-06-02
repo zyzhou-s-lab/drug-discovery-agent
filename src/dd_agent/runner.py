@@ -47,6 +47,7 @@ class Runner:
         # deterministic — Runner threads context, nodes stay boxed). CONCEPTS §5.
         prior: list = []
         done_refs: list[str] = []
+        brief = ""
         for s in self.pipeline:
             if s.name == stage.name:
                 break
@@ -55,9 +56,11 @@ class Runner:
                 done_refs.append(s.name)
                 if out.get("candidates"):
                     prior = out["candidates"]
+                if s.name == "disease-overview" and out.get("summary"):
+                    brief = out["summary"]                    # stage-0 brief → downstream focus
         return NodeInput(campaign_id=campaign, stage=stage.name, disease=disease,
                          objective=f"run {stage.name}",
-                         context_refs=done_refs, prior_candidates=prior)
+                         context_refs=done_refs, prior_candidates=prior, disease_brief=brief)
 
     async def _run_angle(self, stage, node_input, angle):
         async with self.sem:

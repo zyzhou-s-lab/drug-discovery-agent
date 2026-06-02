@@ -172,9 +172,12 @@ def _result_server(captured: dict, stage_name: str):
 
 
 async def _run_session(stage, system: str, prompt: str, mcp_servers: dict, allowed_tools: list,
-                       captured: dict, label: str) -> NodeOutput:
+                       captured: dict, label: str, node_input: NodeInput | None = None) -> NodeOutput:
     """Run one boxed Agent SDK session; return captured NodeOutput or a no-result stub."""
     from claude_agent_sdk import ClaudeAgentOptions, query
+
+    if node_input is not None:
+        system = system + _brief_block(node_input)   # inject stage-0 disease brief (focus context)
 
     opts = ClaudeAgentOptions(
         cwd=str(STAGE_DIR / stage.name),
@@ -191,6 +194,12 @@ async def _run_session(stage, system: str, prompt: str, mcp_servers: dict, allow
         return captured["output"]
     return NodeOutput(stage=stage.name, summary=f"[sdk/{label}] session ended without submit_result",
                       open_questions=["worker did not call submit_result"])
+
+
+def _brief_block(node_input: NodeInput) -> str:
+    """stage-0 disease brief, injected into downstream worker prompts for focus."""
+    b = (getattr(node_input, "disease_brief", "") or "").strip()
+    return f"\n\n## 疾病背景（来自 stage-0 disease-overview，供聚焦）\n{b}\n" if b else ""
 
 
 def _prior_brief(prior: list[dict]) -> str:
@@ -231,7 +240,7 @@ async def _hypothesis_worker(stage, node_input: NodeInput, angle: str | None) ->
         {"opentargets": _ot_server(), "result": _result_server(captured, stage.name)},
         ["mcp__opentargets__search_disease", "mcp__opentargets__disease_associated_targets",
          "mcp__result__submit_result"],
-        captured, angle_name)
+        captured, angle_name, node_input)
 
 
 # ----------------------------------------------------------------------------
@@ -262,7 +271,7 @@ async def _literature_worker(stage, node_input: NodeInput) -> NodeOutput:
         stage, system, prompt,
         {"europepmc": _europepmc_server(), "result": _result_server(captured, stage.name)},
         ["mcp__europepmc__search_literature", "mcp__result__submit_result"],
-        captured, "literature")
+        captured, "literature", node_input)
 
 
 # ----------------------------------------------------------------------------
@@ -295,7 +304,7 @@ async def _selection_worker(stage, node_input: NodeInput) -> NodeOutput:
         stage, system, prompt,
         {"otprofile": _profile_server(), "result": _result_server(captured, stage.name)},
         ["mcp__otprofile__target_profile", "mcp__result__submit_result"],
-        captured, "selection")
+        captured, "selection", node_input)
 
 
 # ----------------------------------------------------------------------------
@@ -337,13 +346,43 @@ async def _validation_worker(stage, node_input: NodeInput, angle: str | None) ->
                   f"流程：search_disease → disease_associated_targets(sort_by='genetic_association') "
                   f"定位 {target} → 评估遗传因果稳健性 → submit_result。")
     return await _run_session(stage, system, prompt, servers, allowed, captured,
-                              f"validate/{target}/{angle}")
+                              f"validate/{target}/{angle}", node_input)
+
+
+# ----------------------------------------------------------------------------
+# stage-0: disease-overview (single session split-and-merge; LLM synthesizes a brief)
+# ----------------------------------------------------------------------------
+async def _overview_worker(stage, node_input: NodeInput) -> NodeOutput:
+    captured: dict = {}
+    role = _load_role(stage.name)
+    system = (
+        role
+        + "\n\n## 本次运行\n"
+        "对该疾病做总体调研:用 `mcp__opentargets__search_disease` 拿规范名/EFO,用 "
+        "`mcp__europepmc__search_literature` 查疾病的子型、相关组织/细胞、已知核心机制、"
+        "关键通路与基因家族。综合成一份**简明 disease brief**(给下游靶点提名/验证提供聚焦背景)。"
+        "完成后**必须** `mcp__result__submit_result`:summary 写 brief,candidates **留空**(本阶段不提名靶点)。"
+    )
+    prompt = (
+        f"疾病:{node_input.disease}\n"
+        "建议流程:search_disease 找 EFO/规范名 → search_literature 查子型/组织/机制/通路 → "
+        "综合 disease brief → submit_result(summary=brief, candidates=[])。"
+    )
+    return await _run_session(
+        stage, system, prompt,
+        {"opentargets": _ot_server(), "europepmc": _europepmc_server(),
+         "result": _result_server(captured, stage.name)},
+        ["mcp__opentargets__search_disease", "mcp__europepmc__search_literature",
+         "mcp__result__submit_result"],
+        captured, "overview")
 
 
 # ----------------------------------------------------------------------------
 # dispatch
 # ----------------------------------------------------------------------------
 async def sdk_worker(stage, node_input: NodeInput, angle: str | None = None) -> NodeOutput:
+    if stage.name == "disease-overview":
+        return await _overview_worker(stage, node_input)
     if stage.name == "target-hypothesis":
         return await _hypothesis_worker(stage, node_input, angle)
     if stage.name == "literature-evidence":

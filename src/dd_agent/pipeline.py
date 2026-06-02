@@ -22,6 +22,15 @@ class Stage:
     planner: bool = False                       # M4: planner-driven dynamic scatter (stage-4)
 
 
+# stage-0 验收 rubric：disease brief 是否覆盖关键背景（子型/组织/机制/通路），可追溯。
+_OVERVIEW_RUBRIC = (
+    "你是疾病调研阶段的审稿人。收敛标准：\n"
+    "1) brief 覆盖疾病的关键背景——子型 / 相关组织或细胞 / 已知核心机制 / 关键通路或基因家族；\n"
+    "2) 基于真实来源（OpenTargets 疾病信息 / Europe PMC 文献），不空泛编造；\n"
+    "3) 本阶段**不提名靶点**（candidates 应为空）。\n"
+    "score 反映 brief 的覆盖度与可用性；missing 标明缺哪类背景。"
+)
+
 # stage-1 验收 rubric（M1）。judge 据此出 typed Verdict（ARCHITECTURE §3.7 D：
 # rubric 是 harness 用来"逼"模型去调遗传证据工具的验收标准，而非命令）。
 _TH_RUBRIC = (
@@ -70,6 +79,7 @@ _VAL_RUBRIC = (
 
 # 发现段 stage 1-4（DOMAIN §5.1 节点清单）
 DISCOVERY_PIPELINE: list[Stage] = [
+    Stage("disease-overview", rubric_prompt=_OVERVIEW_RUBRIC),   # stage-0: split-and-merge brief
     Stage("target-hypothesis", rubric_prompt=_TH_RUBRIC, scatter=True,
           angles=["genetic", "expression", "network", "literature"]),
     Stage("literature-evidence", rubric_prompt=_LIT_RUBRIC),

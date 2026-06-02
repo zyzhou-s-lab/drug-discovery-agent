@@ -115,5 +115,11 @@ gpu 上由 **HAPI** 做出 M5 observer 并合并入主线（`cfa49d0`，与 M4a 
 - **前端**：`web/` typecheck 过，`vite dev :5173`（proxy /api→:8099）起，全栈联通（proxy /api/health 200）。**浏览器访问 `http://10.202.2.224:5173`**（gpu tailscale IP；或 `ssh -L 5173:localhost:5173 gpu-zhouy1` 转发）。
 - observer 本体是 HAPI 写的（前端组件 lifted 自 `tiann/hapi`，AGPL）；本次仅加 cli events 对接 + 指向真实 db。
 
+## stage-0 disease-overview + 三层 fan-out 粒度（决定 2026-06-01）
+审计后调整（ARCHITECTURE §3.7 F）：**撤回**"session 内 agentteam = 委派层级超限"的错误反对——查证 CC subagent 是硬性一层 + context 隔离（parent 只收 output）；真正的取舍是**聚合/judge 粒度**，不是层级。三层落地：
+- **stage-0 `disease-overview`（新增，已实现）**：一个 session **split-and-merge**——用 OT `search_disease` + Europe PMC `search_literature` 查疾病子型/组织/机制/通路 → LLM synthesize 出 **disease brief** → 存 index。`Runner._build_input` 把 brief 串给下游所有 worker（`NodeInput.disease_brief`，经 `_run_session` 注入 system），给角度调查**聚焦背景**（缓解 M2 expression/network 空转）。**pipeline 现 5 stage（0-4）**。代码：schemas `disease_brief`、pipeline `disease-overview`+`_OVERVIEW_RUBRIC`、runner brief 传递、worker `_overview_worker`+`_brief_block`、`stages/disease-overview/CLAUDE.md`。
+- **角度内 split-and-merge（backlog）**：角度 session 内 `Task` fan-out 子 agent——需 `allowed_tools` 含 `Task` + 验证 DeepSeek subagent 兼容，**延后**（stages/target-hypothesis/CLAUDE.md 已写 `genetics-analyst` 等占位）。
+- **跨角度 scatter（保留）**：顶层 Runner scatter + 确定性 gather + 外部 judge——因 §3.7C 的 consensus/leave-one-out **必须 judge 看到各角度原始产出**。
+
 ### M4b 待办
 重型本地工具（FUSION TWAS / GRN_transfer in-silico KO / coloc / MR）+ 独立源（GWAS Catalog / GTEx / STRING）+ **stage-1 planner 回填** + 可能 slurm + durable (a) 层；菜单扩 `perturbation`/`expression`/`network`。

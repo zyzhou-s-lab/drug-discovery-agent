@@ -84,6 +84,7 @@ class DesignArtifact(BaseModel):
 
 | # | 阶段 | 段 | 做什么 | 工具 | anchor 期望（dry AMD） |
 |---|---|---|---|---|---|
+| 0 | `disease-overview` 🆕 | 发现 | 疾病→disease brief（子型/组织/机制/通路） | OpenTargets `search_disease` + Europe PMC | brief 覆盖关键背景，喂下游聚焦（ARCHITECTURE §3.7 F；split-and-merge） |
 | 1 | `target-hypothesis` | 发现 | 疾病→候选靶点+证据（§4） | OpenTargets(本地25.03+API) / GWAS Catalog / 表达图谱 | 补体(CFH/C3) 进 top-N（ROCK 为机制候选） |
 | 2 | `literature-evidence` | 发现 | 候选靶点带引用证据综述 | paper-fetch(OpenAlex/S2) / Europe PMC | 补体/ROCK 机制证据、真实引用 |
 | 3 | `target-selection` | 发现 | 排序并**选定要推进的靶点** | OpenTargets 打分 + 三联评估(ChEMBL/gnomAD/GTEx) | 选定靶点 |
@@ -100,12 +101,13 @@ class DesignArtifact(BaseModel):
 
 ---
 
-### 5.1 发现段节点清单（stage 1–4）
+### 5.1 发现段节点清单（stage 0–4）
 
 > **节点** = 被 Runner 编排的 boxed agent session（worker / planner / judge）。**聚合 gather、路由、Runner 本身 = 确定性代码，不计为节点**（定义见 [ARCHITECTURE §3.6/§3.7](ARCHITECTURE.md)）。下表为**设计层节点种类**；运行时按「候选靶点数 × 验证角度数 × consensus 工具数」横向 fan-out 出实例。
 
 | Stage | 结构 | worker / planner 节点 | judge | 聚合 |
 |---|---|---|---|---|
+| 0 `disease-overview` | 单 session（split-and-merge，无 scatter/planner） | **1** | 1 | —（session 内 synthesize） |
 | 1 `target-hypothesis` | scatter-gather（角度**固定**，无 planner） | 遗传 / 表达 / 网络 / 文献 = **4** | 1 | 代码 |
 | 2 `literature-evidence` | 单 worker（per 候选靶点） | **1** | 1 | — |
 | 3 `target-selection` | 单 worker（三联评估 + 选定） | **1** | 1 | — |

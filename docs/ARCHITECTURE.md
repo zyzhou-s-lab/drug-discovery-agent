@@ -235,6 +235,19 @@
 - **可演进（统一 planner）**：把 planner 做成通用"角度规划"节点，两阶段共用——`stage1-planner(disease)` 从提名菜单选（默认全选，可按疾病裁剪/加权/加角度）；`stage4-planner(target+文献)` 从验证菜单选（靶点特异）。固定 4 角度退化成 planner 的默认值。
 - **决定（2026-06-01）**：M2 先固定角度把 scatter-gather 机制跑通，**stage-1 planner 延到 M4 建 planner 时回填**（避免 scatter 与 planner 两个新机制耦合调试）。
 
+**(F) fan-out 的三个层次（审计修正 2026-06-01，查证 CC subagent 机制后）**：
+**先纠错**：早先反对过"一个 session 内 agentteam 做多角度 = 委派层级超限"——**此反对撤回**。CC subagent **硬性一层**（官方："Subagents cannot spawn other subagents"），层级限制自动满足；且 subagent **独立 context、parent 只收 output（不收 reasoning）**，CC 主动保持 orchestrator context 干净。所以 session 内 **split-and-merge**（orchestrator + 并行 subagent + synthesize）是 CC 原生模式，技术成立、不破坏盒子无状态。
+**真正的取舍 = 聚合/judge 的粒度**（不是层级）：
+- session 内 **LLM synthesize**：灵活、连贯综合（Robin 式）、少 Runner 代码；**但聚合不可复现、外部 judge 看不到各角度原始产出 → 做不了 §3.7C 的 consensus / leave-one-out 消融**。
+- 顶层 **确定性 gather + 外部 judge**：可复现、judge 透明、可消融；但 gather 机械、Runner 多代码。
+**本项目的三层 fan-out 粒度（决定）**：
+| 层次 | 怎么做 | 聚合 | 为什么 |
+|---|---|---|---|
+| **stage-0 disease-overview** | 一个 session **split-and-merge**（文献理解疾病：子型/组织/机制/通路） | session 内 LLM synthesize → disease brief | 此处无"各角度独立验收"需求，synthesize 合适；brief 存 index 喂下游角度 + stage-4 planner |
+| **角度内**（如 genetic 内跨组织/多源） | 角度 session 内 **subagent split-and-merge**（Task fan-out 子 agent） | session 内 synthesize 该角度结论 | "角度内分解"，不跨角度；CLAUDE.md 的 `genetics-analyst` 等即此。实现需 `allowed_tools` 含 `Task` + 验证 DeepSeek subagent 兼容（backlog） |
+| **跨角度**（genetic vs expression…） | 顶层 **Runner scatter + 确定性 gather + 外部 judge** | Runner `_merge_by_symbol`，judge 看每角度原始 | **保留**：§3.7C 的关键角度 consensus + 边缘靶点 leave-one-out **必须 judge 看到每个角度独立产出**才能做 |
+**一句话**：overview 与角度内用 split-and-merge（连贯、CC 原生）；**跨角度的聚合判定用顶层 scatter（保消融与可复现）**。
+
 ### 3.8 持久化与恢复（CC 边界 + Runner 的 durable 责任）
 
 **调研结论（2026，见 [REFERENCES](REFERENCES.md)）**：所有本地/SDK 编码 agent（Claude Code、Codex、Aider、Amp、Devin）只做到 **session 级恢复**（重放 transcript + 文件快照）；**唯一做到 workflow 级 durable execution 的是 Cursor 云端，且靠外挂 Temporal**。→ **durable 是独立引擎，agent 不自带；我们必须在 Runner/index 层自建。** 语言：**Python**（同类科学 agent 全 Python + 领域工具生态；Agent SDK 双语成熟，不构成 TS 理由）。

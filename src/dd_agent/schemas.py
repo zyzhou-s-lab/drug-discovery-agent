@@ -18,6 +18,7 @@ class NodeInput(BaseModel):
     context_refs: list[str] = Field(default_factory=list)  # pointers into index, not full text
     constraints: dict[str, Any] = Field(default_factory=dict)
     prior_candidates: list[dict[str, Any]] = Field(default_factory=list)  # upstream stage candidates (chain)
+    disease_brief: str = ""                                  # stage-0 overview brief (focus context)
 
 
 class Evidence(BaseModel):
