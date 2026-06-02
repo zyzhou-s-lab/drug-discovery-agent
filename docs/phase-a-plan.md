@@ -105,6 +105,14 @@ M4 两块正交：① 机制（planner 动态选角度 + 动态 scatter + 加权
 - **加权/冲突 judge**（`_VAL_RUBRIC`）：实测 `converged=true, score=0.45`——遗传稳健支持（通过），但**显式标注 C3 的 safety 冲突**（LoF constraint + 代谢综合征 triglyceride 风险），冲突拉分不一票否决。加权而非投票，符合设计。
 - **修 bug**：DeepSeek 兼容层偶发在 forced-tool 返回空 input → `Verdict.model_validate({})` 崩 → `api_judge` try/except fallback（attempts=2 重试后过）。
 
+### M4a 补强：stage-4 synthesis 节点 + 完整链端到端（2026-06-02）
+完整 5-stage 链（含 stage-0）首次端到端连跑，暴露并修复 stage-4 的结构缺口：
+- **现象**：stage-4 `target-validation` exhausted 3/3（judge 0.5/0.6 边缘震荡持续打回）。gate 过、worker 产出正常（5 靶点各 genetic+safety、sourced）——**不是 judge bug 也不是 gate**。
+- **根因（架构缺口）**：stage-4 = `planner → per-(靶点×角度) worker → 确定性 union(_merge_by_symbol) → judge`。每个 worker **盲于跨角度**（genetic session 看不到 safety），union **只机械合并不裁决** → rubric 要的「加权裁决（genetic 主导）+ 显式冲突标注」**无产出者**，summary 机械写"N validated"。且 judge 的 `retry_feedback` 喂回原子 worker 也**没用**（worker 做不到跨角度裁决）。
+- **修复（用户选 A）**：union 之后加 **synthesis 节点**（`_validation_synthesis` + dispatch `angle=="synthesis"` + runner `_planner_validate` 接线 + dummy 兜底回 union）。它看全部角度，做加权裁决（PASS iff genetic≥0.6；弱/空标 WEAK/FAIL）+ 显式标 genetic-safety 冲突，是 `retry_feedback` 的正确落点。**呼应 stage-0 split-and-merge**，但更细：union 保原始（消融用）+ synthesis 出裁决（rubric 用）。ARCHITECTURE §3.7(A)/(F) 更新。
+- **验证（`fc5fef0`）**：stage-4 **1 次过 score 0.80**（148s，原 exhausted 3/3 耗 672s）。裁决：**C3(genetic 0.88)/HTRA1(0.66) PASS**、C9(0.58) WEAK、**C5/CFD(genetic 0.0) FAIL** 并标 `CONFLICT: genetic-null vs safety-ok`——synthesis 正确区分"**药理验证 ≠ 遗传验证**"（C5 有获批药 Izervay、CFD 限速步骤，但 dry AMD 遗传信号空 → 按 rubric 不通过）。**完整发现段 stage 0-4 端到端 1 次连跑通**。
+- **附：literature judge 三层修复**：完整链中 stage-2 曾 exhausted，三层根因依次修——① full JSON 太大 judge 不调 submit_verdict（精简 `_summarize_output`，`92c5e4c`）② judge turn 耗尽（`max_turns` 8→25，`b40ab03`）③ **judge 越权用 WebSearch 查 PubMed 误判真 EuropePMC PMID**（2026 新文献 PubMed 未收录）→ `disallowed_tools` 禁 CC 内置工具（`722982f`）。score 0.25→0.75。**设计确认**：judge 纯评判、禁内置工具、不自核查；真实性由 worker 真工具产出时保证（§3.4）。
+
 ### M5 observer 已并行起步（HAPI，2026-06-01）
 gpu 上由 **HAPI** 做出 M5 observer 并合并入主线（`cfa49d0`，与 M4a 在 worker.py 正交、零冲突）：`api.py`（Index 之上 CQRS 只读 HTTP/SSE + run trigger，**非节点，Runner 仍是唯一 writer**）+ `events.py`（Agent SDK 消息流 → per-stage JSONL step cards）+ `web/`（vite/tailwind/radix/mermaid 前端）+ worker `_emit_stream` + pyproject `api` extra + `scripts/seed_demo.py`。**待对接**：events 落盘的 `DD_ARTIFACTS`/path（本次 stage-4 未生成 events 目录，emit 被 worker 的 try 静默吞掉）。
 

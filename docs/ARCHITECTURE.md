@@ -209,11 +209,12 @@
 ### 3.7 fan-out 验证（scatter-gather）+ 节点/工具粒度原则
 
 **(A) scatter-gather 验证模式**（用于 stage 4 `target-validation`，并可复用到 stage 1 多证据提名）：
-`planner 节点(无状态, 出类型化 plan) → Runner 并行 fan-out「一个角度=一个 worker 节点」(barrier) → 确定性 gather → 无状态 judge 出 verdict → Runner 确定性转移`。
+`planner 节点(无状态, 出类型化 plan) → Runner 并行 fan-out「一个(靶点×角度)=一个 worker 节点」(barrier) → 确定性 gather(union, 保各角度原始) → synthesis 节点(LLM 加权裁决 + 冲突标注) → 无状态 judge 出 verdict → Runner 确定性转移`。
 - 一个角度 = 一个**顶层 worker 节点**（**不是**单节点内 fan-out 子 agent）。理由：① §3.6.B——顶层节点才能再开自己的子 agent（如 TWAS 跨组织 fan-out）；② §3.4——聚合/判定交**外部 judge**，不信节点内自评。
 - barrier 在此**正确**（judge 需全部角度才判）；长算角度用 submit→resume 异步（见 B-2），别让 barrier 干等。
 - 动态选角度 = planner；**模式 (a)**：只从「已封装工具菜单」选（(b) 自动封装未接工具 / (c) 安装新工具算法 = 未来规划）。plan **记入 index**（可复现、有界：角度数/预算上限 + 每角度理由）。
 - 并行由 **Runner（确定代码）**发起；**别让 LLM 节点在一次 thinking 里并行 SSH**（取消级联污染 thinking 签名）。
+- **gather 之后需 synthesis 节点（2026-06-02 补，验证完整链时发现）**：确定性 union（`_merge_by_symbol`）保各角度原始证据（可复现 / judge 透明 / 可消融），但**只机械合并、不裁决**。stage-4 rubric 要的「**加权裁决**（因果向 genetic 主导，弱/空者标 WEAK/FAIL，不因 safety 好就笼统通过）+ **显式冲突标注**（如 genetic-null vs safety-ok）」是**语义判断**——此前**无产出者**，summary 机械写"N validated"、裁决缺失 → judge 持续打回（stage-4 exhausted 3/3）。补一个 **synthesis 节点**（union 之后、judge 之前）专做这步裁决。它还是 **judge `retry_feedback` 的正确落点**：per-(靶点×角度) 原子 worker **盲于跨角度**（genetic session 看不到 safety），即便收到"标 X 的冲突"也做不到；synthesis 看全部角度，才能据 feedback 定向改。**分工**：union 保原始（消融用）、synthesis 出裁决（rubric 用）——比 stage-0 的 session 内 split-and-merge 更细（stage-0 无独立 union 层）。**synthesis 为 stage-4 验证特有**（裁决是验证语义）；stage-1 提名 union 即可（judge 评覆盖度，无需加权裁决）。验证：补节点后 stage-4 **1 次过 score 0.80**（C3/HTRA1 PASS、C9 WEAK、C5/CFD FAIL 并标 CONFLICT——正确区分"药理验证 vs 遗传验证"），judge 不再 0.5/0.6 边缘震荡。
 
 **(B) 节点 vs 工具的粒度原则**——"算法工具一律封装为工具调用、不单开 session；节点 session = 一个角度/完整工作流，不是单个工具"。**成立**，与 §12 控制谱系、agent-as-tool 区分、§3.6 成本一致：
 - **算法 = 确定性工具**（`f(params)→result`，无需推理循环）→ 封装为 **MCP/in-process 工具**由节点**调用**；为跑一条命令单开 session = 浪费 + 抽象倒置。
@@ -255,7 +256,7 @@
 |---|---|---|---|
 | **stage-0 disease-overview** | 一个 session **split-and-merge**（文献理解疾病：子型/组织/机制/通路） | session 内 LLM synthesize → disease brief | 此处无"各角度独立验收"需求，synthesize 合适；brief 存 index 喂下游角度 + stage-4 planner |
 | **角度内**（如 genetic 内跨组织/多源） | 角度 session 内 **subagent split-and-merge**（Task fan-out 子 agent） | session 内 synthesize 该角度结论 | "角度内分解"，不跨角度；CLAUDE.md 的 `genetics-analyst` 等即此。实现需 `allowed_tools` 含 `Task` + 验证 DeepSeek subagent 兼容（backlog） |
-| **跨角度**（genetic vs expression…） | 顶层 **Runner scatter + 确定性 gather + 外部 judge** | Runner `_merge_by_symbol`，judge 看每角度原始 | **保留**：§3.7C 的关键角度 consensus + 边缘靶点 leave-one-out **必须 judge 看到每个角度独立产出**才能做 |
+| **跨角度**（genetic vs expression…） | 顶层 **Runner scatter + 确定性 gather(union) + synthesis 节点 + 外部 judge** | union (`_merge_by_symbol`) 保原始 → synthesis 出加权裁决/冲突标注（见 (A)） | **保 union**：§3.7C 关键角度 consensus + 边缘靶点 leave-one-out **必须 judge 看到每角度独立产出**；**裁决**（加权/冲突）union 机械合并做不到 → 加 synthesis（stage-4 验证特有，提名不需要） |
 **一句话**：overview 与角度内用 split-and-merge（连贯、CC 原生）；**跨角度的聚合判定用顶层 scatter（保消融与可复现）**。
 
 ### 3.8 持久化与恢复（CC 边界 + Runner 的 durable 责任）
