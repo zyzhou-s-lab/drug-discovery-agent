@@ -189,7 +189,8 @@
 
 - **三个判断/决策节点（judge/planner/intake）现已全部 = 脚本 gate + claude -p + in-process typed tool**，且全部 `disallowed_tools` 禁 CC 内置工具（否则会用 WebSearch 越权"核查"——见 literature judge 教训）。**planner 此前是最后一个 raw forced-tool 节点**（std≈0.2 不稳、无 gate、无 submit 时校验），2026-06-02 统一到 claude -p（拿 std 0.025 稳定性 + submit 时菜单 clamp）。
 - **worker 是同构变体**：同样 claude -p + typed，但**执行**节点——无 gate、**挂多个外部工具**（真查 OT/文献）。**判断节点禁工具（评判/规划/守门不行动）、执行节点给工具（做事）**——工具归属区分见 §3.7(D)；intake 是例外中的例外（守门需 1 个只读工具 search_disease 作判据，但 EFO 命中本身是证据，非"行动"）。
-- **intake = pipeline 前的 input 守门**（cli 入口、`--real` only；dummy 跑控制流不调 LLM）：用户输入翻译成英文 + 查 OT EFO，**只放真实疾病进流程**（中文/别名归一化成 OT 标准英文名 + EFO 喂下游），非疾病/恶意输入挡门外。实测放行 `老年黄斑变性`→`age-related macular degeneration`(EFO_0001365)、`type 2 diabetes`→`…mellitus`(MONDO_0005148)；拒 `帮我写首诗`、`'; DROP TABLE --`(识别为注入串)。代码 `intake.py`/`planner.py`，commit `6f7ca23`。
+- **intake = pipeline 前的 input 守门**：用户输入翻译成英文 + 查 OT EFO，**只放真实疾病进流程**（中文/别名归一化成 OT 标准英文名 + EFO 喂下游），非疾病/恶意输入挡门外。`--real` only（dummy 跑控制流不调 LLM）；拒绝时 stage-0 标 exhausted + reason（web 可见）。实测放行 `老年黄斑变性`→`age-related macular degeneration`(EFO_0001365)、`type 2 diabetes`→`…mellitus`(MONDO_0005148)；拒 `帮我写首诗`、`'; DROP TABLE --`(识别为注入串)。
+- **收口位置 = `Runner.run`，不是某个入口（2026-06-02 教训 `ab8ef28`）**：`intake_fn` 注入进 `Runner.run`（像 `judge_fn`，Runner 不 import intake、保持哑）。**因为能启动 pipeline 的入口有两个**——cli `dd-agent run`（`cli.main`）和 api `POST /api/campaigns`（web UI → `api._run_pipeline`），各自构造自己的 Runner。初版只把守门写进 `cli.main` → **web 触发的 run 走 api 那条、绕过了它**（`帮我写首诗` 直接进 stage-0）。守门必须放在**两入口的唯一共同收口 `Runner.run`**（所有入口最终都调它启动 pipeline）才全覆盖；同时修了 api 漏传 `planner_fn`（web run 的 stage-4 曾退化到 `_default_plan`）。代码 `intake.py`/`planner.py`/`runner.py`，commits `6f7ca23`/`ab8ef28`。
 
 ### 3.5 headless 无人值守的硬要求
 - 必须**预授权**（`permission_mode="bypassPermissions"` 或 `can_use_tool` 回调 / `--allowedTools`），否则节点卡在等人确认。
