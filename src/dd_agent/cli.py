@@ -60,24 +60,22 @@ def main(argv=None) -> None:
     # --only just restricts which stage actually executes this run.
     # M2+: --real fans out the stage's scatter angles (M1's single-angle downgrade removed).
 
+    from .intake import validate_disease
     from .planner import plan_validation
-    # disease intake gate (real only; dummy mode exercises control flow, no LLM):
-    # translate→OpenTargets EFO lookup→typed verdict — only a real disease enters.
-    disease = args.disease
-    if real:
-        from .intake import validate_disease
-        intake = asyncio.run(validate_disease(args.disease))
-        if not intake.accepted:
-            ap.error(f"拒绝输入 '{args.disease}'：{intake.reason}")
-        disease = intake.normalized_en or args.disease
-        print(f"[intake] '{args.disease}' → '{disease}'"
-              f"{f' (EFO {intake.efo_id})' if intake.efo_id else ''}")
     # step events for the observer: events.emit() no-ops unless events_dir_var is set,
     # so a cli run is observable in the web UI just like an api-triggered run.
     events_dir_var.set(os.path.join(args.artifacts, args.campaign, "events"))
+    # intake gate + planner are injected hooks; the gate runs INSIDE Runner.run so it
+    # covers cli AND api identically (real only — dummy exercises control flow, no LLM).
     runner = Runner(idx, worker_fn, judge_fn, DISCOVERY_PIPELINE,
-                    planner_fn=(plan_validation if real else None))
-    res = asyncio.run(runner.run(args.campaign, disease, only=only))
+                    planner_fn=(plan_validation if real else None),
+                    intake_fn=(validate_disease if real else None))
+    res = asyncio.run(runner.run(args.campaign, args.disease, only=only))
+    if res.get("rejected"):
+        print(f"[intake] 拒绝输入 '{args.disease}'：{res['reason']}")
+        return
+    if real and res.get("disease") and res["disease"] != args.disease:
+        print(f"[intake] '{args.disease}' → '{res['disease']}'")
     print(f"[{res['campaign']}] {args.cmd} done{' [real]' if real else ''}. state:")
     _print_states(idx, args.campaign)
 

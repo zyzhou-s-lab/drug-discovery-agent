@@ -330,8 +330,21 @@ def _run_pipeline(campaign: str, disease: str, real: bool) -> None:
         from .judge import dummy_judge
         from .worker import dummy_worker
         worker_fn, judge_fn = dummy_worker, dummy_judge
+    # intake gate + planner injected the SAME as cli, so an api-triggered run gates the
+    # disease input and plans stage-4 identically (real only). Runner.run is the single
+    # pipeline start → both entrypoints pass through the same gate (was missing here:
+    # web-UI runs bypassed the cli-only gate, e.g. "帮我写首诗" entered the pipeline).
+    intake_fn = planner_fn = None
+    if real:
+        from .intake import validate_disease
+        from .planner import plan_validation
+        intake_fn, planner_fn = validate_disease, plan_validation
     try:
-        asyncio.run(Runner(run_idx, worker_fn, judge_fn, DISCOVERY_PIPELINE).run(campaign, disease))
+        runner = Runner(run_idx, worker_fn, judge_fn, DISCOVERY_PIPELINE,
+                        planner_fn=planner_fn, intake_fn=intake_fn)
+        res = asyncio.run(runner.run(campaign, disease))
+        if res.get("rejected"):
+            print(f"[run {campaign}] intake rejected: {res['reason']}")
     except Exception as exc:  # surface in the uvicorn log; the stage's state shows the failure
         print(f"[run {campaign}] failed: {exc!r}")
     finally:

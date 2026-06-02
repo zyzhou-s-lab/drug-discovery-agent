@@ -113,11 +113,18 @@ class Index:
         )
         self.db.commit()
 
-    def mark_exhausted(self, campaign: str, stage: str) -> None:
-        self.db.execute(
-            "UPDATE stage_state SET status='exhausted', updated_at=? WHERE campaign=? AND stage=?",
-            (time.time(), campaign, stage),
-        )
+    def mark_exhausted(self, campaign: str, stage: str, reason: str | None = None) -> None:
+        if reason:                       # carry a reason (e.g. intake rejection) into output_json
+            self.db.execute(
+                "UPDATE stage_state SET status='exhausted', output_json=?, updated_at=? "
+                "WHERE campaign=? AND stage=?",
+                (json.dumps({"rejected": reason}, ensure_ascii=False), time.time(), campaign, stage),
+            )
+        else:
+            self.db.execute(
+                "UPDATE stage_state SET status='exhausted', updated_at=? WHERE campaign=? AND stage=?",
+                (time.time(), campaign, stage),
+            )
         self.db.commit()
 
     def output(self, campaign: str, stage: str) -> dict | None:

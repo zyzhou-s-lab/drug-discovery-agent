@@ -34,11 +34,12 @@ def _merge_by_symbol(results) -> list[TargetCandidate]:
 
 class Runner:
     def __init__(self, index: Index, worker_fn, judge_fn, pipeline,
-                 planner_fn=None, max_parallel: int = 8):
+                 planner_fn=None, intake_fn=None, max_parallel: int = 8):
         self.index = index
         self.worker_fn = worker_fn
         self.judge_fn = judge_fn
         self.planner_fn = planner_fn                 # stage-4 validation planning (M4)
+        self.intake_fn = intake_fn                   # disease input gate (all entrypoints收口于此)
         self.pipeline = pipeline
         self.sem = asyncio.Semaphore(max_parallel)   # bounded concurrency, not raw gather
 
@@ -130,6 +131,18 @@ class Runner:
         return synth
 
     async def run(self, campaign: str, disease: str, only: str | None = None) -> dict:
+        # input gate BEFORE any stage — Runner.run is the single pipeline start, so this
+        # covers ALL entrypoints (cli + api), not just one. intake_fn is injected like
+        # judge_fn (Runner stays dumb — doesn't import intake; it just awaits the hook).
+        if self.intake_fn is not None and not only:
+            intake = await self.intake_fn(disease)
+            if not intake.accepted:
+                gate = self.pipeline[0].name          # surface rejection on stage-0 for the observer
+                self.index.record_attempt(campaign, gate)
+                self.index.mark_exhausted(campaign, gate, reason=f"intake 拒绝：{intake.reason}")
+                return {"campaign": campaign, "rejected": True, "reason": intake.reason,
+                        "disease": disease, "states": self.index.all_states(campaign)}
+            disease = intake.normalized_en or disease  # normalized English name flows downstream
         for stage in self.pipeline:
             if only and stage.name != only:                  # --only: execute just this stage
                 continue                                     # (full pipeline still visible to _build_input)
@@ -166,4 +179,4 @@ class Runner:
             if not converged:
                 self.index.mark_exhausted(campaign, stage.name)
                 break
-        return {"campaign": campaign, "states": self.index.all_states(campaign)}
+        return {"campaign": campaign, "disease": disease, "states": self.index.all_states(campaign)}
