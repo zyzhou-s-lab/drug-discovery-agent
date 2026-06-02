@@ -45,4 +45,6 @@ PL 设计哲学在对话中确定，落入 `docs/{CONCEPTS,ARCHITECTURE,DETAILED
 ## 待办
 - **M4b**：stage-4 接重型本地工具（FUSION TWAS / GRN_transfer in-silico KO / coloc / MR）+ 独立源（GWAS Catalog / GTEx / STRING）+ **stage-1 planner 回填**（§3.7 E）；菜单扩 perturbation/expression/network。性质转变：在线 API → gpu/cpu 本地重型计算，可能上 slurm + durable (a) 层。
 - **M3 剩余**：stage-1 独立证据源（GTEx / STRING）给 expression/network 角度——延后，不阻塞（M2 实测暴露 OT datatype 在这两个角度对遗传驱动病空转）。
-- **M5 observer**：HAPI 已起步（api.py + events.py + web/，已合并）；待对接 events 落盘 path、端到端联调。
+- **Phase B 设计段**：结构(AlphaFold3) → 分子设计/对接(Vina) → 模拟(GROMACS) → 报告；gated on qiaoy1 工具访问（凭据已具备）。
+
+（**M5 observer 已联调跑通**，见上方时间线；Phase A 发现段 M0–M4a + observer M5 全部完成。）

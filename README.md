@@ -107,10 +107,16 @@ python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 - [x] **语言定为 Python**（科学 agent 全 Python + 领域工具生态；Agent SDK 双语成熟，不构成 TS 理由）→ 调研见 REFERENCES
 - [x] **持久化/恢复策略**：CC 只给 session 级恢复（resume 会重复 tool call），durable 必须自建 → ARCHITECTURE §3.8。**(c)→(a) 渐进**：快节点先跑通(c)，接 GPU/slurm 长算上(a)；(b) Temporal 留待生产化。**(a) 实现三件套**：daemon watchdog（监控 pid + stream-json 提 session_id + 检 524/崩溃 → `claude --resume`+继续）+ `PreToolUse`/`PostToolUse` hook 幂等（防 524 重复提交）+ Runner/index 跨节点
 - [x] **审计 coder-loop**（TS+Bun+SQLite harness 现成参考）→ 吸收：**持久层 = SQLite(WAL) state-DB + content-addressed artifact-store 分离**、**daemon watchdog 算法**（进程组 kill / recover-stale / 退避预算 / `probe-claude-resume`）照其 Python 重写；保留 judge/scatter-gather/tool 幂等/Agent SDK worker（科学域独有或更强）。详见 REFERENCES + ARCHITECTURE §3.8
-- [ ] **Phase A 实现**：据逻辑链条填 stage1-3 `DOMAIN-FILL` + `schemas.py` + 接 Open Targets/GWAS Catalog/Europe PMC（anchor 发现端 ground-truth = 补体 CFH/C3）
+- [x] **Phase A 发现段（M0–M4a）+ observer（M5）跑通**：发现段 1-4 全链真实（提名→文献→选定→验证）+ web 可视化（详见下方里程碑 + `docs/PROGRESS.md`）
 - [ ] **Phase B（设计）**：qiaoy1 访问手段已具备（凭据 + remote `sshpass`）→ wrap AlphaFold3/Vina/GROMACS/RDKit/ORCA（建议迁共享 `/data`）
 - [x] **M0 骨架（dummy，零 API）跑通**（gpu 验证：状态机 stage 1-4 全 done + 断点续跳过已 done + scatter-gather 聚合）→ `src/dd_agent/`、`docs/phase-a-plan.md`
 - [x] **M1（2026-06-01）stage-1 真实切片端到端跑通**：Agent SDK worker 自主调 OpenTargets（in-process MCP）出候选含补体 C3(0.71)/CFH(0.67)；judge（forced-tool typed Verdict）converged=true、score=0.9。后端实证 = DeepSeek Anthropic 兼容层（详见 `docs/phase-a-plan.md`「M1 完成记录」）
-- [ ] **M2**：恢复 scatter（遗传/表达/网络/文献 4 角度并行）+ pubmed/gtex/string MCP
+- [x] **M2**：stage-1 scatter（4 角度并行 → 确定性去重合并），补体多角度命中，judge 0.9
+- [x] **M3a**：stage 间数据流 + stage-2 文献证据（Europe PMC 真实 PMID），judge 0.85（含修 `--only` 隐藏上游 bug）
+- [x] **M3b**：stage-3 选定（OT `target_profile` 三联评估）→ C3=Top / CFH=biologic（modality 分支）/ HTRA1=次选，judge 0.85
+- [x] **M4a**：stage-4 验证（planner 动态选角度 + 动态 scatter + 加权/冲突 judge）→ C3/CFH/HTRA1 各 genetic+safety，judge 0.45 显式标注 C3 safety 冲突；**发现段 1-4 全链真实跑通**
+- [x] **M5 observer**（HAPI 并行 + 联调）：Index 上 CQRS 只读 API + SSE + SDK 事件流 + web 前端，serve 真实 m3（含 stage-4），浏览器 `http://10.202.2.224:5173`
+- [ ] **M4b**：stage-4 接重型本地工具（FUSION / GRN_transfer + 独立源 GWAS/GTEx/STRING + stage-1 planner 回填 + 可能 slurm/durable）
+- [ ] **stage-1 独立源**（GTEx/STRING，解决 M2 暴露的 expression/network 空转）
 
 详见 [DETAILED-DESIGN §路线图](docs/DETAILED-DESIGN.md#路线图) + [DOMAIN §7 落地顺序](docs/DOMAIN.md)。
