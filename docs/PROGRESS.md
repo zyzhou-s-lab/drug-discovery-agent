@@ -44,6 +44,7 @@ PL 设计哲学在对话中确定，落入 `docs/{CONCEPTS,ARCHITECTURE,DETAILED
 | 06-02 | **stage-4 synthesis 节点**（union 后加权裁决+冲突标注，补"缺综合判定"缺口）→ **完整 5-stage 链端到端 1 次跑通** | ✅ stage-4 exhausted 3/3 → 1 次过 0.80；**裁决**：C3/HTRA1 PASS、C9 WEAK、C5/CFD FAIL（genetic=0，标 CONFLICT；正确区分"药理 vs 遗传验证"） | `fc5fef0` |
 | 06-02 | **疾病 input gate**（翻译→OT EFO→typed `DiseaseIntake`）+ **planner 统一到 claude -p**（迁最后一个 raw-forced-tool 节点）| ✅ intake：中文/英文病名归一化+EFO 放行、非疾病/注入串拒；planner typed plan（引用具体变异）；**`gate+claude-p+typed` 三处同构**（judge/planner/intake） | `6f7ca23` |
 | 06-02 | **修：intake 守门收口到 `Runner.run`**（初版只在 `cli.main`，web/api 触发走 `api._run_pipeline` 绕过 → `帮我写首诗` 进了 stage-0）+ api 补传 `planner_fn` | ✅ 经 Runner 路径（=api）`帮我写首诗`→rejected、stage-0 exhausted+reason（web 可见）；`老年黄斑变性`→归一化+跑通；两入口同门 | `ab8ef28` |
+| 06-02 | **cooperative cancellation**（删除运行中的 campaign 真停掉它，不复活）：Runner 每 stage 边界查 `campaign_exists`，删了就停+清残留；`cancellable` 快照不误停 cli/测试 + Runner 不重建 campaigns 行 | ✅ real run 跑到 stage-0 删除 → 下个边界停、`stage_state` 清空不增长、claude 子进程归 0。运维：重启 uvicorn 用 group-kill 防孤儿 | `cc5842e` `88afa84` |
 
 **完整发现段 stage 0-4 端到端 1 次连跑通**（2026-06-02）：`dry AMD` → 疾病 brief(stage-0) → 提名(scatter 4 角度) → 文献(真 PMID) → 三联评估选定 → 多角度验证 + **synthesis 加权裁决**。最终推进：**C3、HTRA1（PASS）**；C9（WEAK）；C5、CFD（遗传信号空→FAIL，虽有药理先例 Izervay/danicopan）。
 
