@@ -143,7 +143,17 @@ class Runner:
                 return {"campaign": campaign, "rejected": True, "reason": intake.reason,
                         "disease": disease, "states": self.index.all_states(campaign)}
             disease = intake.normalized_en or disease  # normalized English name flows downstream
+        # register the campaign (idempotent) so campaign_exists is a valid cancel signal for
+        # BOTH entrypoints (api calls record_campaign; cli doesn't). A web/api delete drops the
+        # campaigns row → Runner stops at the next stage boundary (cooperative cancellation —
+        # a Python daemon thread can't be force-killed, so the run must check + bail itself).
+        if not only:
+            self.index.record_campaign(campaign, disease)
         for stage in self.pipeline:
+            if not only and not self.index.campaign_exists(campaign):  # deleted externally → stop
+                self.index.delete_campaign(campaign)         # clear any row this run wrote post-delete
+                return {"campaign": campaign, "cancelled": True,
+                        "disease": disease, "states": []}
             if only and stage.name != only:                  # --only: execute just this stage
                 continue                                     # (full pipeline still visible to _build_input)
             if self.index.is_done(campaign, stage.name):     # durable resume: skip completed

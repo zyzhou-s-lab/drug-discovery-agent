@@ -159,6 +159,15 @@ class Index:
         )
         self.db.commit()
 
+    def campaign_exists(self, campaign: str) -> bool:
+        """True iff the campaigns-table row is still present. Runner checks this each stage
+        as a cooperative-cancellation signal: delete_campaign drops the row, and Runner only
+        writes stage_state (never campaigns), so a deleted campaign stays gone → Runner bails
+        at the next stage boundary (a Python daemon thread can't be force-killed externally)."""
+        return self.db.execute(
+            "SELECT 1 FROM campaigns WHERE campaign=?", (campaign,)
+        ).fetchone() is not None
+
     def rename_campaign(self, campaign: str, title: str) -> None:
         self.db.execute(
             """INSERT INTO campaigns(campaign, title, created_at) VALUES(?,?,?)
