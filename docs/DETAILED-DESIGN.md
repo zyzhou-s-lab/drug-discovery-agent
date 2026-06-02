@@ -320,9 +320,10 @@ manifesto §一 指出的实操约束，对本项目（个人本地、跑在 `gp
 - **worker（`claude -p` / Agent SDK，个人本地用）可走订阅额度（OAuth）**，无需 API Key。注意：若环境里**同时**有 `ANTHROPIC_API_KEY` 和 OAuth 登录，CLI **优先用 API Key**（按 token 计费）；想走订阅要 `unset ANTHROPIC_API_KEY`。
 - **judge 用 raw Messages API（`anthropic.Anthropic`）必须有 API Key**，走不了订阅 → 与"worker 想 unset key 走订阅"**冲突**。
 
-**决定（默认 (a)，可改）**：
-- **(a)【默认】judge 显式传 key、用独立变量名**：`anthropic.Anthropic(api_key=os.environ["DD_JUDGE_API_KEY"])`，**不污染全局 `ANTHROPIC_API_KEY`** → worker 仍可走订阅。judge token 量小，按量计费可接受。
-- (b) **judge 也改用 `claude -p --output-format json`**：可走订阅，但**失去 `messages.parse` 的强 schema 校验**（需自己校验 + 重试）。成本极敏感时选它。
+**决定（2026-06-02 实测后更新，最终选 claude -p + submit_verdict）**：
+- 原 (a) raw Messages API + `DD_JUDGE_API_KEY`：typed 强，但**实测评分不稳**（同 brief std≈0.2），且需独立 key。
+- 原 (b) `claude -p --output-format json`：走订阅，但解析 result 文本不可控（实测 `result:"DONE_CP"`）。
+- **最终（实测选定）：claude -p（`claude_agent_sdk.query` session）+ `submit_verdict` in-process tool** —— 既 **typed**（与 worker `submit_result` 同机制，**纠正"claude -p 失去 schema"的旧说法**），又走订阅/同 worker 后端（这里 DeepSeek），且**评分稳 ~10×**（claude -p std 0.025 vs raw ≈0.2；不稳的根是 raw 形态不是模型）。前置 **确定性脚本 `_gate`（格式/完整性，零 LLM）**，pass 由 **harness score 阈值 `DD_JUDGE_PASS`** 定（LLM converged 仅 advisory）。`DD_JUDGE_VOTES` 默认 1。完整设计见 ARCHITECTURE §3.4。
 - worker 另可加 `--max-budget-usd <N>` 设每节点花费天花板。
 
 ## 路线图

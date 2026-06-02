@@ -147,7 +147,7 @@
 
 **决定**：
 - **worker 节点 = Claude Agent SDK（或等价的 `claude -p` 子进程）**，headless 一次性跑完，复用 CC 的 skills/子agent/tools/todo。
-- **judge 节点 = raw Messages API + 结构化输出**（不需要 harness，要纯净 + 强制 typed）。
+- **judge 节点 = claude -p（Agent SDK session）+ `submit_verdict` in-process tool（typed）**（2026-06-02 实测演进，见 §3.4；原设计为 raw Messages API，但 claude -p 同样拿 typed、且评分稳 ~10×，前置确定性 `_gate` 查格式）。
 - **Runner / observer = 我们自己的薄代码**。
 - `claude -p` 与 Agent SDK **起的是同一个 claude 引擎、同一条 session**；SDK 只是这条 session 的官方客户端。选 SDK（进程内自定义工具）还是裸 CLI（进程隔离 / 非 Py·TS）按需。
 
@@ -167,6 +167,16 @@
 ### 3.4 验收：judge 外置，不信 CC 自检
 - CC 的"任务是否完成"是 **session 内自评**（todo 打勾、模型自己说做完了），会**过早宣布完成**。
 - 所以"这阶段产出够不够好 / 要不要重跑"由**外层无状态 judge** 独立裁决。**节点内自检 ≠ 外层验收**，两者都要，拍板的是外层。
+
+**judge 最终形态（2026-06-02 实测演进，三层 + 两条被实测推翻的旧结论）**：
+- **三层职责拆分**：
+  1. **`_gate`（确定性脚本）**：查业务硬规则（候选非空/有 source、overview 不提名）——**零 LLM 成本先跑；格式/完整性归脚本，不归 LLM**（否则浪费 + 拖累评分稳定）。
+  2. **claude -p judge**（`claude_agent_sdk.query` session + `submit_verdict` in-process tool = **typed** Verdict）：**只评语义质量**（领域合理性 / 证据是否真支持 / 逻辑 / 冲突）；**只挂 `submit_verdict`、不挂外部工具——judge 评判不行动**（核查交独立 worker，如 stage-4；事实真伪由 worker 用真工具产出时保证）。
+  3. **harness 决策**：pass = `mean_score ≥ DD_JUDGE_PASS`(默认 0.6)；**LLM 的 `converged` 布尔仅 advisory**（实测它噪声最大）。即 **judge advises score / harness decides threshold**——LLM 给它擅长的评分，"过不过"由 harness 用确定阈值定。
+- **被实测推翻的两条旧说法**：
+  - ~~"claude -p 失去 schema 校验"~~ → **错**。claude -p 经 `submit_verdict` in-process tool 同样拿 typed（与 worker 的 `submit_result` 同机制）；旧说法只针对 `--output-format json` 解析 result 文本那条路（实测会得到 `result:"DONE_CP"`，不可控）。
+  - ~~"DeepSeek 不适合当 judge"~~ → **半错**。不稳的根是 **raw API 形态**（一次性 forced-tool 拍脑袋打分）不是模型：同一 brief，**raw judge std≈0.2**（0.95/0.733/0.533），**claude -p judge std=0.025**（0.9-1.0，9 次）——**agentic（有 thinking/多轮深思）让同一个 DeepSeek 评分稳 ~10×**。
+- **设计经验 + 参数**：需要**稳定判断**的任务，**agentic 形态 > raw 一次性 forced-tool**（同模型亦然）。`DD_JUDGE_VOTES` 默认 **1**（claude -p 单票就稳，far from 0.6）；consensus（N 票 mean score）留作降噪手段。成本 ~$0.156/次（~27k ctx + agentic），`DD_JUDGE_VOTES`/`DD_JUDGE_PASS`/`DD_JUDGE_MAX_TURNS` 均 env 可调。代码：`judge.py`（`_gate`/`_verdict_server`/`_judge_once_claude`/`api_judge`），commits `a34c930`(gate)/`4f11783`(claude -p)。
 
 ### 3.5 headless 无人值守的硬要求
 - 必须**预授权**（`permission_mode="bypassPermissions"` 或 `can_use_tool` 回调 / `--allowedTools`），否则节点卡在等人确认。
