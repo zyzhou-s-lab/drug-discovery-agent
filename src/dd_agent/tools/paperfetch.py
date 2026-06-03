@@ -46,7 +46,7 @@ _S2_FIELDS = "paperId,title,year,citationCount,authors,journal,venue,externalIds
 def _http_json(url: str, headers: dict | None = None) -> dict:
     req = urllib.request.Request(url, headers=headers or {"Accept": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=15) as resp:
             return json.loads(resp.read().decode())
     except urllib.error.URLError as e:
         raise RuntimeError(f"request failed ({url.split('?')[0]}): {e}") from e
@@ -171,8 +171,8 @@ def abstract_by_doi(doi: str) -> dict | None:
         w = _openalex_work_by_doi(doi)
         rec = _norm_openalex(w)
         rec["abstract"] = _reconstruct_abstract(w.get("abstract_inverted_index"))
-    except RuntimeError:
-        rec = None
+    except Exception:  # noqa: BLE001 — incl. network timeout/URLError, not just RuntimeError;
+        rec = None     # must not raise (a hanging DOI made a fetch agent loop to max_turns)
 
     if rec is None or not rec.get("abstract"):
         s2 = _s2_paper_by_doi(doi)

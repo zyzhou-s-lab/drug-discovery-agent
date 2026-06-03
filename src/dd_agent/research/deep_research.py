@@ -124,16 +124,22 @@ def _lit_server():
           "doi/title/year/venue. Use this for the scholarly-literature part of the angle.",
           {"query": str})
     async def _search_lit(args):
-        rows = await _aio.to_thread(search_literature_multi, args.get("query", ""), 8)
-        slim = [{"doi": r.get("doi"), "title": r.get("title"), "year": r.get("year"),
-                 "venue": r.get("venue"), "citation_count": r.get("citation_count")}
-                for r in rows if r.get("title")]
-        return {"content": [{"type": "text", "text": _json.dumps(slim, ensure_ascii=False)}]}
+        try:
+            rows = await _aio.to_thread(search_literature_multi, args.get("query", ""), 8)
+            slim = [{"doi": r.get("doi"), "title": r.get("title"), "year": r.get("year"),
+                     "venue": r.get("venue"), "citation_count": r.get("citation_count")}
+                    for r in rows if r.get("title")]
+            return {"content": [{"type": "text", "text": _json.dumps(slim, ensure_ascii=False)}]}
+        except Exception:  # noqa: BLE001 — never raise: a failing tool makes the agent loop
+            return {"content": [{"type": "text", "text": "[]"}]}
 
     @tool("get_paper", "Fetch a paper's abstract + metadata by DOI (for claim extraction).",
           {"doi": str})
     async def _get_paper(args):
-        rec = await _aio.to_thread(abstract_by_doi, args.get("doi", ""))
+        try:
+            rec = await _aio.to_thread(abstract_by_doi, args.get("doi", ""))
+        except Exception:  # noqa: BLE001 — never raise (a hanging DOI looped a fetch agent)
+            rec = None
         if not rec:
             return {"content": [{"type": "text", "text": "NOT_FOUND"}]}
         return {"content": [{"type": "text", "text": _json.dumps(rec, ensure_ascii=False)}]}
