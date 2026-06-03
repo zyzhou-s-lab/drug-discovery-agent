@@ -522,9 +522,10 @@ async def _deep_overview_worker(stage, node_input: NodeInput) -> NodeOutput:
 # ----------------------------------------------------------------------------
 async def sdk_worker(stage, node_input: NodeInput, angle: str | None = None) -> NodeOutput:
     if stage.name == "disease-overview":
-        if os.environ.get("DD_STAGE0", "simple").lower() == "deep":
-            return await _deep_overview_worker(stage, node_input)
-        return await _overview_worker(stage, node_input)
+        # master defaults to deep-research scope; DD_STAGE0=simple → legacy brief worker
+        if os.environ.get("DD_STAGE0", "deep").lower() == "simple":
+            return await _overview_worker(stage, node_input)
+        return await _deep_overview_worker(stage, node_input)
     if stage.name == "target-hypothesis":
         return await _hypothesis_worker(stage, node_input, angle)
     if stage.name == "literature-evidence":

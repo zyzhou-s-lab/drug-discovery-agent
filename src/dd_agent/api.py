@@ -55,8 +55,10 @@ def _active_pipeline() -> list:
     """DD_STAGE0=deep → the scope-only deep-research flow (1 stage); else full discovery.
     Drives both execution (_run_pipeline) and display (pipeline/campaign view) so a deep
     run shows just stage-0 and reaches a terminal state at scope output."""
-    return (DEEP_RESEARCH_PIPELINE if os.environ.get("DD_STAGE0", "").lower() == "deep"
-            else DISCOVERY_PIPELINE)
+    # master now defaults to the deep-research flow; the legacy 5-stage discovery flow is
+    # preserved on branch `legacy-discovery-pipeline` and reachable via DD_STAGE0=simple.
+    return (DISCOVERY_PIPELINE if os.environ.get("DD_STAGE0", "deep").lower() == "simple"
+            else DEEP_RESEARCH_PIPELINE)
 
 
 def _pipeline_meta() -> list[dict]:
