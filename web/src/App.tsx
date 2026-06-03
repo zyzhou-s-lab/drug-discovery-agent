@@ -39,7 +39,7 @@ const STATUS_LABEL: Record<StageStatus, string> = {
 }
 
 const STAGE_LABEL: Record<string, string> = {
-    'disease-overview': '0 · 疾病总览',
+    'disease-overview': '0 · 研究角度拆解',
     'target-hypothesis': '1 · 靶点假设',
     'literature-evidence': '2 · 文献证据',
     'target-selection': '3 · 靶点选定',
@@ -48,7 +48,7 @@ const STAGE_LABEL: Record<string, string> = {
 
 const STAGE_DESC: Record<string, string> = {
     'disease-overview':
-        '对目标疾病做规范化(EFO 映射)、子型分类与关键基因家族梳理,为后续靶点提名建立背景。',
+        'Deep-research Scope 阶段:把目标疾病拆解为多个互补的研究角度,每个角度是一条可检索的目标(限定维度与方法,不预设具体基因 / 蛋白 / 药物),作为后续文献检索与靶点提名的起点。',
     'target-hypothesis':
         '多角度(遗传 / 表达 / 网络 / 文献)并行从 OpenTargets 提名候选靶点(scatter-gather),按跨角度证据强度合并去重并排序。',
     'literature-evidence':
