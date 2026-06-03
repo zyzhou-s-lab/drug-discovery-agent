@@ -104,6 +104,21 @@ export interface IntakeResult {
     reason: string // rejection reason when accepted=false
 }
 
+// deep-research stage-0 Scope (api.py POST /research/scope -> research.scope)
+export interface ScopeAngle {
+    label: string
+    query: string
+    rationale?: string
+}
+
+export interface ScopeResult {
+    question: string
+    summary: string
+    angles: ScopeAngle[]
+    budget?: { spent_tokens: number; by_phase: Record<string, unknown> }
+    error?: string
+}
+
 // One captured Agent SDK step (events.py / worker._emit_stream)
 export type StepEventType = 'session_start' | 'thinking' | 'text' | 'tool_use' | 'tool_result' | 'result'
 

@@ -439,3 +439,20 @@ def intake_check(req: IntakeRequest) -> dict:
         "efo_id": intake.efo_id,
         "reason": intake.reason,
     }
+
+
+class ScopeRequest(BaseModel):
+    disease: str
+
+
+@app.post("/api/research/scope")
+def research_scope(req: ScopeRequest) -> dict:
+    """deep-research stage-0 Scope: decompose a disease into characterization angles for
+    the user to review before the (expensive) search/fetch/verify phases. Returns
+    {question, summary, angles[], budget}. Sync def → threadpool; asyncio.run for the SDK
+    session. See docs/deep-research-port-plan.md."""
+    from .research.scope import scope
+
+    out = asyncio.run(scope(req.disease))
+    return out or {"question": req.disease, "summary": "", "angles": [],
+                   "error": "scope agent returned no result"}

@@ -7,6 +7,7 @@ import type {
     IntakeResult,
     PipelineStage,
     ReferencesResponse,
+    ScopeResult,
     StageDetail,
     StepEvent,
 } from '@/types/dda'
@@ -39,6 +40,17 @@ export const ddaApi = {
         }).then((r) => {
             if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
             return r.json() as Promise<IntakeResult>
+        }),
+
+    // deep-research stage-0 Scope: decompose a disease into characterization angles
+    scope: (disease: string): Promise<ScopeResult> =>
+        fetch(`${BASE}/research/scope`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ disease }),
+        }).then((r) => {
+            if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
+            return r.json() as Promise<ScopeResult>
         }),
 
     startRun: (body: { disease: string; campaign: string; real?: boolean; skip_intake?: boolean }) =>
