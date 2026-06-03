@@ -97,6 +97,8 @@ async def validate_disease(raw: str) -> DiseaseIntake:
                           "Glob", "Grep", "Task", "TodoWrite", "NotebookEdit"],
         permission_mode="bypassPermissions",
         max_turns=int(os.environ.get("DD_INTAKE_MAX_TURNS", "12")),
+        setting_sources=[],  # don't load the host CLAUDE.md (gpu MemOS block) — it makes the
+                             # gatekeeper ruminate about unmounted memory tools and stall.
     )
     user = (f"用户输入（可能任意语言/格式）：{raw!r}\n"
             "判断它是不是真实疾病：翻译成英文 + 查 OT EFO，然后调 submit_intake 提交。")
