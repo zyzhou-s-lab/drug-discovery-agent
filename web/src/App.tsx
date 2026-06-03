@@ -287,54 +287,54 @@ function PhasesPanel(props: {
         : props.status === 'error' ? '失败'
         : '进行中'
     const [openPhase, setOpenPhase] = useState<string | null>(null)
+    const phaseEventsOf = (k: string) =>
+        props.events.filter((e) => e.label === k || e.label.startsWith(k + ' · '))
+    const sessionsOf = (k: string) =>
+        new Set(phaseEventsOf(k).filter((e) => e.type !== 'progress').map((e) => e.label)).size
+    const selEvents = openPhase ? phaseEventsOf(openPhase) : []
     return (
-        <Card className="p-4">
-            <div className="mb-2 flex items-center gap-2 text-sm font-medium">
-                深度检索
-                <span className="text-[10px] font-normal text-[var(--app-hint)]">
-                    {agents} agents{ts.length ? ` · ${fmt(elapsed)}` : ''} · {statusLabel}
-                </span>
-            </div>
-            <div className="flex flex-col gap-1.5">
-                {phases.map(([k, label]) => {
-                    const total = prog[k]?.total ?? 0
-                    const d = prog[k]?.done ?? 0
-                    const complete = total > 0 && d >= total
-                    const pct = total > 0 ? Math.min(100, Math.round((d / total) * 100)) : 0
-                    // this phase's agent sessions (labels "search · …" etc.); progress events
-                    // (label === k) are dropped inside StepCards.
-                    const phaseEvents = props.events.filter(
-                        (e) => e.label === k || e.label.startsWith(k + ' · ')
-                    )
-                    const sessions = new Set(
-                        phaseEvents.filter((e) => e.type !== 'progress').map((e) => e.label)
-                    ).size
-                    const open = openPhase === k
-                    return (
-                        <div key={k}>
+        <>
+            <Card className="p-4">
+                <div className="mb-2 flex items-center gap-2 text-sm font-medium">
+                    深度检索
+                    <span className="text-[10px] font-normal text-[var(--app-hint)]">
+                        {agents} agents{ts.length ? ` · ${fmt(elapsed)}` : ''} · {statusLabel}
+                    </span>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                    {phases.map(([k, label]) => {
+                        const total = prog[k]?.total ?? 0
+                        const d = prog[k]?.done ?? 0
+                        const complete = total > 0 && d >= total
+                        const pct = total > 0 ? Math.min(100, Math.round((d / total) * 100)) : 0
+                        const sessions = sessionsOf(k)
+                        const open = openPhase === k
+                        // a phase row is a SELECTOR; the selected phase's agent cards render in the
+                        // detail area below the panel (master-detail), not inline.
+                        return (
                             <button
+                                key={k}
                                 onClick={() => setOpenPhase(open ? null : k)}
                                 disabled={sessions === 0}
-                                className="flex w-full items-center gap-2 text-xs disabled:cursor-default"
+                                className={'flex w-full items-center gap-2 rounded px-1 py-0.5 text-xs disabled:cursor-default '
+                                    + (open ? 'bg-[var(--app-subtle-bg)]' : '')}
                             >
                                 <span className="w-3 text-[var(--app-button)]">{complete ? '✓' : d > 0 ? '·' : ''}</span>
                                 <span className="w-10 text-left font-medium">{label}</span>
                                 <div className="h-1.5 flex-1 overflow-hidden rounded bg-[var(--app-subtle-bg)]">
                                     <div className="h-full bg-[var(--app-button)] transition-all" style={{ width: `${pct}%` }} />
                                 </div>
-                                <span className="w-12 text-right font-mono text-[var(--app-hint)]">{d}/{total || '—'}</span>
-                                <span className="w-4 text-right text-[var(--app-hint)]">{sessions > 0 ? (open ? '▾' : '▸') : ''}</span>
+                                <span className="w-16 text-right font-mono text-[var(--app-hint)]">{d}/{total || '—'}</span>
+                                <span className="w-8 text-right text-[10px] text-[var(--app-hint)]">{sessions > 0 ? `${sessions} 会话` : ''}</span>
                             </button>
-                            {open && sessions > 0 && (
-                                <div className="mt-1.5 pl-3">
-                                    <StepCards events={phaseEvents} terminal={props.terminal} />
-                                </div>
-                            )}
-                        </div>
-                    )
-                })}
-            </div>
-        </Card>
+                        )
+                    })}
+                </div>
+            </Card>
+            {openPhase && sessionsOf(openPhase) > 0 && (
+                <StepCards events={selEvents} terminal={props.terminal} />
+            )}
+        </>
     )
 }
 
