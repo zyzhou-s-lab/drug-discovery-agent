@@ -136,6 +136,21 @@ def test_research_no_claims_salvage():
     assert "No claims" in r["summary"]
 
 
+def test_schema_errors_validates_required_enum_type():
+    from dd_agent.research.orchestrate import _schema_errors
+    schema = {"type": "object", "required": ["results"], "properties": {
+        "results": {"type": "array"}, "refuted": {"type": "boolean"},
+        "confidence": {"enum": ["high", "medium", "low"]}}}
+    assert _schema_errors({"results": []}, schema) == []  # valid
+    assert any("results" in e for e in _schema_errors({}, schema))  # missing required
+    assert any("array" in e for e in _schema_errors({"results": "x"}, schema))  # wrong type
+    assert any("confidence" in e for e in
+               _schema_errors({"results": [], "confidence": "bad"}, schema))  # bad enum
+    # simple {name: type} form (scope-style)
+    assert _schema_errors({"question": "q", "angles": []}, {"question": str, "angles": list}) == []
+    assert any("question" in e for e in _schema_errors({"angles": []}, {"question": str, "angles": list}))
+
+
 def test_bibliography_groups_cited_sources():
     from dd_agent.research.deep_research import _bibliography
     confirmed = [

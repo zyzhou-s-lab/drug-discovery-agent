@@ -10,6 +10,44 @@ See docs/deep-research-port-plan.md §0, §4.
 from __future__ import annotations
 
 
+def _schema_errors(args, schema) -> list[str]:
+    """Shallow JSON-Schema check (top-level required / type / enum). Mirrors CC's
+    StructuredOutput validation: a submit_* call with a bad shape is rejected so the model
+    re-submits (instead of us silently accepting garbage). Nested array items are prompt-
+    steered, so we don't deep-validate them (avoid over-rejecting)."""
+    errs: list[str] = []
+    if not isinstance(args, dict):
+        return ["input must be a JSON object"]
+    if not isinstance(schema, dict):
+        return errs
+    is_json_schema = schema.get("type") == "object" or "properties" in schema
+    if is_json_schema:
+        props = schema.get("properties", {})
+        for req in schema.get("required", []):
+            if req not in args or args.get(req) in (None, ""):
+                errs.append(f"missing required field '{req}'")
+        for k, spec in props.items():
+            if k not in args or not isinstance(spec, dict):
+                continue
+            v = args[k]
+            if "enum" in spec and v not in spec["enum"]:
+                errs.append(f"'{k}'={v!r} must be one of {spec['enum']}")
+            t = spec.get("type")
+            if t == "string" and not isinstance(v, str):
+                errs.append(f"'{k}' must be a string")
+            elif t == "array" and not isinstance(v, list):
+                errs.append(f"'{k}' must be an array")
+            elif t == "boolean" and not isinstance(v, bool):
+                errs.append(f"'{k}' must be a boolean")
+            elif t == "object" and not isinstance(v, dict):
+                errs.append(f"'{k}' must be an object")
+    else:  # simple {name: type} form (scope-style)
+        for k in schema:
+            if k not in args or args.get(k) in (None, ""):
+                errs.append(f"missing field '{k}'")
+    return errs
+
+
 async def run_agent(phase, prompt, submit_name, schema, extra_mcp, budget, sem,
                     on_message=None, max_turns: int = 12, should_stop=None):
     """One isolated forced-tool agent = deep-research's `agent({schema})` primitive.
@@ -39,6 +77,14 @@ async def run_agent(phase, prompt, submit_name, schema, extra_mcp, budget, sem,
 
     @tool(submit_name, "Submit the structured result. Call exactly once when done.", schema)
     async def _submit(args):
+        # Validate like CC's StructuredOutput: reject a bad shape so the model re-submits
+        # (the error tool result tells it what to fix) instead of us accepting garbage.
+        errs = _schema_errors(args, schema)
+        if errs:
+            return {"content": [{"type": "text", "text":
+                    "Your input failed validation: " + "; ".join(errs[:5])
+                    + f". Call {submit_name} again with corrected fields — the tool input IS your answer."}],
+                    "is_error": True}
         cap["v"] = args
         return {"content": [{"type": "text", "text": "recorded"}]}
 
@@ -70,14 +116,14 @@ async def run_agent(phase, prompt, submit_name, schema, extra_mcp, budget, sem,
         **extra_opts,
     )
 
-    # Bounded in-session nudge (DD_DR_NUDGE, default 1): if the agent ends a turn WITHOUT
-    # calling submit_name (prose ending / gave up), re-prompt it in the SAME session to call
-    # the tool — preserving its work (web searches). This is what CC's Workflow does to hit
-    # 100% structured output; bounded so it can't become the old "retry storm". The SDK has no
-    # forced tool_choice, so this is the closest we get.
-    max_nudges = int(os.environ.get("DD_DR_NUDGE", "1"))
-    nudge = (f"You have not called `{submit_name}` yet. Call it now, exactly once, with the "
-             f"structured result — that is your only remaining action. No prose, no Sources list.")
+    # Bounded in-session nudge (DD_DR_NUDGE, default 2 = CC's SubagentStop bound): if the agent
+    # ends a turn without a VALID submit_name (prose-ended, gave up, or its submit failed the
+    # schema check above), re-prompt it in the SAME session — preserving its work. Verbatim
+    # from CC's bundled Workflow ("You did not call X. You MUST call X …"). Bounded so it can't
+    # become the old "retry storm".
+    max_nudges = int(os.environ.get("DD_DR_NUDGE", "2"))
+    nudge = (f"You did not call `{submit_name}`. You MUST call `{submit_name}` to return your "
+             f"answer — the tool input IS your answer, in the required schema. Call it now.")
 
     async def _drain(client):
         async for msg in client.receive_response():
