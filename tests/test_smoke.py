@@ -4,7 +4,6 @@ branch legacy-discovery-pipeline.)"""
 import asyncio
 
 from dd_agent.index import Index
-from dd_agent.judge import dummy_judge
 from dd_agent.pipeline import PIPELINE
 from dd_agent.runner import Runner
 from dd_agent.worker import dummy_worker
@@ -15,7 +14,7 @@ def _fresh(tmp_path):
 
 
 def _run(idx, campaign="c1"):
-    r = Runner(idx, dummy_worker, dummy_judge, PIPELINE)
+    r = Runner(idx, dummy_worker, None, PIPELINE)  # judge_fn=None: unjudged deep-research flow
     return asyncio.run(r.run(campaign, "dry AMD"))
 
 
