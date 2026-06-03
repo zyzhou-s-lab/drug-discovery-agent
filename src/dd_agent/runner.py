@@ -181,6 +181,11 @@ class Runner:
                     out = await self.worker_fn(stage, node_input, None)
                 # converge side effects into index (artifact, atomic) then judge
                 self.index.write_artifact(campaign, stage.name, out.model_dump_json())
+                if not getattr(stage, "rubric_prompt", ""):
+                    # no rubric → unjudged stage (deep-research flow): accept output, no verdict
+                    self.index.mark_done(campaign, stage.name, out.model_dump(), None)
+                    converged = True
+                    break
                 verdict = await self.judge_fn(stage, out)   # judge is async (claude -p session)
                 if verdict.converged:                         # Runner = dumb transition on verdict
                     self.index.mark_done(campaign, stage.name, out.model_dump(), verdict.model_dump())

@@ -30,7 +30,7 @@ from pydantic import BaseModel
 
 from .events import events_dir_var, read_stage_events
 from .index import Index
-from .pipeline import DEEP_RESEARCH_PIPELINE, DISCOVERY_PIPELINE
+from .pipeline import PIPELINE
 
 DB_PATH = os.environ.get("DD_DB", "/tmp/dd/state.sqlite")
 ARTIFACTS = os.environ.get("DD_ARTIFACTS", "/tmp/dd/artifacts")
@@ -52,13 +52,9 @@ def get_index() -> Index:
 
 
 def _active_pipeline() -> list:
-    """DD_STAGE0=deep → the scope-only deep-research flow (1 stage); else full discovery.
-    Drives both execution (_run_pipeline) and display (pipeline/campaign view) so a deep
-    run shows just stage-0 and reaches a terminal state at scope output."""
-    # master now defaults to the deep-research flow; the legacy 5-stage discovery flow is
-    # preserved on branch `legacy-discovery-pipeline` and reachable via DD_STAGE0=simple.
-    return (DISCOVERY_PIPELINE if os.environ.get("DD_STAGE0", "deep").lower() == "simple"
-            else DEEP_RESEARCH_PIPELINE)
+    """The active pipeline. master = deep-research flow only; the legacy 5-stage discovery
+    pipeline lives on branch `legacy-discovery-pipeline`."""
+    return PIPELINE
 
 
 def _pipeline_meta() -> list[dict]:
@@ -163,7 +159,7 @@ async def campaign_file_raw(campaign: str, path: str) -> dict:
 def _run_context(idx: Index, campaign: str) -> str:
     """Compact text digest of a run (stage summaries + candidates + verdicts) to ground the chat."""
     parts: list[str] = []
-    for s in DISCOVERY_PIPELINE:
+    for s in PIPELINE:
         status = idx.status(campaign, s.name) or "queued"
         out = idx.output(campaign, s.name)
         verdict = idx.verdict(campaign, s.name)
@@ -240,7 +236,7 @@ async def campaign_chat(campaign: str, req: ChatRequest) -> StreamingResponse:
 @app.get("/api/campaigns/{campaign}/stages/{stage}")
 async def stage_detail(campaign: str, stage: str) -> dict:
     idx = get_index()
-    if not any(s.name == stage for s in DISCOVERY_PIPELINE):
+    if not any(s.name == stage for s in PIPELINE):
         raise HTTPException(404, f"unknown stage {stage!r}")
     return {
         "campaign": campaign,
@@ -266,7 +262,7 @@ def _campaign_dois(idx: Index, campaign: str) -> list[str]:
     """Deduped, first-seen-ordered DOIs from every literature evidence across all stages."""
     seen: set[str] = set()
     order: list[str] = []
-    for s in DISCOVERY_PIPELINE:
+    for s in PIPELINE:
         out = idx.output(campaign, s.name)
         if not out:
             continue
@@ -394,20 +390,14 @@ def _run_pipeline(campaign: str, disease: str, real: bool, skip_intake: bool = F
         from .judge import dummy_judge
         from .worker import dummy_worker
         worker_fn, judge_fn = dummy_worker, dummy_judge
-    # intake gate + planner injected the SAME as cli, so an api-triggered run gates the
-    # disease input and plans stage-4 identically (real only). Runner.run is the single
-    # pipeline start → both entrypoints pass through the same gate (was missing here:
-    # web-UI runs bypassed the cli-only gate, e.g. "帮我写首诗" entered the pipeline).
-    # skip_intake: the web dialog already ran the intake gate (POST /intake/check) before
-    # creating this run, so re-gating here would just repeat the same LLM call. Direct API
-    # callers (no pre-check) still get gated. planner is unaffected.
+    # intake gate (real runs): validates/normalizes the disease before the pipeline.
+    # skip_intake: the web dialog already ran POST /intake/check, so re-gating here would
+    # repeat the same LLM call. Direct API callers (no pre-check) still get gated.
+    # (planner removed — it drove the legacy stage-4; the deep-research flow has no planner.)
     intake_fn = planner_fn = None
-    if real:
-        from .planner import plan_validation
-        planner_fn = plan_validation
-        if not skip_intake:
-            from .intake import validate_disease
-            intake_fn = validate_disease
+    if real and not skip_intake:
+        from .intake import validate_disease
+        intake_fn = validate_disease
     # DD_STAGE0=deep → scope-only deep-research flow (ends at scope output, no
     # disease-overview judge); otherwise the full discovery pipeline.
     try:

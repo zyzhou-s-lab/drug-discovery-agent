@@ -1,9 +1,11 @@
-"""M0 smoke: dummy worker/judge, zero API. Verifies control flow + durable + scatter."""
+"""Smoke: deep-research flow (scope-only PIPELINE) with dummy worker/judge, zero API.
+Verifies control flow + durable resume. (Legacy 5-stage discovery smoke tests are on
+branch legacy-discovery-pipeline.)"""
 import asyncio
 
 from dd_agent.index import Index
 from dd_agent.judge import dummy_judge
-from dd_agent.pipeline import DISCOVERY_PIPELINE
+from dd_agent.pipeline import PIPELINE
 from dd_agent.runner import Runner
 from dd_agent.worker import dummy_worker
 
@@ -13,14 +15,14 @@ def _fresh(tmp_path):
 
 
 def _run(idx, campaign="c1"):
-    r = Runner(idx, dummy_worker, dummy_judge, DISCOVERY_PIPELINE)
+    r = Runner(idx, dummy_worker, dummy_judge, PIPELINE)
     return asyncio.run(r.run(campaign, "dry AMD"))
 
 
 def test_pipeline_runs_all_stages(tmp_path):
     idx = _fresh(tmp_path)
     _run(idx)
-    for stage in DISCOVERY_PIPELINE:
+    for stage in PIPELINE:
         assert idx.is_done("c1", stage.name), f"{stage.name} not done"
 
 
@@ -33,12 +35,3 @@ def test_durable_resume_skips_done(tmp_path):
     _run(idx2)
     attempts_after = {s: a for s, _, a in idx2.all_states("c1")}
     assert attempts_before == attempts_after, "resume re-ran already-done stages"
-
-
-def test_scatter_gather_merges_angles(tmp_path):
-    idx = _fresh(tmp_path)
-    _run(idx)
-    out = idx.output("c1", "target-hypothesis")
-    assert out is not None and "[scatter]" in out["summary"]
-    symbols = {c["symbol"] for c in out["candidates"]}
-    assert "CFH" in symbols  # anchor: complement surfaces (genetics-first dry-AMD)
