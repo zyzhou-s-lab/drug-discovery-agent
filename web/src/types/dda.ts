@@ -141,6 +141,10 @@ export interface DeepReport {
     openQuestions?: string[]
     refuted?: { claim: string; vote: string; source: string }[]
     sources?: { url: string; quality: string; angle?: string; claimCount?: number }[]
+    // bibliography over confirmed-finding sources (M3.3): papers->APA7, web, database
+    references?: { n: number; doi: string; apa7: string; title?: string }[]
+    webSources?: { title?: string; url: string }[]
+    dbSources?: { title?: string; url: string }[]
     stats?: Record<string, number>
     budget?: { spent_tokens: number; by_phase?: Record<string, unknown> }
 }

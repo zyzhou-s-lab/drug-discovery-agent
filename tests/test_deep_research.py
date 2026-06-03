@@ -136,6 +136,23 @@ def test_research_no_claims_salvage():
     assert "No claims" in r["summary"]
 
 
+def test_bibliography_groups_cited_sources():
+    from dd_agent.research.deep_research import _bibliography
+    confirmed = [
+        {"claim": "c1", "source_type": "web", "sourceUrl": "https://a.com/x"},
+        {"claim": "c2", "source_type": "database", "sourceUrl": "https://ebi.ac.uk/ols4/efo"},
+    ]
+    all_sources = [
+        {"source_type": "web", "url": "https://a.com/x", "title": "A"},
+        {"source_type": "database", "url": "https://ebi.ac.uk/ols4/efo", "title": "EFO"},
+        {"source_type": "web", "url": "https://uncited.com/z", "title": "Z"},  # not in confirmed
+    ]
+    refs, web, db = _bibliography(confirmed, all_sources)
+    assert refs == []  # no paper sources → no network/APA7
+    assert [w["url"] for w in web] == ["https://a.com/x"]  # uncited excluded
+    assert [d["title"] for d in db] == ["EFO"]
+
+
 def test_research_all_refuted_salvage():
     async def fake(phase, prompt, submit, schema, extra, budget, sem, on_message=None, max_turns=12):
         if submit == "submit_results":

@@ -307,6 +307,42 @@ def survives(verdicts) -> bool:
     return len(valid) >= REFUTATIONS_REQUIRED and refuted < REFUTATIONS_REQUIRED
 
 
+def _bibliography(confirmed, all_sources):
+    """From the sources that backed CONFIRMED claims, split into APA7 references (papers),
+    web sources, and database sources. cite_by_doi is a deterministic network format step
+    (OpenAlex), run only over confirmed papers. Returns (references, webSources, dbSources)."""
+    try:
+        from ..tools.paperfetch import cite_by_doi
+    except Exception:  # noqa: BLE001 — offline tests / paperfetch unavailable
+        def cite_by_doi(_d):
+            return None
+
+    cited = set()
+    for c in confirmed:
+        doi = (c.get("doi") or "").strip().lower()
+        cited.add(("doi:" + doi) if doi else norm_url(c.get("sourceUrl", "")))
+
+    refs, web, db, seen = [], [], [], set()
+    for s in all_sources:
+        doi = (s.get("doi") or "").strip().lower()
+        key = ("doi:" + doi) if doi else norm_url(s.get("url", ""))
+        if key not in cited or key in seen:
+            continue
+        seen.add(key)
+        st = s.get("source_type") or "web"
+        if st == "paper" and s.get("doi"):
+            try:
+                apa = cite_by_doi(s["doi"])
+            except Exception:  # noqa: BLE001
+                apa = None
+            refs.append({"n": len(refs) + 1, "doi": s["doi"], "apa7": apa or "", "title": s.get("title")})
+        elif st == "database":
+            db.append({"title": s.get("title"), "url": s.get("url")})
+        else:
+            web.append({"title": s.get("title"), "url": s.get("url")})
+    return refs, web, db
+
+
 # ─── Orchestration ───
 async def research(question: str, angles: list, *, budget: Budget | None = None,
                    sem=None, on_event=None, on_progress=None, fetch_budget: int = MAX_FETCH,
@@ -464,6 +500,9 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
         **stats_base, "verified": len(voted), "confirmed": len(confirmed), "killed": len(killed),
         "agentCalls": 1 + len(angles) + len(all_sources) + len(voted) * VOTES_PER_CLAIM + 1,
     }
+    # bibliography over the sources that backed CONFIRMED claims (papers→APA7, web, database)
+    references, web_sources, db_sources = _bibliography(confirmed, all_sources)
+    biblio = {"references": references, "webSources": web_sources, "dbSources": db_sources}
 
     if not report:
         return {
@@ -473,7 +512,7 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
             "confirmed": [{"claim": c["claim"], "source": c.get("sourceUrl"), "quote": c.get("quote"),
                            "vote": str(len(c["verdicts"]) - c["refutedVotes"]) + "-" + str(c["refutedVotes"])}
                           for c in confirmed],
-            "refuted": refuted_out, "sources": sources_out,
+            "refuted": refuted_out, "sources": sources_out, **biblio,
             "stats": {**stats, "afterSynthesis": 0}, "budget": budget.report(),
         }
 
@@ -483,6 +522,7 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
         **report,
         "refuted": refuted_out,
         "sources": sources_out,
+        **biblio,
         "stats": {**stats, "afterSynthesis": len(report.get("findings", []))},
         "budget": budget.report(),
     }

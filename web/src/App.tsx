@@ -347,6 +347,44 @@ function DeepReportView(props: { report: DeepReport }) {
                     </ul>
                 </div>
             )}
+            {r.references && r.references.length > 0 && (
+                <div className="mt-3">
+                    <p className="mb-1 text-sm font-medium">参考文献</p>
+                    <ol className="flex flex-col gap-1.5">
+                        {r.references.map((ref) => (
+                            <ReferenceItem key={ref.n} r={{ n: ref.n, doi: ref.doi, apa7: ref.apa7 }} />
+                        ))}
+                    </ol>
+                </div>
+            )}
+            {r.dbSources && r.dbSources.length > 0 && (
+                <div className="mt-3">
+                    <p className="mb-1 text-sm font-medium">数据库来源</p>
+                    <ul className="flex flex-col gap-0.5">
+                        {r.dbSources.map((s, i) => (
+                            <li key={i} className="text-xs">
+                                <a href={s.url} target="_blank" rel="noreferrer" className="text-[var(--app-link,#2563eb)] hover:underline">
+                                    {s.title || s.url}
+                                </a>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
+            {r.webSources && r.webSources.length > 0 && (
+                <div className="mt-3">
+                    <p className="mb-1 text-sm font-medium">网络来源</p>
+                    <ul className="flex flex-col gap-0.5">
+                        {r.webSources.map((s, i) => (
+                            <li key={i} className="text-xs">
+                                <a href={s.url} target="_blank" rel="noreferrer" className="text-[var(--app-link,#2563eb)] hover:underline">
+                                    {s.title || s.url}
+                                </a>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
             {r.refuted && r.refuted.length > 0 && (
                 <details className="mt-3">
                     <summary className="cursor-pointer text-xs text-[var(--app-hint)]">被对抗式核验否决的 claim（{r.refuted.length}）</summary>
