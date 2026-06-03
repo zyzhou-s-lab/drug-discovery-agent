@@ -14,6 +14,7 @@ Protocol: async worker_fn(stage, NodeInput, angle: str | None) -> NodeOutput.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from .events import emit
@@ -485,10 +486,42 @@ async def _overview_worker(stage, node_input: NodeInput) -> NodeOutput:
 
 
 # ----------------------------------------------------------------------------
+# stage-0 (deep-research variant, M1 scope-only): DD_STAGE0=deep selects this.
+# Runs the deep-research Scope phase → emits the angle plan as the brief. The full
+# searched brief (scope→search→verify→synth) lands in M2. See docs/deep-research-port-plan.md.
+# ----------------------------------------------------------------------------
+async def _deep_overview_worker(stage, node_input: NodeInput) -> NodeOutput:
+    from .research.scope import scope
+
+    res = await scope(node_input.disease)
+    angles = (res or {}).get("angles") or []
+    if not angles:
+        return NodeOutput(stage=stage.name, summary="[deep-research scope] 未能拆解出研究角度",
+                          open_questions=["scope returned no angles"])
+    lines = [f"# Deep-research 研究计划 (scope-only, M1) — {res.get('question', node_input.disease)}", ""]
+    if res.get("summary"):
+        lines += [res["summary"], ""]
+    lines.append("## 研究角度（后续 Search 据此展开；完整检索简报待 M2）")
+    for i, a in enumerate(angles, 1):
+        lines.append(f"{i}. **{a.get('label', '')}**")
+        lines.append(f"   - query: {a.get('query', '')}")
+        if a.get("rationale"):
+            lines.append(f"   - 理由: {a['rationale']}")
+    spent = (res.get("budget") or {}).get("spent_tokens")
+    if spent:
+        lines.append(f"\n_(scope tokens: {spent})_")
+    return NodeOutput(
+        stage=stage.name, summary="\n".join(lines), candidates=[],
+        open_questions=["这是 scope-only 研究计划；完整检索简报（search→verify→synth）待 M2"])
+
+
+# ----------------------------------------------------------------------------
 # dispatch
 # ----------------------------------------------------------------------------
 async def sdk_worker(stage, node_input: NodeInput, angle: str | None = None) -> NodeOutput:
     if stage.name == "disease-overview":
+        if os.environ.get("DD_STAGE0", "simple").lower() == "deep":
+            return await _deep_overview_worker(stage, node_input)
         return await _overview_worker(stage, node_input)
     if stage.name == "target-hypothesis":
         return await _hypothesis_worker(stage, node_input, angle)
