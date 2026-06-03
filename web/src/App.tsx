@@ -412,12 +412,15 @@ function DeepReportView(props: { report: DeepReport }) {
 // phase tree + per-agent session cards + the cited report.
 function DeepResearchPage(props: { campaign: string; report: ReportResponse | null }) {
     const { events } = useStageEvents(props.campaign, 'deep-research')
+    const { detail } = useStageDetail(props.campaign, 'disease-overview')
+    const angles = detail?.output?.data?.angles ?? []
     const state = props.report?.status.state ?? 'none'
     const active = state === 'running' || state === 'stopping'
+    const terminal = state === 'done' || state === 'stopped' || state === 'error'
     return (
         <div className="flex flex-col gap-4">
-            {active && (
-                <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
+                {active && (
                     <Button
                         size="sm"
                         variant="outline"
@@ -426,8 +429,17 @@ function DeepResearchPage(props: { campaign: string; report: ReportResponse | nu
                     >
                         {state === 'stopping' ? '停止中…' : '停止检索'}
                     </Button>
-                </div>
-            )}
+                )}
+                {terminal && angles.length > 0 && (
+                    <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => ddaApi.startSearch(props.campaign, angles).catch(() => {})}
+                    >
+                        重新检索
+                    </Button>
+                )}
+            </div>
             <PhasesPanel events={events} status={state} />
             {state === 'error' && (
                 <Card className="p-4 text-sm text-[var(--app-badge-error-text,#dc2626)]">
