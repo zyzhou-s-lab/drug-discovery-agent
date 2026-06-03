@@ -14,8 +14,9 @@ from .events import emit
 from .schemas import NodeInput, NodeOutput
 
 
-def _emit_stream(stage_name: str, label: str, msg) -> None:
-    """Map one Agent SDK message to step-card events (路子一: same stream HAPI consumes)."""
+def _emit_stream(stage_name: str, label: str, msg, skip_text: bool = False) -> None:
+    """Map one Agent SDK message to step-card events (路子一: same stream HAPI consumes).
+    skip_text: drop assistant TextBlock prose (e.g. scope's chatty post-submit summary)."""
     from claude_agent_sdk import (
         AssistantMessage, ResultMessage, TextBlock, ThinkingBlock,
         ToolResultBlock, ToolUseBlock, UserMessage,
@@ -26,7 +27,7 @@ def _emit_stream(stage_name: str, label: str, msg) -> None:
                 if isinstance(b, ThinkingBlock):
                     emit(stage_name, label, "thinking", text=b.thinking)
                 elif isinstance(b, TextBlock):
-                    if b.text and b.text.strip():
+                    if not skip_text and b.text and b.text.strip():
                         emit(stage_name, label, "text", text=b.text)
                 elif isinstance(b, ToolUseBlock):
                     emit(stage_name, label, "tool_use", tool_id=b.id, name=b.name, input=b.input)
@@ -59,7 +60,8 @@ async def _deep_overview_worker(stage, node_input: NodeInput) -> NodeOutput:
 
     # stream live step cards (forward scope's SDK messages, like the legacy _run_session)
     emit(stage.name, "scope", "session_start", prompt=f"deep-research scope: {node_input.disease}")
-    res = await scope(node_input.disease, on_message=lambda m: _emit_stream(stage.name, "scope", m))
+    res = await scope(node_input.disease,
+                      on_message=lambda m: _emit_stream(stage.name, "scope", m, skip_text=True))
     angles = (res or {}).get("angles") or []
     if not angles:
         return NodeOutput(stage=stage.name, summary="[deep-research scope] 未能拆解出研究角度",

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { LoadingState } from '@/components/LoadingState'
 import { StepCards } from '@/components/StepCards'
@@ -18,6 +19,7 @@ import type {
     Evidence,
     Reference,
     ReferencesResponse,
+    ScopeAngle,
     StageStatus,
     TargetCandidate,
 } from '@/types/dda'
@@ -182,6 +184,64 @@ function StageRail(props: {
     )
 }
 
+// Scope angles (structured) + a control to add the user's own angle. Added angles are
+// client-side for now; they will feed the Search phase (M2). (scope-checkpoint augment)
+function ScopeAngles(props: { serverAngles: ScopeAngle[]; spentTokens?: number }) {
+    const [extra, setExtra] = useState<string[]>([])
+    const [draft, setDraft] = useState('')
+    const add = () => {
+        const t = draft.trim()
+        if (!t) return
+        setExtra((x) => [...x, t])
+        setDraft('')
+    }
+    const total = props.serverAngles.length + extra.length
+    return (
+        <Card className="p-4">
+            <div className="mb-2 text-sm font-medium">
+                研究角度 ({total})
+                {props.spentTokens != null && (
+                    <span className="ml-2 text-[10px] font-normal text-[var(--app-hint)]">tokens {props.spentTokens}</span>
+                )}
+            </div>
+            <ol className="flex flex-col gap-2">
+                {props.serverAngles.map((a, i) => (
+                    <li key={`s${i}`} className="rounded-lg border border-[var(--app-border)] p-2.5">
+                        <div className="text-sm font-medium">{i + 1}. {a.label}</div>
+                        <div className="mt-0.5 break-words font-mono text-xs text-[var(--app-hint)]">{a.query}</div>
+                        {a.rationale && <div className="mt-1 text-xs text-[var(--app-fg)]">{a.rationale}</div>}
+                    </li>
+                ))}
+                {extra.map((label, i) => (
+                    <li key={`u${i}`} className="rounded-lg border border-dashed border-[var(--app-border)] p-2.5">
+                        <div className="flex items-center gap-2 text-sm font-medium">
+                            <span>{props.serverAngles.length + i + 1}. {label}</span>
+                            <span className="rounded bg-[var(--app-subtle-bg)] px-1.5 py-0.5 text-[10px] font-normal text-[var(--app-hint)]">自定义</span>
+                            <button
+                                onClick={() => setExtra((x) => x.filter((_, j) => j !== i))}
+                                className="ml-auto text-xs text-[var(--app-hint)] hover:text-[var(--app-fg)]"
+                            >删除</button>
+                        </div>
+                    </li>
+                ))}
+            </ol>
+            <div className="mt-3 flex gap-2">
+                <input
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && add()}
+                    placeholder="添加一个自定义研究角度…"
+                    className="flex-1 rounded-md border border-[var(--app-border)] bg-transparent px-2 py-1.5 text-sm outline-none focus:border-[var(--app-button)]"
+                />
+                <Button size="sm" variant="outline" onClick={add}>添加角度</Button>
+            </div>
+            {extra.length > 0 && (
+                <p className="mt-1 text-[10px] text-[var(--app-hint)]">自定义角度将用于后续检索阶段(M2)。</p>
+            )}
+        </Card>
+    )
+}
+
 function StageDetail(props: { campaign: string; stage: string }) {
     const { detail, loading } = useStageDetail(props.campaign, props.stage)
     const { events } = useStageEvents(props.campaign, props.stage)
@@ -229,27 +289,15 @@ function StageDetail(props: { campaign: string; stage: string }) {
 
             {detail.output ? (
                 <>
-                    <p className="text-sm text-[var(--app-hint)]">{detail.output.summary}</p>
+                    {/* summary hidden when structured angles are present (it just restates the task) */}
+                    {!(detail.output.data?.angles?.length) && detail.output.summary && (
+                        <p className="text-sm text-[var(--app-hint)]">{detail.output.summary}</p>
+                    )}
                     {detail.output.data?.angles && detail.output.data.angles.length > 0 && (
-                        <Card className="p-4">
-                            <div className="mb-2 text-sm font-medium">
-                                研究角度 ({detail.output.data.angles.length})
-                                {detail.output.data.budget?.spent_tokens != null && (
-                                    <span className="ml-2 text-[10px] font-normal text-[var(--app-hint)]">
-                                        tokens {detail.output.data.budget.spent_tokens}
-                                    </span>
-                                )}
-                            </div>
-                            <ol className="flex flex-col gap-2">
-                                {detail.output.data.angles.map((a, i) => (
-                                    <li key={i} className="rounded-lg border border-[var(--app-border)] p-2.5">
-                                        <div className="text-sm font-medium">{i + 1}. {a.label}</div>
-                                        <div className="mt-0.5 break-words font-mono text-xs text-[var(--app-hint)]">{a.query}</div>
-                                        {a.rationale && <div className="mt-1 text-xs text-[var(--app-fg)]">{a.rationale}</div>}
-                                    </li>
-                                ))}
-                            </ol>
-                        </Card>
+                        <ScopeAngles
+                            serverAngles={detail.output.data.angles}
+                            spentTokens={detail.output.data.budget?.spent_tokens}
+                        />
                     )}
                     <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
                         {(detail.output.candidates ?? []).map((c) => (

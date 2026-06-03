@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { Card } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
@@ -364,11 +364,17 @@ function timelineNodes(events: StepEvent[]): ReactNode[] {
     return nodes
 }
 
-function SessionCard(props: { label: string; events: StepEvent[]; defaultOpen: boolean }) {
-    const [open, setOpen] = useState(props.defaultOpen)
+function SessionCard(props: { label: string; events: StepEvent[] }) {
     const evs = props.events
     const result = evs.find((e) => e.type === 'result')
     const running = !result
+    const [open, setOpen] = useState(running)          // expanded while running
+    const wasRunning = useRef(running)
+    useEffect(() => {
+        // auto-collapse the session card once it finishes (running -> done edge)
+        if (wasRunning.current && !running) setOpen(false)
+        wasRunning.current = running
+    }, [running])
     const isError = result?.is_error
     const start = evs[0]?.ts ?? 0
     const end = result?.ts ?? evs[evs.length - 1]?.ts ?? start
@@ -415,16 +421,11 @@ export function StepCards(props: { events: StepEvent[] }) {
     }, [props.events])
 
     if (props.events.length === 0) return null
-    // expand running sessions, or all of them when there's only one
-    const single = groups.length === 1
-
     return (
         <div className="flex flex-col gap-2">
-            <div className="text-sm font-medium">执行过程 · {groups.length} 个会话</div>
-            {groups.map((g) => {
-                const running = !g.events.some((e) => e.type === 'result')
-                return <SessionCard key={g.label} label={g.label} events={g.events} defaultOpen={single || running} />
-            })}
+            {groups.map((g) => (
+                <SessionCard key={g.label} label={g.label} events={g.events} />
+            ))}
         </div>
     )
 }
