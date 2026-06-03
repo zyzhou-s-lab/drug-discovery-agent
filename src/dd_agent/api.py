@@ -592,9 +592,18 @@ async def campaign_report(campaign: str) -> dict:
     """Poll the Search phase: {status:{state}, report|null}.
     state ∈ none/running/stopping/stopped/done/error."""
     status_path, report_path = _search_paths(campaign)
+    status = _read_json(status_path) or {"state": "none"}
+    # self-heal orphans: a 'running'/'stopping' status with no live worker in the registry
+    # means the thread died (e.g. server restart) and will never finish — mark it stopped.
+    if status.get("state") in ("running", "stopping"):
+        with _search_lock:
+            alive = campaign in _search_stops
+        if not alive:
+            status = {"state": "stopped", "note": "worker ended (server restart)"}
+            _write_json(status_path, status)
     return {
         "campaign": campaign,
-        "status": _read_json(status_path) or {"state": "none"},
+        "status": status,
         "report": _read_json(report_path),
     }
 

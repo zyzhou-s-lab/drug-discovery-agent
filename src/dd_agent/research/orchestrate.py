@@ -44,11 +44,30 @@ async def run_agent(phase, prompt, submit_name, schema, extra_mcp, budget, sem,
 
     servers = {"submit": create_sdk_mcp_server("submit", "1.0.0", [_submit])}
     servers.update(extra_mcp or {})
+
+    # Optional model override for deep-research agents (DD_DR_MODEL). Default unset → inherit the
+    # process env (DeepSeek). Set DD_DR_MODEL (+ DD_DR_BASE_URL / DD_DR_AUTH_TOKEN) to route these
+    # agents to a faster / forced-output-honoring backend (e.g. mimo-v2.5-pro) without changing
+    # the rest of dd-agent. ClaudeAgentOptions.env merges over os.environ (SDK), so only overrides
+    # are needed.
+    import os
+    extra_opts: dict = {}
+    dr_model = os.environ.get("DD_DR_MODEL")
+    if dr_model:
+        env_over = {"ANTHROPIC_MODEL": dr_model}
+        if os.environ.get("DD_DR_BASE_URL"):
+            env_over["ANTHROPIC_BASE_URL"] = os.environ["DD_DR_BASE_URL"]
+        if os.environ.get("DD_DR_AUTH_TOKEN"):
+            env_over["ANTHROPIC_AUTH_TOKEN"] = os.environ["DD_DR_AUTH_TOKEN"]
+        extra_opts["model"] = dr_model
+        extra_opts["env"] = env_over
+
     opts = ClaudeAgentOptions(
         mcp_servers=servers,
         permission_mode="bypassPermissions",
         max_turns=max_turns,
         setting_sources=[],
+        **extra_opts,
     )
     async with sem:
         try:
