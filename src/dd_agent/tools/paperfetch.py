@@ -36,8 +36,11 @@ OPENALEX_API = "https://api.openalex.org/works"
 S2_API = "https://api.semanticscholar.org/graph/v1"
 _MAILTO = os.environ.get("UNPAYWALL_EMAIL", "dd-agent@example.com")
 
-# venue/externalIds/openAccessPdf give us venue, doi+pmid, and is_oa in one call
-_S2_FIELDS = "paperId,title,year,citationCount,authors,journal,venue,externalIds,openAccessPdf"
+# venue/externalIds/openAccessPdf give us venue, doi+pmid, and is_oa in one call.
+# abstract + tldr (S2's one-line AI summary) are carried in SEARCH results so the agent can
+# extract from them without a separate fetch — mirrors the paper-fetch skill's search_s2.py.
+_S2_FIELDS = ("paperId,title,abstract,tldr,year,citationCount,authors,"
+              "journal,venue,externalIds,openAccessPdf")
 
 
 # ----------------------------------------------------------------------------
@@ -84,6 +87,8 @@ def _norm_openalex(w: dict) -> dict:
         "authors": [a for a in authors if a],
         "citation_count": w.get("cited_by_count", 0),
         "is_oa": bool((w.get("open_access") or {}).get("is_oa")),
+        "abstract": _reconstruct_abstract(w.get("abstract_inverted_index"))[:600],
+        "tldr": "",
         "source": "openalex",
     }
 
@@ -100,6 +105,8 @@ def _norm_s2(p: dict) -> dict:
         "authors": [a.get("name", "") for a in (p.get("authors") or []) if a.get("name")],
         "citation_count": p.get("citationCount", 0),
         "is_oa": bool(p.get("openAccessPdf")),
+        "abstract": _clean(p.get("abstract"))[:600],
+        "tldr": _clean((p.get("tldr") or {}).get("text") or ""),
         "source": "semantic_scholar",
     }
 
@@ -211,7 +218,7 @@ def _openalex_by_ids(work_urls: list[str], size: int) -> list[dict]:
 # ----------------------------------------------------------------------------
 def _fill(base: dict, extra: dict) -> None:
     """Backfill empty fields of `base` from `extra`; OR the OA flag; union sources."""
-    for f in ("pmid", "title", "year", "venue", "citation_count"):
+    for f in ("pmid", "title", "year", "venue", "citation_count", "abstract", "tldr"):
         if not base.get(f) and extra.get(f):
             base[f] = extra[f]
     if not base.get("authors") and extra.get("authors"):

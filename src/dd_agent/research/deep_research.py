@@ -126,8 +126,11 @@ def _lit_server():
     async def _search_lit(args):
         try:
             rows = await _aio.to_thread(search_literature_multi, args.get("query", ""), 8)
+            # carry abstract + tldr so the agent can extract claims from the search result
+            # directly (no extra get_paper round-trip), like the paper-fetch skill's search.
             slim = [{"doi": r.get("doi"), "title": r.get("title"), "year": r.get("year"),
-                     "venue": r.get("venue"), "citation_count": r.get("citation_count")}
+                     "venue": r.get("venue"), "citation_count": r.get("citation_count"),
+                     "tldr": r.get("tldr") or "", "abstract": r.get("abstract") or ""}
                     for r in rows if r.get("title")]
             return {"content": [{"type": "text", "text": _json.dumps(slim, ensure_ascii=False)}]}
         except Exception:  # noqa: BLE001 — never raise: a failing tool makes the agent loop
