@@ -40,13 +40,15 @@ CONF_RANK = {"high": 0, "medium": 1, "low": 2}
 SEARCH_SCHEMA = {
     "type": "object", "required": ["results"],
     "properties": {
-        "results": {"type": "array", "maxItems": 6, "items": {
-            "type": "object", "required": ["url", "title", "relevance"],
+        "results": {"type": "array", "maxItems": 8, "items": {
+            "type": "object", "required": ["title", "relevance", "source_type"],
             "properties": {
-                "url": {"type": "string"},
+                "url": {"type": "string"},                 # web / database record-or-API URL
+                "doi": {"type": "string"},                 # paper sources
                 "title": {"type": "string"},
                 "snippet": {"type": "string"},
                 "relevance": {"enum": ["high", "medium", "low"]},
+                "source_type": {"enum": ["web", "paper", "database"]},
             },
         }},
     },
@@ -100,33 +102,93 @@ _END = ("\n\nYour ONLY completion action is to call `{tool}` exactly once with t
         "result. Do NOT write a prose answer, a summary, or a Sources list — just call the tool.")
 
 
+# Lazily-built in-process MCP exposing the literature tools (search_literature / get_paper),
+# injected additively into search/fetch agents. Lazy import keeps deep_research importable
+# (and unit-testable) without the SDK installed.
+_LIT = None
+
+
+def _lit_server():
+    global _LIT
+    if _LIT is not None:
+        return _LIT
+    import asyncio as _aio
+    import json as _json
+
+    from claude_agent_sdk import create_sdk_mcp_server, tool
+
+    from ..tools.paperfetch import abstract_by_doi, search_literature_multi
+
+    @tool("search_literature",
+          "Search peer-reviewed literature (OpenAlex + Semantic Scholar). Returns papers with "
+          "doi/title/year/venue. Use this for the scholarly-literature part of the angle.",
+          {"query": str})
+    async def _search_lit(args):
+        rows = await _aio.to_thread(search_literature_multi, args.get("query", ""), 8)
+        slim = [{"doi": r.get("doi"), "title": r.get("title"), "year": r.get("year"),
+                 "venue": r.get("venue"), "citation_count": r.get("citation_count")}
+                for r in rows if r.get("title")]
+        return {"content": [{"type": "text", "text": _json.dumps(slim, ensure_ascii=False)}]}
+
+    @tool("get_paper", "Fetch a paper's abstract + metadata by DOI (for claim extraction).",
+          {"doi": str})
+    async def _get_paper(args):
+        rec = await _aio.to_thread(abstract_by_doi, args.get("doi", ""))
+        if not rec:
+            return {"content": [{"type": "text", "text": "NOT_FOUND"}]}
+        return {"content": [{"type": "text", "text": _json.dumps(rec, ensure_ascii=False)}]}
+
+    _LIT = {"lit": create_sdk_mcp_server("lit", "1.0.0", [_search_lit, _get_paper])}
+    return _LIT
+
+
 def SEARCH_PROMPT(question: str, angle: dict) -> str:
     return (
-        "## Web Searcher: " + angle["label"] + "\n\n"
+        "## Source Scout: " + angle["label"] + "\n\n"
         "Research question: \"" + question + "\"\n\n"
         "Your angle: **" + angle["label"] + "** — " + (angle.get("rationale") or "") + "\n"
         "Search query: `" + angle["query"] + "`\n\n"
-        "## Task\nUse WebSearch with the query above (or a refined version). Return the top 4-6 most relevant results.\n"
-        "Rank by relevance to the ORIGINAL question, not just the search query. Skip obvious SEO spam/content farms.\n"
-        "Include a short snippet capturing why each result is relevant."
+        "## Task\nFind the top 4-8 most relevant sources for this angle, drawing on THREE kinds of sources:\n"
+        "1. **web** — use WebSearch for guidelines, reviews, institutional pages. Skip SEO spam/content farms.\n"
+        "2. **paper** — use the `search_literature` tool for peer-reviewed papers; return each paper's `doi`.\n"
+        "3. **database** — when relevant, surface AUTHORITATIVE database / ontology API records and return their\n"
+        "   record/API URL: disease ontologies (EFO/MONDO via EBI OLS4), gene/variant resources\n"
+        "   (Ensembl, MyGene, ClinVar), trial registries (ClinicalTrials.gov). Prefer primary databases.\n\n"
+        "Tag every result with `source_type` (web | paper | database). For paper set `doi`; for web/database set `url`.\n"
+        "Rank by relevance to the ORIGINAL question, not just the search query. Add a short snippet per result.\n\n"
+        "GUARDRAIL: databases here are for IDENTIFICATION / CLASSIFICATION / qualitative facts (ontology IDs,\n"
+        "subtypes, gene roles) only. Do NOT fetch or eyeball quantitative association scores or target rankings\n"
+        "(e.g. OpenTargets association scores) — that is a separate downstream step."
         + _END.format(tool="submit_results")
     )
 
 
 def FETCH_PROMPT(question: str, source: dict, angle: str) -> str:
+    st = source.get("source_type") or "web"
+    if st == "paper":
+        retrieve = ("## Task\n1. Call the `get_paper` tool with this DOI to retrieve the abstract + metadata:\n"
+                    "   **DOI:** " + (source.get("doi") or "") + "\n"
+                    "   (if it returns NOT_FOUND or an empty abstract, return claims: [] and sourceQuality: \"unreliable\")\n")
+    elif st == "database":
+        retrieve = ("## Task\n1. Use WebFetch to GET this database / ontology API record and read its structured fields:\n"
+                    "   **URL:** " + (source.get("url") or "") + "\n"
+                    "   Treat it as a PRIMARY source; extract the concrete records (IDs, classifications, qualitative facts).\n")
+    else:
+        retrieve = ("## Task\n1. Use WebFetch to retrieve the page content:\n"
+                    "   **URL:** " + (source.get("url") or "") + "\n")
     return (
-        "## Source Extractor\n\n"
+        "## Source Extractor (" + st + ")\n\n"
         "Research question: \"" + question + "\"\n\n"
-        "Fetch and extract key claims from this source:\n"
-        "**URL:** " + source["url"] + "\n**Title:** " + source.get("title", "") + "\n**Found via:** " + angle + " search\n\n"
-        "## Task\n1. Use WebFetch to retrieve the page content.\n"
-        "2. Assess source quality: primary research/institution? secondary reporting? blog/opinion? forum? unreliable?\n"
+        "Extract key claims from this source:\n"
+        "**Title:** " + (source.get("title") or "") + "\n**Found via:** " + angle + " search\n\n"
+        + retrieve +
+        "2. Assess source quality: primary research/database/institution? secondary reporting? blog/opinion? forum? unreliable?\n"
         "3. Extract 2-5 FALSIFIABLE claims that bear on the research question. Each claim must:\n"
         "   - be a concrete, checkable statement (not vague generalities)\n"
-        "   - include a direct quote from the source as support\n"
+        "   - include a direct quote (or the exact field value, for database records) as support\n"
         "   - be rated central/supporting/tangential to the research question\n"
         "4. Note publish date if available.\n\n"
-        "If the fetch fails or the page is irrelevant/paywalled, return claims: [] and sourceQuality: \"unreliable\"."
+        "If retrieval fails or the content is irrelevant/paywalled, return claims: [] and sourceQuality: \"unreliable\"."
         + _END.format(tool="submit_claims")
     )
 
@@ -204,13 +266,19 @@ def norm_url(u: str) -> str:
         return u.lower()
 
 
+def source_key(r) -> str:
+    """Dedup identity: papers by DOI, web/database by normalized URL."""
+    doi = (r.get("doi") or "").strip().lower()
+    return ("doi:" + doi) if doi else norm_url(r.get("url", ""))
+
+
 def dedup_results(results, angle, seen, slots, dupes, budget_dropped):
     """Port of the blueprint's per-searcher dedup. Mutates seen / slots / dupes / budget_dropped.
     slots is a 1-element list (shared mutable fetch budget). Returns the novel results to fetch."""
     ordered = sorted(results, key=lambda r: REL_RANK.get(r.get("relevance"), 3))
     novel = []
     for r in ordered:
-        key = norm_url(r.get("url", ""))
+        key = source_key(r)
         if key in seen:
             dupes.append({**r, "angle": angle, "dupOf": seen[key]})
             continue
@@ -265,10 +333,15 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
     slots = [fetch_budget]
     lock = asyncio.Lock()
 
+    try:
+        lit = _lit_server()  # search_literature / get_paper, injected into search + fetch agents
+    except Exception:  # noqa: BLE001 — SDK/paperfetch unavailable (offline tests): run web-only
+        lit = {}
+
     # ── pipeline: search → dedup → fetch+extract (link-level concurrency, one barrier at the end) ──
     async def angle_chain(angle: dict) -> list:
         sr = await run_agent("search", SEARCH_PROMPT(question, angle), "submit_results",
-                             SEARCH_SCHEMA, {}, budget, sem)
+                             SEARCH_SCHEMA, lit, budget, sem)
         if not sr or not sr.get("results"):
             ev("search", angle["label"] + ": 0 结果")
             return []
@@ -281,14 +354,17 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
 
         async def fetch_one(source: dict):
             ext = await run_agent("fetch", FETCH_PROMPT(question, source, angle["label"]),
-                                  "submit_claims", EXTRACT_SCHEMA, {}, budget, sem)
+                                  "submit_claims", EXTRACT_SCHEMA, lit, budget, sem)
             if not ext:
                 return None
             sq = ext.get("sourceQuality")
+            st = source.get("source_type") or "web"
+            doi = source.get("doi") or None
+            url = source.get("url") or (f"https://doi.org/{doi}" if doi else "")
             return {
-                "url": source["url"], "title": source.get("title"), "angle": angle["label"],
-                "sourceQuality": sq, "publishDate": ext.get("publishDate"),
-                "claims": [{**c, "sourceUrl": source["url"], "sourceQuality": sq}
+                "url": url, "title": source.get("title"), "angle": angle["label"],
+                "source_type": st, "doi": doi, "sourceQuality": sq, "publishDate": ext.get("publishDate"),
+                "claims": [{**c, "sourceUrl": url, "doi": doi, "source_type": st, "sourceQuality": sq}
                            for c in (ext.get("claims") or [])],
             }
 

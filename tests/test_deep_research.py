@@ -37,6 +37,16 @@ def test_dedup_respects_fetch_budget_for_non_high():
     assert len(dropped) == 1 and slots[0] == -1
 
 
+def test_dedup_papers_by_doi():
+    seen, dupes, dropped, slots = {}, [], [], [15]
+    res = [{"doi": "10.1/AbC", "title": "P", "relevance": "high", "source_type": "paper"},
+           {"doi": "10.1/abc", "title": "P dup", "relevance": "medium", "source_type": "paper"},
+           {"url": "https://x.com/p", "title": "web", "relevance": "high", "source_type": "web"}]
+    novel = dedup_results(res, "g", seen, slots, dupes, dropped)
+    # the two papers (same DOI, case-insensitive) collapse to one; web is separate
+    assert len(novel) == 2 and len(dupes) == 1
+
+
 def test_dedup_orders_by_relevance():
     seen, dupes, dropped, slots = {}, [], [], [15]
     res = [{"url": "https://a.com/low", "title": "l", "relevance": "low"},

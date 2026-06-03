@@ -137,6 +137,30 @@ def _openalex_work_by_doi(doi: str) -> dict:
                       f"?mailto={urllib.parse.quote(_MAILTO)}")
 
 
+def _reconstruct_abstract(inv: dict | None) -> str:
+    """OpenAlex stores abstracts as an inverted index {word: [positions]}; rebuild the text."""
+    if not inv:
+        return ""
+    positions: list[tuple[int, str]] = []
+    for word, locs in inv.items():
+        for p in locs:
+            positions.append((p, word))
+    positions.sort()
+    return " ".join(w for _, w in positions)
+
+
+def abstract_by_doi(doi: str) -> dict | None:
+    """Resolve a DOI to {doi,title,year,venue,authors,abstract,...} via OpenAlex (for claim
+    extraction in the deep-research fetch step). None if unresolved / no title."""
+    try:
+        w = _openalex_work_by_doi(doi)
+    except RuntimeError:
+        return None
+    rec = _norm_openalex(w)
+    rec["abstract"] = _reconstruct_abstract(w.get("abstract_inverted_index"))
+    return rec if rec.get("title") else None
+
+
 def _openalex_by_ids(work_urls: list[str], size: int) -> list[dict]:
     """Fetch metadata for OpenAlex work IDs (batched OR-filter), preserving input order."""
     ids = [w.rsplit("/", 1)[-1] for w in work_urls][:size]
