@@ -26,7 +26,7 @@ async def run_agent(phase, prompt, submit_name, schema, extra_mcp, budget, sem,
     import asyncio  # noqa: F401  (kept local; engine is import-light for testability)
 
     from claude_agent_sdk import (
-        ClaudeAgentOptions, create_sdk_mcp_server, query, tool,
+        ClaudeAgentOptions, ClaudeSDKClient, create_sdk_mcp_server, tool,
     )
 
     # cooperative cancel: a stopped run starts no new agents (in-flight ones drain naturally),
@@ -69,20 +69,41 @@ async def run_agent(phase, prompt, submit_name, schema, extra_mcp, budget, sem,
         setting_sources=[],
         **extra_opts,
     )
+
+    # Bounded in-session nudge (DD_DR_NUDGE, default 1): if the agent ends a turn WITHOUT
+    # calling submit_name (prose ending / gave up), re-prompt it in the SAME session to call
+    # the tool — preserving its work (web searches). This is what CC's Workflow does to hit
+    # 100% structured output; bounded so it can't become the old "retry storm". The SDK has no
+    # forced tool_choice, so this is the closest we get.
+    max_nudges = int(os.environ.get("DD_DR_NUDGE", "1"))
+    nudge = (f"You have not called `{submit_name}` yet. Call it now, exactly once, with the "
+             f"structured result — that is your only remaining action. No prose, no Sources list.")
+
+    async def _drain(client):
+        async for msg in client.receive_response():
+            if on_message is not None:
+                try:
+                    on_message(msg)
+                except Exception:  # noqa: BLE001 — streaming is best-effort
+                    pass
+            if type(msg).__name__ == "ResultMessage":
+                budget.add(phase, getattr(msg, "usage", None), getattr(msg, "total_cost_usd", 0) or 0)
+
     async with sem:
         try:
-            async for msg in query(prompt=prompt, options=opts):
-                if on_message is not None:
-                    try:
-                        on_message(msg)
-                    except Exception:  # noqa: BLE001 — streaming is best-effort
-                        pass
-                if type(msg).__name__ == "ResultMessage":
-                    budget.add(phase, getattr(msg, "usage", None), getattr(msg, "total_cost_usd", 0) or 0)
+            async with ClaudeSDKClient(options=opts) as client:
+                await client.query(prompt)
+                await _drain(client)
+                attempt = 0
+                while cap.get("v") is None and attempt < max_nudges:
+                    if (should_stop is not None and should_stop()) or budget.exhausted():
+                        break
+                    attempt += 1
+                    await client.query(nudge)
+                    await _drain(client)
         except Exception:  # noqa: BLE001
-            # An agent that errors (e.g. "max turns", a web agent that kept searching and
-            # never called submit_*) must NOT crash the whole gather. Drop it to None — the
-            # blueprint's resilience: fetch→drop source, verify→abstain (handled by survives()).
+            # An agent that errors (max turns / failing tool loop) must NOT crash the gather —
+            # drop to None (fetch→drop source, verify→abstain via survives()).
             return cap.get("v")
     return cap.get("v")
 
