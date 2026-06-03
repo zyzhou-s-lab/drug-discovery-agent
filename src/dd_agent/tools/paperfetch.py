@@ -149,16 +149,47 @@ def _reconstruct_abstract(inv: dict | None) -> str:
     return " ".join(w for _, w in positions)
 
 
+def _s2_paper_by_doi(doi: str) -> dict | None:
+    """Fetch a single paper (incl. abstract) from Semantic Scholar by DOI. None on failure."""
+    d = _norm_doi(doi)
+    if not d:
+        return None
+    try:
+        return _s2_get("/paper/DOI:" + d,
+                       {"fields": "title,abstract,year,venue,authors,externalIds"})
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def abstract_by_doi(doi: str) -> dict | None:
-    """Resolve a DOI to {doi,title,year,venue,authors,abstract,...} via OpenAlex (for claim
-    extraction in the deep-research fetch step). None if unresolved / no title."""
+    """Resolve a DOI to {doi,title,year,venue,authors,abstract,...} for claim extraction in the
+    deep-research fetch step. OpenAlex for metadata; falls back to Semantic Scholar for the
+    abstract (OpenAlex omits many abstracts for licensing → empty inverted index). None if
+    unresolved / no title."""
+    rec: dict | None = None
     try:
         w = _openalex_work_by_doi(doi)
+        rec = _norm_openalex(w)
+        rec["abstract"] = _reconstruct_abstract(w.get("abstract_inverted_index"))
     except RuntimeError:
-        return None
-    rec = _norm_openalex(w)
-    rec["abstract"] = _reconstruct_abstract(w.get("abstract_inverted_index"))
-    return rec if rec.get("title") else None
+        rec = None
+
+    if rec is None or not rec.get("abstract"):
+        s2 = _s2_paper_by_doi(doi)
+        if s2:
+            if rec is None:
+                rec = {
+                    "doi": _norm_doi(doi),
+                    "pmid": str(s2["externalIds"]["PubMed"]) if (s2.get("externalIds") or {}).get("PubMed") else None,
+                    "title": _clean(s2.get("title")),
+                    "year": s2.get("year"),
+                    "venue": _clean(s2.get("venue")),
+                    "authors": [a.get("name", "") for a in (s2.get("authors") or []) if a.get("name")],
+                    "source": "semantic_scholar",
+                }
+            if not rec.get("abstract"):
+                rec["abstract"] = s2.get("abstract") or ""
+    return rec if rec and rec.get("title") else None
 
 
 def _openalex_by_ids(work_urls: list[str], size: int) -> list[dict]:
