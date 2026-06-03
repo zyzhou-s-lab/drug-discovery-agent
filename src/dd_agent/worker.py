@@ -64,21 +64,19 @@ async def _deep_overview_worker(stage, node_input: NodeInput) -> NodeOutput:
     if not angles:
         return NodeOutput(stage=stage.name, summary="[deep-research scope] 未能拆解出研究角度",
                           open_questions=["scope returned no angles"])
-    lines = [f"# Deep-research 研究计划 (scope-only, M1) — {res.get('question', node_input.disease)}", ""]
-    if res.get("summary"):
-        lines += [res["summary"], ""]
-    lines.append("## 研究角度（后续 Search 据此展开；完整检索简报待 M2）")
-    for i, a in enumerate(angles, 1):
-        lines.append(f"{i}. **{a.get('label', '')}**")
-        lines.append(f"   - query: {a.get('query', '')}")
-        if a.get("rationale"):
-            lines.append(f"   - 理由: {a['rationale']}")
-    spent = (res.get("budget") or {}).get("spent_tokens")
-    if spent:
-        lines.append(f"\n_(scope tokens: {spent})_")
+    # structured payload for the frontend (rendered as angle cards); summary = short strategy
     return NodeOutput(
-        stage=stage.name, summary="\n".join(lines), candidates=[],
-        open_questions=["这是 scope-only 研究计划；完整检索简报（search→verify→synth）待 M2"])
+        stage=stage.name,
+        summary=res.get("summary") or f"Deep-research scope: {len(angles)} 个研究角度",
+        candidates=[],
+        open_questions=["scope-only 研究计划；完整检索简报（search→verify→synth）待 M2"],
+        data={
+            "kind": "scope",
+            "question": res.get("question", node_input.disease),
+            "angles": angles,
+            "budget": res.get("budget"),
+        },
+    )
 
 
 # ----------------------------------------------------------------------------

@@ -26,6 +26,12 @@ export interface NodeOutput {
     candidates: TargetCandidate[]
     self_assessment: string
     open_questions: string[]
+    data?: {
+        kind?: string
+        question?: string
+        angles?: ScopeAngle[]
+        budget?: { spent_tokens: number; by_phase?: Record<string, unknown> }
+    }
 }
 
 export interface Verdict {

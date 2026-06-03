@@ -230,6 +230,27 @@ function StageDetail(props: { campaign: string; stage: string }) {
             {detail.output ? (
                 <>
                     <p className="text-sm text-[var(--app-hint)]">{detail.output.summary}</p>
+                    {detail.output.data?.angles && detail.output.data.angles.length > 0 && (
+                        <Card className="p-4">
+                            <div className="mb-2 text-sm font-medium">
+                                研究角度 ({detail.output.data.angles.length})
+                                {detail.output.data.budget?.spent_tokens != null && (
+                                    <span className="ml-2 text-[10px] font-normal text-[var(--app-hint)]">
+                                        tokens {detail.output.data.budget.spent_tokens}
+                                    </span>
+                                )}
+                            </div>
+                            <ol className="flex flex-col gap-2">
+                                {detail.output.data.angles.map((a, i) => (
+                                    <li key={i} className="rounded-lg border border-[var(--app-border)] p-2.5">
+                                        <div className="text-sm font-medium">{i + 1}. {a.label}</div>
+                                        <div className="mt-0.5 break-words font-mono text-xs text-[var(--app-hint)]">{a.query}</div>
+                                        {a.rationale && <div className="mt-1 text-xs text-[var(--app-fg)]">{a.rationale}</div>}
+                                    </li>
+                                ))}
+                            </ol>
+                        </Card>
+                    )}
                     <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
                         {(detail.output.candidates ?? []).map((c) => (
                             <CandidateCard key={c.symbol} c={c} />

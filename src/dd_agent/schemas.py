@@ -45,6 +45,7 @@ class NodeOutput(BaseModel):
     candidates: list[TargetCandidate] = Field(default_factory=list)
     self_assessment: str = ""                                # advisory only; not authoritative
     open_questions: list[str] = Field(default_factory=list)
+    data: dict = Field(default_factory=dict)                 # structured stage payload (e.g. scope angles)
 
 
 class Verdict(BaseModel):

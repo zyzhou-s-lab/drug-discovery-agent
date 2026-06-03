@@ -382,14 +382,15 @@ def _run_pipeline(campaign: str, disease: str, real: bool, skip_intake: bool = F
     # tasks the Runner spawns inherit this ContextVar -> worker emits step events here
     events_dir_var.set(os.path.join(ARTIFACTS, campaign, "events"))
     run_idx = Index(DB_PATH, ARTIFACTS)
+    # judge removed: the deep-research flow has no per-stage judge (quality gating moves
+    # into the Verify phase in M2). worker only.
     if real:
-        from .judge import api_judge
         from .worker import sdk_worker
-        worker_fn, judge_fn = sdk_worker, api_judge
+        worker_fn = sdk_worker
     else:
-        from .judge import dummy_judge
         from .worker import dummy_worker
-        worker_fn, judge_fn = dummy_worker, dummy_judge
+        worker_fn = dummy_worker
+    judge_fn = None
     # intake gate (real runs): validates/normalizes the disease before the pipeline.
     # skip_intake: the web dialog already ran POST /intake/check, so re-gating here would
     # repeat the same LLM call. Direct API callers (no pre-check) still get gated.

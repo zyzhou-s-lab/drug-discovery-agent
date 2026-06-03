@@ -11,7 +11,6 @@ import os
 
 from .events import events_dir_var
 from .index import Index
-from .judge import api_judge, dummy_judge
 from .pipeline import PIPELINE
 from .runner import Runner
 from .worker import dummy_worker, sdk_worker
@@ -32,7 +31,7 @@ def main(argv=None) -> None:
         p.add_argument("--db", default="/tmp/dd/state.sqlite")
         p.add_argument("--artifacts", default="/tmp/dd/artifacts")
         p.add_argument("--real", action="store_true",
-                       help="use sdk_worker + api_judge (real LLM/tools) instead of dummy")
+                       help="use sdk_worker (real LLM/tools) instead of dummy")
         p.add_argument("--only", default=None,
                        help="run a single stage by name (M1 vertical slice)")
     st = sub.add_parser("status")
@@ -50,7 +49,7 @@ def main(argv=None) -> None:
 
     real = getattr(args, "real", False)
     worker_fn = sdk_worker if real else dummy_worker
-    judge_fn = api_judge if real else dummy_judge
+    judge_fn = None  # judge removed (deep-research flow has no per-stage judge)
 
     only = getattr(args, "only", None)
     if only and only not in {s.name for s in PIPELINE}:
