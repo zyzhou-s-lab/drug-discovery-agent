@@ -180,9 +180,15 @@ SCOPE_SCHEMA(原样):`{question, summary, angles[{label, query, rationale?}]}`,a
 
 ## 7. 里程碑(含 scope-checkpoint)
 
-- **M1 = scope-only + 人审闸**:`scope()` 产 angles + Budget 统计 + `emit`/落库 + 前端展示 angles + "批准并继续"。**重点验**:① "默认+加法"工具在 SDK 生效;② search 带 WebSearch + 调 submit 时**不 prose-ending**(整移植最大单点风险,用一个 search agent 先验);③ budget 统计正确;④ 暂停/批准闭环。
-- **M2**:`research(angles)` 全五阶段(`angle_chain` pipeline + 照抄 verify + synth),`DD_DR_BUDGET=50k` 熔断测试。
-- **M3**:接成 stage-0 `_deep_overview_worker`(NodeOutput:summary=报告;literature DOI→evidence + APA7 书目);`DD_STAGE0=deep|simple` 灰度开关。
+- **M1 = scope-only + 人审闸**:✅ 完成。`scope()` 产 angles + Budget 统计 + `emit`/落库 + 前端展示 angles + 用户自定义角度。`setting_sources=[]` 隔离 host CLAUDE.md(gpu MemOS 块)。
+- **M2 = `research(angles)` 全五阶段**:✅ 完成(`src/dd_agent/research/{orchestrate,deep_research}.py`)。`angle_chain` pipeline(search→dedup→fetch,无屏障)+ 25-claim 3 票对抗 verify(barrier)+ synth;schema/prompt/去重/排序/计票逐字移植;forced StructuredOutput 用"submit_* 为唯一收尾动作"替代。
+  - **关键风险已排除**(plan §8.1):search agent 在 DeepSeek 上 WebSearch ×5 → 调 `submit_results` ×1,**不 prose-ending**(实测,~32k tok)。
+  - **错误兜底**:agent 撞 max_turns / 跑飞 → `run_agent` 捕获返回 None(fetch 丢源 / verify 弃权,`survives()` 处理)。
+  - **端到端实测**(ALS,2 角度,fetch_budget=3,max_verify_claims=6):search→fetch(4 源/19 claims)→verify(6→确认 3/否决 3,含 1 弃权)→synth(3 条发现),agentCalls=26,质量高(真实 loci + 置信度 + 开放问题),弱 claim(NUP50)被对抗式否决 0-3。
+  - **成本**(此受限run):verify 占大头(~514k tok / 18 calls);全量 25-claim 估 ~2M+ tok/病。`budget.report().usd` 是 DeepSeek 错价,只看 token。`DD_DR_CONC`(默认 6)控并发;`DD_DR_BUDGET` 熔断 + salvage 待 M3 接 worker 时一并验。
+  - 测试:13 个离线单测(dedup/rank/survives/norm_url + happy-path/no-claims/all-refuted salvage,monkeypatch `run_agent`)。
+  - **未做(留 M3)**:三源融合(OT+paperfetch,`extra_mcp` 钩子已留)、DD_DR_BUDGET 熔断实测、前端富步骤卡。
+- **M3**:接成 stage-0 `_deep_overview_worker`(`research()` 接在 `scope()` 后;NodeOutput:summary=报告;literature DOI→evidence + APA7 书目);三源融合;`DD_DR_BUDGET` 熔断实测;`on_event`→`emit` 前端进度。
 - **M4**:dry AMD 端到端 + token 报告,校准推荐 `DD_DR_BUDGET`(预期 0.8–1.5M/病);与 simple stage-0 对比质量/成本。
 - **(后续)**:nomination 实例(§1 配置)+ validation 实例。
 

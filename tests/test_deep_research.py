@@ -73,3 +73,73 @@ def test_survives_too_many_abstentions_fails():
 
 def test_survives_all_abstain_fails():
     assert survives([None, None, None]) is False
+
+
+# ─── Orchestration (run_agent monkeypatched — no network) ───
+import asyncio  # noqa: E402
+
+from dd_agent.research import deep_research as dr  # noqa: E402
+
+_ANGLE = [{"label": "g", "query": "q", "rationale": "r"}]
+
+
+def _patch_agent(fake):
+    """Swap deep_research.run_agent for a fake; return a restore() callable."""
+    orig = dr.run_agent
+    dr.run_agent = fake
+    return lambda: setattr(dr, "run_agent", orig)
+
+
+def test_research_happy_path_returns_report():
+    async def fake(phase, prompt, submit, schema, extra, budget, sem, on_message=None, max_turns=12):
+        return {
+            "submit_results": {"results": [{"url": "https://x.com/a", "title": "A", "relevance": "high"}]},
+            "submit_claims": {"sourceQuality": "primary",
+                              "claims": [{"claim": "C1", "quote": "q", "importance": "central"}]},
+            "submit_verdict": {"refuted": False, "evidence": "e", "confidence": "high"},
+            "submit_report": {"summary": "S", "caveats": "none",
+                              "findings": [{"claim": "C1", "confidence": "high",
+                                            "sources": ["https://x.com/a"], "evidence": "e"}]},
+        }[submit]
+    restore = _patch_agent(fake)
+    try:
+        r = asyncio.run(dr.research("Q", _ANGLE))
+    finally:
+        restore()
+    assert r["stats"]["confirmed"] == 1 and r["stats"]["afterSynthesis"] == 1
+    assert r["findings"][0]["claim"] == "C1"
+
+
+def test_research_no_claims_salvage():
+    async def fake(phase, prompt, submit, schema, extra, budget, sem, on_message=None, max_turns=12):
+        if submit == "submit_results":
+            return {"results": [{"url": "https://x.com/a", "title": "A", "relevance": "high"}]}
+        if submit == "submit_claims":
+            return {"sourceQuality": "unreliable", "claims": []}  # nothing extracted
+        return None
+    restore = _patch_agent(fake)
+    try:
+        r = asyncio.run(dr.research("Q", _ANGLE))
+    finally:
+        restore()
+    assert r["findings"] == [] and r["stats"]["claims"] == 0
+    assert "No claims" in r["summary"]
+
+
+def test_research_all_refuted_salvage():
+    async def fake(phase, prompt, submit, schema, extra, budget, sem, on_message=None, max_turns=12):
+        if submit == "submit_results":
+            return {"results": [{"url": "https://x.com/a", "title": "A", "relevance": "high"}]}
+        if submit == "submit_claims":
+            return {"sourceQuality": "blog",
+                    "claims": [{"claim": "weak", "quote": "q", "importance": "central"}]}
+        if submit == "submit_verdict":
+            return {"refuted": True, "evidence": "debunked", "confidence": "high"}
+        return None  # synth never reached
+    restore = _patch_agent(fake)
+    try:
+        r = asyncio.run(dr.research("Q", _ANGLE))
+    finally:
+        restore()
+    assert r["findings"] == [] and r["stats"]["confirmed"] == 0
+    assert len(r["refuted"]) == 1 and "refuted" in r["summary"]
