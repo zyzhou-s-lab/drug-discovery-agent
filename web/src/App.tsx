@@ -20,6 +20,7 @@ import type {
     Evidence,
     Reference,
     ReferencesResponse,
+    ReportResponse,
     ScopeAngle,
     StageStatus,
     TargetCandidate,
@@ -157,30 +158,30 @@ function StageRail(props: {
     stages: CampaignStage[]
     selected: string | null
     onSelect: (name: string) => void
+    extra?: { id: string; label: string; badge?: string }[]
 }) {
+    const cls = (active: boolean) =>
+        'flex flex-col items-start gap-1 rounded-lg border px-3 py-2 text-left transition-colors ' +
+        (active
+            ? 'border-[var(--app-button)] bg-[var(--app-subtle-bg)]'
+            : 'border-[var(--app-border)] hover:bg-[var(--app-subtle-bg)]')
     return (
         <div className="flex flex-wrap gap-2">
-            {props.stages.map((s) => {
-                const active = s.name === props.selected
-                return (
-                    <button
-                        key={s.name}
-                        onClick={() => props.onSelect(s.name)}
-                        className={
-                            'flex flex-col items-start gap-1 rounded-lg border px-3 py-2 text-left transition-colors ' +
-                            (active
-                                ? 'border-[var(--app-button)] bg-[var(--app-subtle-bg)]'
-                                : 'border-[var(--app-border)] hover:bg-[var(--app-subtle-bg)]')
-                        }
-                    >
-                        <span className="text-sm font-medium">{stageLabel(s.name)}</span>
-                        <span className="flex items-center gap-1.5">
-                            <Badge variant={STATUS_VARIANT[s.status]}>{STATUS_LABEL[s.status]}</Badge>
-                            {s.scatter && <span className="text-[10px] text-[var(--app-hint)]">并行 ×{s.angles.length}</span>}
-                        </span>
-                    </button>
-                )
-            })}
+            {props.stages.map((s) => (
+                <button key={s.name} onClick={() => props.onSelect(s.name)} className={cls(s.name === props.selected)}>
+                    <span className="text-sm font-medium">{stageLabel(s.name)}</span>
+                    <span className="flex items-center gap-1.5">
+                        <Badge variant={STATUS_VARIANT[s.status]}>{STATUS_LABEL[s.status]}</Badge>
+                        {s.scatter && <span className="text-[10px] text-[var(--app-hint)]">并行 ×{s.angles.length}</span>}
+                    </span>
+                </button>
+            ))}
+            {(props.extra || []).map((e) => (
+                <button key={e.id} onClick={() => props.onSelect(e.id)} className={cls(e.id === props.selected)}>
+                    <span className="text-sm font-medium">{e.label}</span>
+                    {e.badge && <span className="text-[10px] text-[var(--app-hint)]">{e.badge}</span>}
+                </button>
+            ))}
         </div>
     )
 }
@@ -403,12 +404,37 @@ function DeepReportView(props: { report: DeepReport }) {
     )
 }
 
-function StageDetail(props: { campaign: string; stage: string }) {
+// Dedicated page for the deep-research run (reached via the 检索简报 tab after 开始检索):
+// phase tree + per-agent session cards + the cited report.
+function DeepResearchPage(props: { campaign: string; report: ReportResponse | null }) {
+    const { events } = useStageEvents(props.campaign, 'deep-research')
+    const state = props.report?.status.state ?? 'none'
+    return (
+        <div className="flex flex-col gap-4">
+            <PhasesPanel events={events} status={state} />
+            {state === 'error' && (
+                <Card className="p-4 text-sm text-[var(--app-badge-error-text,#dc2626)]">
+                    检索失败:{props.report?.status.error}
+                </Card>
+            )}
+            {props.report?.report && <DeepReportView report={props.report.report} />}
+            {events.length > 0 ? (
+                <StepCards events={events} />
+            ) : state === 'running' ? (
+                <Card className="p-4 text-sm text-[var(--app-hint)]">检索启动中,各 agent 会话稍候出现…</Card>
+            ) : null}
+        </div>
+    )
+}
+
+function StageDetail(props: {
+    campaign: string
+    stage: string
+    searchState?: 'none' | 'running' | 'done' | 'error'
+    onSearch?: (angles: ScopeAngle[]) => void
+}) {
     const { detail, loading } = useStageDetail(props.campaign, props.stage)
     const { events } = useStageEvents(props.campaign, props.stage)
-    const { report, refresh } = useReport(props.campaign)
-    const { events: searchEvents } = useStageEvents(props.campaign, 'deep-research')
-    const searchState = report?.status.state ?? 'none'
     if (loading && !detail) return <LoadingState label={`正在加载 ${stageLabel(props.stage)}…`} />
     if (!detail) return null
 
@@ -461,26 +487,9 @@ function StageDetail(props: { campaign: string; stage: string }) {
                         <ScopeAngles
                             serverAngles={detail.output.data.angles}
                             spentTokens={detail.output.data.budget?.spent_tokens}
-                            searchState={searchState}
-                            onSearch={(angles) => {
-                                ddaApi
-                                    .startSearch(props.campaign, angles, detail.output?.data?.question)
-                                    .then(() => refresh())
-                                    .catch(() => {})
-                            }}
+                            searchState={props.searchState}
+                            onSearch={props.onSearch}
                         />
-                    )}
-                    {(searchState !== 'none' || searchEvents.length > 0) && (
-                        <div className="flex flex-col gap-3">
-                            <PhasesPanel events={searchEvents} status={searchState} />
-                            {searchEvents.length > 0 && <StepCards events={searchEvents} />}
-                            {report?.report && <DeepReportView report={report.report} />}
-                            {searchState === 'error' && (
-                                <Card className="p-4 text-sm text-[var(--app-badge-error-text,#dc2626)]">
-                                    检索失败:{report?.status.error}
-                                </Card>
-                            )}
-                        </div>
                     )}
                     <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
                         {(detail.output.candidates ?? []).map((c) => (
@@ -588,7 +597,20 @@ export function App() {
     }, [campaigns, campaign])
 
     const { view, error: vErr } = useCampaignView(campaign)
+    const { report, refresh: refreshReport } = useReport(campaign)
+    const searchState = report?.status.state ?? 'none'
     const [selected, setSelected] = useState<string | null>(null)
+    const SEARCH_TAB = '__search__'
+    const onStartSearch = (angles: ScopeAngle[]) => {
+        if (!campaign) return
+        ddaApi
+            .startSearch(campaign, angles)
+            .then(() => {
+                setSelected(SEARCH_TAB)
+                refreshReport()
+            })
+            .catch(() => {})
+    }
     const [chatOpen, setChatOpen] = useState(true)
     const [filesOpen, setFilesOpen] = useState<string | null>(null)
     const [pendingRefs, setPendingRefs] = useState<string[]>([])
@@ -675,9 +697,34 @@ export function App() {
                         </Card>
                     )}
 
-                    {view && <StageRail stages={view.stages} selected={selected} onSelect={setSelected} />}
+                    {view && (
+                        <StageRail
+                            stages={view.stages}
+                            selected={selected}
+                            onSelect={setSelected}
+                            extra={
+                                searchState !== 'none'
+                                    ? [{
+                                          id: SEARCH_TAB,
+                                          label: '检索简报',
+                                          badge: searchState === 'running' ? '进行中' : searchState === 'done' ? '完成' : '失败',
+                                      }]
+                                    : []
+                            }
+                        />
+                    )}
 
-                    {campaign && selected && <StageDetail campaign={campaign} stage={selected} />}
+                    {campaign && selected === SEARCH_TAB && (
+                        <DeepResearchPage campaign={campaign} report={report} />
+                    )}
+                    {campaign && selected && selected !== SEARCH_TAB && (
+                        <StageDetail
+                            campaign={campaign}
+                            stage={selected}
+                            searchState={searchState}
+                            onSearch={onStartSearch}
+                        />
+                    )}
 
                     {campaign && <Bibliography campaign={campaign} />}
                 </div>

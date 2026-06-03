@@ -345,7 +345,8 @@ def _bibliography(confirmed, all_sources):
 
 # ─── Orchestration ───
 async def research(question: str, angles: list, *, budget: Budget | None = None,
-                   sem=None, on_event=None, on_progress=None, fetch_budget: int = MAX_FETCH,
+                   sem=None, on_event=None, on_progress=None, on_agent=None,
+                   fetch_budget: int = MAX_FETCH,
                    max_verify_claims: int = MAX_VERIFY_CLAIMS) -> dict:
     """Run Search→Fetch→Verify→Synthesize over pre-scoped `angles`.
 
@@ -353,6 +354,9 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
     on_progress(phase, done, total): structured per-phase counters for the run UI's phase tree
     (Search 5/5, Fetch 27/27, Verify 75/75, Synthesize 1/1). Totals for fetch/verify are not
     known upfront (pipeline) and grow as the run proceeds.
+    on_agent(label, msg): per-agent SDK-message callback — each agent gets a unique label so the
+    UI can render one expandable session card per agent (search/fetch/verify/synth), with its
+    own thinking / tool calls / outcome.
     Returns the report dict (+ refuted/sources/stats/budget), or a salvage dict on empty paths.
     """
     budget = budget or Budget()
@@ -364,6 +368,12 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
                 on_event(phase, message)
             except Exception:  # noqa: BLE001
                 pass
+
+    def amsg(label: str):
+        """Build a per-agent on_message callback that tags every SDK message with `label`."""
+        if on_agent is None:
+            return None
+        return lambda m: on_agent(label, m)
 
     # ── per-phase progress counters for the UI phase tree ──
     prog = {"search": [0, len(angles)], "fetch": [0, 0], "verify": [0, 0], "synthesize": [0, 1]}
@@ -399,7 +409,8 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
     # ── pipeline: search → dedup → fetch+extract (link-level concurrency, one barrier at the end) ──
     async def angle_chain(angle: dict) -> list:
         sr = await run_agent("search", SEARCH_PROMPT(question, angle), "submit_results",
-                             SEARCH_SCHEMA, lit, budget, sem)
+                             SEARCH_SCHEMA, lit, budget, sem,
+                             on_message=amsg("search · " + angle["label"][:28]))
         if not sr or not sr.get("results"):
             ev("search", angle["label"] + ": 0 结果")
             await bump("search", ddone=1)
@@ -414,8 +425,15 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
         await bump("fetch", dtotal=len(novel))
 
         async def fetch_one(source: dict):
+            host = ""
+            try:
+                host = urlparse(source.get("url", "")).hostname or ""
+            except Exception:  # noqa: BLE001
+                host = ""
+            flabel = "fetch · " + ((source.get("title") or host or source.get("doi") or "source")[:28])
             ext = await run_agent("fetch", FETCH_PROMPT(question, source, angle["label"]),
-                                  "submit_claims", EXTRACT_SCHEMA, lit, budget, sem)
+                                  "submit_claims", EXTRACT_SCHEMA, lit, budget, sem,
+                                  on_message=amsg(flabel))
             await bump("fetch", ddone=1)
             if not ext:
                 return None
@@ -458,7 +476,8 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
     async def verify_claim(claim: dict) -> dict:
         verdicts = await asyncio.gather(*[
             run_agent("verify", VERIFY_PROMPT(question, claim, v), "submit_verdict",
-                      VERDICT_SCHEMA, {}, budget, sem)
+                      VERDICT_SCHEMA, {}, budget, sem,
+                      on_message=amsg("verify · " + claim["claim"][:18] + " v" + str(v + 1)))
             for v in range(VOTES_PER_CLAIM)
         ])
         await bump("verify", ddone=VOTES_PER_CLAIM)
@@ -492,7 +511,8 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
 
     # ── synthesize ──
     report = await run_agent("synthesize", SYNTH_PROMPT(question, confirmed, killed),
-                             "submit_report", REPORT_SCHEMA, {}, budget, sem)
+                             "submit_report", REPORT_SCHEMA, {}, budget, sem,
+                             on_message=amsg("synthesize"))
     await bump("synthesize", ddone=1)
     sources_out = [{"url": s["url"], "quality": s["sourceQuality"], "angle": s["angle"],
                     "claimCount": len(s["claims"])} for s in all_sources]

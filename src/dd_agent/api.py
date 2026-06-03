@@ -500,19 +500,19 @@ def _run_search(campaign: str, disease: str, angles: list[dict]) -> None:
     """Background Search→Fetch→Verify→Synthesize over the approved angles (own loop/thread,
     like _run_pipeline). Emits step events under SEARCH_STAGE; writes status + report files."""
     from .research.deep_research import research
+    from .worker import _emit_stream
 
     events_dir_var.set(os.path.join(ARTIFACTS, campaign, "events"))
     status_path, report_path = _search_paths(campaign)
     _write_json(status_path, {"state": "running", "angles": len(angles)})
-    emit(SEARCH_STAGE, "search", "session_start",
-         prompt=f"deep-research 检索:{disease}({len(angles)} 个角度)")
     try:
         max_claims = int(os.environ.get("DD_DR_MAX_CLAIMS", "25"))
         report = asyncio.run(research(
             disease, angles,
-            on_event=lambda phase, msg: emit(SEARCH_STAGE, phase, "text", text=msg),
             on_progress=lambda phase, done, total: emit(SEARCH_STAGE, phase, "progress",
                                                         done=done, total=total),
+            # one expandable step card per agent (its thinking / tool calls / outcome)
+            on_agent=lambda label, msg: _emit_stream(SEARCH_STAGE, label, msg, skip_text=True),
             max_verify_claims=max_claims,
         ))
         _write_json(report_path, report)
