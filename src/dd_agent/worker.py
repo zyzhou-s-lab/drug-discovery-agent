@@ -14,9 +14,12 @@ from .events import emit
 from .schemas import NodeInput, NodeOutput
 
 
-def _emit_stream(stage_name: str, label: str, msg, skip_text: bool = False) -> None:
+def _emit_stream(stage_name: str, label: str, msg, skip_text: bool = False,
+                 with_outcome: bool = False) -> None:
     """Map one Agent SDK message to step-card events (路子一: same stream HAPI consumes).
-    skip_text: drop assistant TextBlock prose (e.g. scope's chatty post-submit summary)."""
+    skip_text: drop assistant TextBlock prose (e.g. scope's chatty post-submit summary).
+    with_outcome: include ResultMessage.result as the card's Outcome — ON for search agents,
+    OFF for scope (its result text is the same chatty/prompt-echo summary skip_text hides)."""
     from claude_agent_sdk import (
         AssistantMessage, ResultMessage, TextBlock, ThinkingBlock,
         ToolResultBlock, ToolUseBlock, UserMessage,
@@ -51,7 +54,7 @@ def _emit_stream(stage_name: str, label: str, msg, skip_text: bool = False) -> N
             emit(stage_name, label, "result", session_id=getattr(msg, "session_id", None),
                  is_error=bool(getattr(msg, "is_error", False)),
                  cost=getattr(msg, "total_cost_usd", None), num_turns=getattr(msg, "num_turns", None),
-                 result=getattr(msg, "result", None), tokens=tokens)  # Outcome text + token total
+                 result=(getattr(msg, "result", None) if with_outcome else None), tokens=tokens)
     except Exception:
         pass  # telemetry must never break the run
 

@@ -555,7 +555,8 @@ def _run_search(campaign: str, disease: str, angles: list[dict]) -> None:
             on_progress=lambda phase, done, total: emit(SEARCH_STAGE, phase, "progress",
                                                         done=done, total=total),
             # one expandable step card per agent (its thinking / tool calls / outcome)
-            on_agent=lambda label, msg: _emit_stream(SEARCH_STAGE, label, msg, skip_text=True),
+            on_agent=lambda label, msg: _emit_stream(SEARCH_STAGE, label, msg, skip_text=True,
+                                                     with_outcome=True),
             should_stop=stop.is_set,
             max_verify_claims=max_claims,
         ))
