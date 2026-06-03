@@ -424,7 +424,7 @@ function DeepResearchPage(props: { campaign: string; report: ReportResponse | nu
                         disabled={state === 'stopping'}
                         onClick={() => ddaApi.stopSearch(props.campaign).catch(() => {})}
                     >
-                        {state === 'stopping' ? '停止中…(在途 agent 跑完即止)' : '停止检索'}
+                        {state === 'stopping' ? '停止中…' : '停止检索'}
                     </Button>
                 </div>
             )}

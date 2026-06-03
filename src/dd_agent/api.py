@@ -510,15 +510,20 @@ def _run_search(campaign: str, disease: str, angles: list[dict]) -> None:
     from .worker import _emit_stream
 
     stop = threading.Event()
+    # own loop so a stop can HARD-cancel the in-flight task (interrupts agents mid-query),
+    # not just gate new agents via should_stop. holder carries loop+task to _signal_stop.
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    holder: dict = {"loop": loop, "task": None}
     with _search_lock:
-        _search_stops[campaign] = stop
+        _search_stops[campaign] = (stop, holder)
 
     events_dir_var.set(os.path.join(ARTIFACTS, campaign, "events"))
     status_path, report_path = _search_paths(campaign)
     _write_json(status_path, {"state": "running", "angles": len(angles)})
     try:
         max_claims = int(os.environ.get("DD_DR_MAX_CLAIMS", "25"))
-        report = asyncio.run(research(
+        task = loop.create_task(research(
             disease, angles,
             on_progress=lambda phase, done, total: emit(SEARCH_STAGE, phase, "progress",
                                                         done=done, total=total),
@@ -527,18 +532,28 @@ def _run_search(campaign: str, disease: str, angles: list[dict]) -> None:
             should_stop=stop.is_set,
             max_verify_claims=max_claims,
         ))
+        holder["task"] = task
+        report = loop.run_until_complete(task)
         _write_json(report_path, report)
         final = "stopped" if stop.is_set() else "done"
         _write_json(status_path, {"state": final, "stats": report.get("stats", {})})
         emit(SEARCH_STAGE, "synthesize", "result",
              num_turns=(report.get("stats") or {}).get("agentCalls"))
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        # hard-stopped mid-run: no report, just mark stopped
+        _write_json(status_path, {"state": "stopped"})
+        print(f"[search {campaign}] cancelled (stop)")
     except Exception as exc:  # noqa: BLE001 — surface in log + status, never crash the server
         _write_json(status_path, {"state": "error", "error": repr(exc)})
         emit(SEARCH_STAGE, "search", "result", is_error=True)
         print(f"[search {campaign}] failed: {exc!r}")
     finally:
+        try:
+            loop.close()
+        except Exception:  # noqa: BLE001
+            pass
         with _search_lock:
-            if _search_stops.get(campaign) is stop:
+            if (_search_stops.get(campaign) or (None,))[0] is stop:
                 _search_stops.pop(campaign, None)
 
 
@@ -585,13 +600,21 @@ async def campaign_report(campaign: str) -> dict:
 
 
 def _signal_stop(campaign: str) -> bool:
-    """Set the cancel flag for a running search, if any. Returns True if one was running."""
+    """Stop a running search: set should_stop (no new agents) AND hard-cancel the in-flight
+    task (interrupts agents mid-query for a near-immediate stop). True if one was running."""
     with _search_lock:
-        ev = _search_stops.get(campaign)
-    if ev:
-        ev.set()
-        return True
-    return False
+        entry = _search_stops.get(campaign)
+    if not entry:
+        return False
+    stop, holder = entry
+    stop.set()
+    loop, task = holder.get("loop"), holder.get("task")
+    if loop is not None and task is not None:
+        try:
+            loop.call_soon_threadsafe(task.cancel)
+        except Exception:  # noqa: BLE001 — loop may already be closing
+            pass
+    return True
 
 
 @app.post("/api/campaigns/{campaign}/stop")
