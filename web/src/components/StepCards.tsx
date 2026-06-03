@@ -415,6 +415,9 @@ export function StepCards(props: { events: StepEvent[]; terminal?: boolean }) {
         const order: string[] = []
         const by = new Map<string, StepEvent[]>()
         for (const e of props.events) {
+            // 'progress' events are phase counters for PhasesPanel, not agent sessions —
+            // they'd otherwise create empty "会话 · search/fetch/…" cards (0 tools, 运行中).
+            if (e.type === 'progress') continue
             if (!by.has(e.label)) {
                 by.set(e.label, [])
                 order.push(e.label)
