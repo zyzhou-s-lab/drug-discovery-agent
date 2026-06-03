@@ -213,7 +213,7 @@ function ScopeAngles(props: {
     return (
         <Card className="p-4">
             <div className="mb-2 text-sm font-medium">
-                研究角度 ({total})
+                研究方向 ({total})
                 {props.spentTokens != null && (
                     <span className="ml-2 text-[10px] font-normal text-[var(--app-hint)]">tokens {props.spentTokens}</span>
                 )}
@@ -244,24 +244,16 @@ function ScopeAngles(props: {
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && add()}
-                    placeholder="添加一个自定义研究角度…"
+                    placeholder="添加一个自定义研究方向…"
                     className="flex-1 rounded-md border border-[var(--app-border)] bg-transparent px-2 py-1.5 text-sm outline-none focus:border-[var(--app-button)]"
                 />
-                <Button size="sm" variant="outline" onClick={add}>添加角度</Button>
+                <Button size="sm" variant="outline" onClick={add}>添加方向</Button>
             </div>
-            <p className="mt-1 text-[10px] text-[var(--app-hint)]">
-                {extra.length > 0
-                    ? `自定义角度是模型 ${props.serverAngles.length} 个角度之外的补充,会一并进入检索阶段;角度越多检索成本越高。`
-                    : `模型自动拆解出 ${props.serverAngles.length} 个角度;可在此补充自定义角度,总数可超过 6。`}
-            </p>
             {props.onSearch && (
                 <div className="mt-3 flex items-center gap-3 border-t border-[var(--app-border)] pt-3">
                     <Button size="sm" onClick={startSearch} disabled={running || total === 0}>
-                        {running ? '检索中…' : props.searchState === 'done' ? '重新检索' : `开始检索（${total} 个角度）→`}
+                        {running ? '检索中…' : props.searchState === 'done' ? '重新检索' : `开始检索（${total} 个方向）→`}
                     </Button>
-                    <span className="text-[10px] text-[var(--app-hint)]">
-                        审阅 / 增删角度后,基于这 {total} 个角度做联网检索 → 抽取 → 对抗式核验 → 汇总成带引文的简报。
-                    </span>
                 </div>
             )}
         </Card>
