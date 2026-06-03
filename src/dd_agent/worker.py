@@ -493,7 +493,9 @@ async def _overview_worker(stage, node_input: NodeInput) -> NodeOutput:
 async def _deep_overview_worker(stage, node_input: NodeInput) -> NodeOutput:
     from .research.scope import scope
 
-    res = await scope(node_input.disease)
+    # stream live step cards (parity with _run_session): forward scope's SDK messages
+    emit(stage.name, "scope", "session_start", prompt=f"deep-research scope: {node_input.disease}")
+    res = await scope(node_input.disease, on_message=lambda m: _emit_stream(stage.name, "scope", m))
     angles = (res or {}).get("angles") or []
     if not angles:
         return NodeOutput(stage=stage.name, summary="[deep-research scope] 未能拆解出研究角度",

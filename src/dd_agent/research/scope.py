@@ -50,9 +50,14 @@ that is your only output (no prose answer, no Sources list)."""
 SCOPE_SCHEMA = {"question": str, "summary": str, "angles": list}
 
 
-async def scope(disease: str, budget: Budget | None = None) -> dict | None:
+async def scope(disease: str, budget: Budget | None = None, on_message=None) -> dict | None:
     """Run the Scope phase. Returns {question, summary, angles[], budget} or None if the
-    agent never submitted. Caller (API/worker) drives env + asyncio."""
+    agent never submitted. Caller (API/worker) drives env + asyncio.
+
+    on_message(msg): optional callback per SDK message — the worker passes _emit_stream so
+    the run UI shows live step cards (parity with _run_session). Kept as a callback so this
+    module stays decoupled from events.py.
+    """
     from claude_agent_sdk import ClaudeAgentOptions, create_sdk_mcp_server, query, tool
 
     budget = budget or Budget()
@@ -69,6 +74,11 @@ async def scope(disease: str, budget: Budget | None = None) -> dict | None:
         max_turns=6,
     )
     async for msg in query(prompt=SCOPE_PROMPT.replace("{QUESTION}", disease), options=opts):
+        if on_message is not None:
+            try:
+                on_message(msg)
+            except Exception:  # noqa: BLE001 — streaming is best-effort, never break scope
+                pass
         if type(msg).__name__ == "ResultMessage":
             budget.add("scope", getattr(msg, "usage", None), getattr(msg, "total_cost_usd", 0) or 0)
 
