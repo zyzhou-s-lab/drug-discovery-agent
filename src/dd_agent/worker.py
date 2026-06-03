@@ -69,7 +69,7 @@ async def _deep_overview_worker(stage, node_input: NodeInput) -> NodeOutput:
     # structured payload for the frontend (rendered as angle cards); summary = short strategy
     return NodeOutput(
         stage=stage.name,
-        summary=res.get("summary") or f"Deep-research scope: {len(angles)} 个研究角度",
+        summary=f"Deep-research scope: {len(angles)} 个研究角度",
         candidates=[],
         open_questions=["scope-only 研究计划；完整检索简报（search→verify→synth）待 M2"],
         data={

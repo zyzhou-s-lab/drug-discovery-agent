@@ -41,13 +41,14 @@ approved drugs & trials). Do NOT pre-name specific genes, proteins, or drugs fro
 knowledge — discovering those is the downstream search's job; pre-baking unverified names
 anchors the search and is not traceable.
 
-Return: the disease (verbatim or lightly normalized), a 1-2 sentence decomposition strategy,
-and the angles. Call `submit_angles` exactly once with {question, summary, angles};
-that is your only output (no prose answer, no Sources list)."""
+Return the disease (verbatim or lightly normalized) and the angles. Call `submit_angles`
+exactly once with {question, angles}; that is your only output (no prose answer, no
+Sources list, no extra summary)."""
 
 # @tool input schema (dd-agent convention: name -> python type). Nested angle shape
 # (label/query/rationale) is steered by the prompt, like worker.submit_result's `candidates`.
-SCOPE_SCHEMA = {"question": str, "summary": str, "angles": list}
+# No `summary` field: it only made the model paraphrase the task (read like a leaked prompt).
+SCOPE_SCHEMA = {"question": str, "angles": list}
 
 
 async def scope(disease: str, budget: Budget | None = None, on_message=None) -> dict | None:
