@@ -28,7 +28,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from .events import events_dir_var, read_stage_events
+from .events import emit, events_dir_var, read_stage_events
 from .index import Index
 from .pipeline import PIPELINE
 
@@ -169,6 +169,15 @@ def _run_context(idx: Index, campaign: str) -> str:
         if out:
             if out.get("summary"):
                 parts.append(str(out["summary"])[:600])
+            # scope (deep-research stage-0): the real angles live in data.angles, not in
+            # candidates — feed them so the side-chat reports the actual count/content
+            # (otherwise it only sees "N 个研究角度" and confabulates a number).
+            data = out.get("data") or {}
+            angles = data.get("angles") or []
+            if angles:
+                parts.append(f"研究角度共 {len(angles)} 个:")
+                for i, a in enumerate(angles, 1):
+                    parts.append(f"{i}. {a.get('label')} — 检索目标: {str(a.get('query', ''))[:200]}")
             for c in (out.get("candidates") or [])[:20]:
                 kinds = ",".join(sorted({e.get("kind", "") for e in (c.get("evidence") or [])}))
                 parts.append(
@@ -459,3 +468,97 @@ def research_scope(req: ScopeRequest) -> dict:
     out = asyncio.run(scope(req.disease))
     return out or {"question": req.disease, "summary": "", "angles": [],
                    "error": "scope agent returned no result"}
+
+
+# ── deep-research Search phase (M3: scope-checkpoint → user-approved angles → Search) ──
+# Not a pipeline Stage: it runs only when the user clicks "开始检索" after reviewing/editing
+# the scope angles. Reuses the events stream (stage label "deep-research") for live step
+# cards; the report + run status are persisted as artifacts and polled via GET /report.
+SEARCH_STAGE = "deep-research"
+
+
+def _read_json(path: str):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _write_json(path: str, obj) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False)
+
+
+def _search_paths(campaign: str) -> tuple[str, str]:
+    base = os.path.join(ARTIFACTS, campaign)
+    return os.path.join(base, "search_status.json"), os.path.join(base, "report.json")
+
+
+def _run_search(campaign: str, disease: str, angles: list[dict]) -> None:
+    """Background Search→Fetch→Verify→Synthesize over the approved angles (own loop/thread,
+    like _run_pipeline). Emits step events under SEARCH_STAGE; writes status + report files."""
+    from .research.deep_research import research
+
+    events_dir_var.set(os.path.join(ARTIFACTS, campaign, "events"))
+    status_path, report_path = _search_paths(campaign)
+    _write_json(status_path, {"state": "running", "angles": len(angles)})
+    emit(SEARCH_STAGE, "search", "session_start",
+         prompt=f"deep-research 检索:{disease}({len(angles)} 个角度)")
+    try:
+        max_claims = int(os.environ.get("DD_DR_MAX_CLAIMS", "25"))
+        report = asyncio.run(research(
+            disease, angles,
+            on_event=lambda phase, msg: emit(SEARCH_STAGE, phase, "text", text=msg),
+            max_verify_claims=max_claims,
+        ))
+        _write_json(report_path, report)
+        _write_json(status_path, {"state": "done", "stats": report.get("stats", {})})
+        emit(SEARCH_STAGE, "synthesize", "result",
+             num_turns=(report.get("stats") or {}).get("agentCalls"))
+    except Exception as exc:  # noqa: BLE001 — surface in log + status, never crash the server
+        _write_json(status_path, {"state": "error", "error": repr(exc)})
+        emit(SEARCH_STAGE, "search", "result", is_error=True)
+        print(f"[search {campaign}] failed: {exc!r}")
+
+
+class SearchRequest(BaseModel):
+    angles: list[dict]
+    disease: str | None = None
+
+
+@app.post("/api/campaigns/{campaign}/search")
+async def start_search(campaign: str, req: SearchRequest) -> dict:
+    """Kick off the Search phase for the user-approved (possibly edited) scope angles."""
+    angles: list[dict] = []
+    for a in (req.angles or []):
+        label = (a.get("label") or "").strip()
+        query = (a.get("query") or "").strip() or label  # custom angles may carry only a label
+        if not query:
+            continue
+        angles.append({"label": label or query[:60], "query": query,
+                       "rationale": (a.get("rationale") or "")})
+    if not angles:
+        raise HTTPException(status_code=400, detail="no angles provided")
+    disease = req.disease
+    if not disease:  # fall back to the scope stage's recorded question
+        out = get_index().output(campaign, "disease-overview") or {}
+        disease = (out.get("data") or {}).get("question") or campaign
+    status_path, _ = _search_paths(campaign)
+    cur = _read_json(status_path)
+    if cur and cur.get("state") == "running":
+        raise HTTPException(status_code=409, detail="search already running")
+    threading.Thread(target=_run_search, args=(campaign, disease, angles), daemon=True).start()
+    return {"campaign": campaign, "started": True, "angles": len(angles)}
+
+
+@app.get("/api/campaigns/{campaign}/report")
+async def campaign_report(campaign: str) -> dict:
+    """Poll the Search phase: {status:{state}, report|null}. state ∈ none/running/done/error."""
+    status_path, report_path = _search_paths(campaign)
+    return {
+        "campaign": campaign,
+        "status": _read_json(status_path) or {"state": "none"},
+        "report": _read_json(report_path),
+    }

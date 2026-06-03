@@ -124,6 +124,33 @@ export interface ScopeResult {
     error?: string
 }
 
+// deep-research Search phase report (api.py /campaigns/{c}/report -> research.research())
+export interface DeepFinding {
+    claim: string
+    confidence: 'high' | 'medium' | 'low'
+    sources: string[]
+    evidence: string
+    vote?: string
+}
+
+export interface DeepReport {
+    question: string
+    summary: string
+    findings: DeepFinding[]
+    caveats?: string
+    openQuestions?: string[]
+    refuted?: { claim: string; vote: string; source: string }[]
+    sources?: { url: string; quality: string; angle?: string; claimCount?: number }[]
+    stats?: Record<string, number>
+    budget?: { spent_tokens: number; by_phase?: Record<string, unknown> }
+}
+
+export interface ReportResponse {
+    campaign: string
+    status: { state: 'none' | 'running' | 'done' | 'error'; stats?: Record<string, number>; error?: string }
+    report: DeepReport | null
+}
+
 // One captured Agent SDK step (events.py / worker._emit_stream)
 export type StepEventType = 'session_start' | 'thinking' | 'text' | 'tool_use' | 'tool_result' | 'result'
 

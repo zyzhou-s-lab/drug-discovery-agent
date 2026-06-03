@@ -7,6 +7,8 @@ import type {
     IntakeResult,
     PipelineStage,
     ReferencesResponse,
+    ReportResponse,
+    ScopeAngle,
     ScopeResult,
     StageDetail,
     StepEvent,
@@ -52,6 +54,18 @@ export const ddaApi = {
             if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
             return r.json() as Promise<ScopeResult>
         }),
+
+    // deep-research Search: run Search→Fetch→Verify→Synthesize over the user-approved angles
+    startSearch: (c: string, angles: ScopeAngle[], disease?: string) =>
+        fetch(`${BASE}/campaigns/${encodeURIComponent(c)}/search`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ angles, disease }),
+        }).then((r) => {
+            if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
+            return r.json() as Promise<{ started: boolean; angles: number }>
+        }),
+    report: (c: string) => getJson<ReportResponse>(`/campaigns/${encodeURIComponent(c)}/report`),
 
     startRun: (body: { disease: string; campaign: string; real?: boolean; skip_intake?: boolean }) =>
         fetch(`${BASE}/campaigns`, {

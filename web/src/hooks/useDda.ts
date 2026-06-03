@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ddaApi } from '@/api/dda'
-import type { CampaignSummary, CampaignView, DdaConfig, PipelineStage, StageDetail, StepEvent } from '@/types/dda'
+import type { CampaignSummary, CampaignView, DdaConfig, PipelineStage, ReportResponse, StageDetail, StepEvent } from '@/types/dda'
 
 /** Backend config (model, real-mode availability) — for the session header / settings. */
 export function useConfig() {
@@ -89,6 +89,34 @@ export function useStageDetail(campaign: string | null, stage: string | null) {
 }
 
 /** Captured Agent SDK step stream for one stage (SSE: existing events then live tail). */
+/** Poll the deep-research Search phase (status + report). Polls while running, stops when
+ *  the run is terminal. `refresh` re-reads immediately (call right after starting a search). */
+export function useReport(campaign: string | null, pollMs = 3000) {
+    const [data, setData] = useState<ReportResponse | null>(null)
+    const refresh = useCallback(() => {
+        if (!campaign) return
+        ddaApi.report(campaign).then(setData).catch(() => {})
+    }, [campaign])
+    useEffect(() => {
+        setData(null)
+        if (!campaign) return
+        let alive = true
+        const tick = () => {
+            ddaApi.report(campaign).then((r) => {
+                if (!alive) return
+                setData(r)
+                if (r.status.state === 'running' || r.status.state === 'none') {
+                    // keep polling; 'none' too, in case a search is about to start
+                }
+            }).catch(() => {})
+        }
+        tick()
+        const id = setInterval(tick, pollMs)
+        return () => { alive = false; clearInterval(id) }
+    }, [campaign, pollMs])
+    return { report: data, refresh }
+}
+
 export function useStageEvents(campaign: string | null, stage: string | null) {
     const [events, setEvents] = useState<StepEvent[]>([])
     useEffect(() => {

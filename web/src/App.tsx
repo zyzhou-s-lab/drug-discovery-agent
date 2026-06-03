@@ -13,9 +13,10 @@ import { FilesPage } from '@/components/FilesDialog'
 
 import { ddaApi, doiRef } from '@/api/dda'
 import { useTheme } from '@/lib/settings'
-import { useCampaigns, useCampaignView, useStageDetail, useStageEvents } from '@/hooks/useDda'
+import { useCampaigns, useCampaignView, useReport, useStageDetail, useStageEvents } from '@/hooks/useDda'
 import type {
     CampaignStage,
+    DeepReport,
     Evidence,
     Reference,
     ReferencesResponse,
@@ -186,7 +187,12 @@ function StageRail(props: {
 
 // Scope angles (structured) + a control to add the user's own angle. Added angles are
 // client-side for now; they will feed the Search phase (M2). (scope-checkpoint augment)
-function ScopeAngles(props: { serverAngles: ScopeAngle[]; spentTokens?: number }) {
+function ScopeAngles(props: {
+    serverAngles: ScopeAngle[]
+    spentTokens?: number
+    onSearch?: (angles: ScopeAngle[]) => void
+    searchState?: 'none' | 'running' | 'done' | 'error'
+}) {
     const [extra, setExtra] = useState<string[]>([])
     const [draft, setDraft] = useState('')
     const add = () => {
@@ -196,6 +202,14 @@ function ScopeAngles(props: { serverAngles: ScopeAngle[]; spentTokens?: number }
         setDraft('')
     }
     const total = props.serverAngles.length + extra.length
+    const running = props.searchState === 'running'
+    const startSearch = () => {
+        const merged: ScopeAngle[] = [
+            ...props.serverAngles,
+            ...extra.map((label) => ({ label, query: label })),
+        ]
+        props.onSearch?.(merged)
+    }
     return (
         <Card className="p-4">
             <div className="mb-2 text-sm font-medium">
@@ -237,9 +251,77 @@ function ScopeAngles(props: { serverAngles: ScopeAngle[]; spentTokens?: number }
             </div>
             <p className="mt-1 text-[10px] text-[var(--app-hint)]">
                 {extra.length > 0
-                    ? `自定义角度是模型 ${props.serverAngles.length} 个角度之外的补充,会一并进入后续检索阶段(M2);角度越多检索成本越高。`
+                    ? `自定义角度是模型 ${props.serverAngles.length} 个角度之外的补充,会一并进入检索阶段;角度越多检索成本越高。`
                     : `模型自动拆解出 ${props.serverAngles.length} 个角度;可在此补充自定义角度,总数可超过 6。`}
             </p>
+            {props.onSearch && (
+                <div className="mt-3 flex items-center gap-3 border-t border-[var(--app-border)] pt-3">
+                    <Button size="sm" onClick={startSearch} disabled={running || total === 0}>
+                        {running ? '检索中…' : props.searchState === 'done' ? '重新检索' : `开始检索（${total} 个角度）→`}
+                    </Button>
+                    <span className="text-[10px] text-[var(--app-hint)]">
+                        审阅 / 增删角度后,基于这 {total} 个角度做联网检索 → 抽取 → 对抗式核验 → 汇总成带引文的简报。
+                    </span>
+                </div>
+            )}
+        </Card>
+    )
+}
+
+function DeepReportView(props: { report: DeepReport }) {
+    const r = props.report
+    const confVariant = (c: string) => (c === 'high' ? 'success' : c === 'medium' ? 'warning' : 'default') as
+        'success' | 'warning' | 'default'
+    return (
+        <Card className="p-4">
+            <div className="mb-2 text-sm font-medium">检索简报</div>
+            {r.summary && <p className="text-sm leading-relaxed">{r.summary}</p>}
+            {r.findings?.length > 0 && (
+                <ol className="mt-3 flex flex-col gap-2">
+                    {r.findings.map((f, i) => (
+                        <li key={i} className="rounded-lg border border-[var(--app-border)] p-2.5">
+                            <div className="flex items-start gap-2">
+                                <Badge variant={confVariant(f.confidence)}>{f.confidence}</Badge>
+                                <span className="text-sm font-medium">{f.claim}</span>
+                            </div>
+                            {f.evidence && <div className="mt-1 text-xs text-[var(--app-hint)]">{f.evidence}</div>}
+                            {f.sources?.length > 0 && (
+                                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                                    {f.sources.map((s, j) => (
+                                        <a key={j} href={s} target="_blank" rel="noreferrer"
+                                           className="break-all font-mono text-[10px] text-[var(--app-link,#2563eb)] hover:underline">{s}</a>
+                                    ))}
+                                </div>
+                            )}
+                        </li>
+                    ))}
+                </ol>
+            )}
+            {r.caveats && (
+                <p className="mt-3 text-xs text-[var(--app-hint)]"><span className="font-medium">注意:</span> {r.caveats}</p>
+            )}
+            {r.openQuestions && r.openQuestions.length > 0 && (
+                <div className="mt-3">
+                    <p className="mb-1 text-sm font-medium">开放问题</p>
+                    <ul className="list-disc pl-5 text-sm text-[var(--app-hint)]">
+                        {r.openQuestions.map((q, i) => <li key={i}>{q}</li>)}
+                    </ul>
+                </div>
+            )}
+            {r.refuted && r.refuted.length > 0 && (
+                <details className="mt-3">
+                    <summary className="cursor-pointer text-xs text-[var(--app-hint)]">被对抗式核验否决的 claim（{r.refuted.length}）</summary>
+                    <ul className="mt-1 list-disc pl-5 text-xs text-[var(--app-hint)]">
+                        {r.refuted.map((c, i) => <li key={i}>{c.claim}（票 {c.vote}）</li>)}
+                    </ul>
+                </details>
+            )}
+            {r.stats && (
+                <p className="mt-3 border-t border-[var(--app-border)] pt-2 text-[10px] text-[var(--app-hint)]">
+                    角度 {r.stats.angles} · 源 {r.stats.sources} · claims {r.stats.claims} · 确认 {r.stats.confirmed} · 否决 {r.stats.killed}
+                    {r.budget?.spent_tokens != null && ` · tokens ${r.budget.spent_tokens}`}
+                </p>
+            )}
         </Card>
     )
 }
@@ -247,6 +329,9 @@ function ScopeAngles(props: { serverAngles: ScopeAngle[]; spentTokens?: number }
 function StageDetail(props: { campaign: string; stage: string }) {
     const { detail, loading } = useStageDetail(props.campaign, props.stage)
     const { events } = useStageEvents(props.campaign, props.stage)
+    const { report, refresh } = useReport(props.campaign)
+    const { events: searchEvents } = useStageEvents(props.campaign, 'deep-research')
+    const searchState = report?.status.state ?? 'none'
     if (loading && !detail) return <LoadingState label={`正在加载 ${stageLabel(props.stage)}…`} />
     if (!detail) return null
 
@@ -299,7 +384,31 @@ function StageDetail(props: { campaign: string; stage: string }) {
                         <ScopeAngles
                             serverAngles={detail.output.data.angles}
                             spentTokens={detail.output.data.budget?.spent_tokens}
+                            searchState={searchState}
+                            onSearch={(angles) => {
+                                ddaApi
+                                    .startSearch(props.campaign, angles, detail.output?.data?.question)
+                                    .then(() => refresh())
+                                    .catch(() => {})
+                            }}
                         />
+                    )}
+                    {(searchState !== 'none' || searchEvents.length > 0) && (
+                        <div className="flex flex-col gap-3">
+                            {searchState === 'running' && (
+                                <div className="flex items-center gap-2 text-sm text-[var(--app-hint)]">
+                                    <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--app-git-unstaged-color,#FF9500)]" />
+                                    检索 → 抽取 → 核验 → 汇总 进行中(全量约 10–15 分钟)…
+                                </div>
+                            )}
+                            {searchEvents.length > 0 && <StepCards events={searchEvents} />}
+                            {report?.report && <DeepReportView report={report.report} />}
+                            {searchState === 'error' && (
+                                <Card className="p-4 text-sm text-[var(--app-badge-error-text,#dc2626)]">
+                                    检索失败:{report?.status.error}
+                                </Card>
+                            )}
+                        </div>
                     )}
                     <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
                         {(detail.output.candidates ?? []).map((c) => (
