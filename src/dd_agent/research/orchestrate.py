@@ -136,6 +136,11 @@ async def run_agent(phase, prompt, submit_name, schema, extra_mcp, budget, sem,
                 budget.add(phase, getattr(msg, "usage", None), getattr(msg, "total_cost_usd", 0) or 0)
 
     async with sem:
+        if on_message is not None:
+            try:
+                on_message({"__dd_prompt__": prompt})  # card's Prompt section (CC parity)
+            except Exception:  # noqa: BLE001
+                pass
         try:
             async with ClaudeSDKClient(options=opts) as client:
                 await client.query(prompt)

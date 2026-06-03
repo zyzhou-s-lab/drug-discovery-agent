@@ -22,6 +22,11 @@ def _emit_stream(stage_name: str, label: str, msg, skip_text: bool = False) -> N
         ToolResultBlock, ToolUseBlock, UserMessage,
     )
     try:
+        # synthetic sentinel from run_agent: the agent's input prompt (for the card's Prompt
+        # section, like CC's per-agent "Prompt" block).
+        if isinstance(msg, dict) and "__dd_prompt__" in msg:
+            emit(stage_name, label, "session_start", prompt=str(msg["__dd_prompt__"]))
+            return
         if isinstance(msg, AssistantMessage):
             for b in msg.content:
                 if isinstance(b, ThinkingBlock):
@@ -39,9 +44,14 @@ def _emit_stream(stage_name: str, label: str, msg, skip_text: bool = False) -> N
                         emit(stage_name, label, "tool_result", tool_id=b.tool_use_id,
                              content=b.content, is_error=bool(getattr(b, "is_error", False)))
         elif isinstance(msg, ResultMessage):
+            u = getattr(msg, "usage", None) or {}
+            if not isinstance(u, dict):
+                u = {k: getattr(u, k, 0) for k in ("input_tokens", "output_tokens")}
+            tokens = (u.get("input_tokens", 0) or 0) + (u.get("output_tokens", 0) or 0)
             emit(stage_name, label, "result", session_id=getattr(msg, "session_id", None),
                  is_error=bool(getattr(msg, "is_error", False)),
-                 cost=getattr(msg, "total_cost_usd", None), num_turns=getattr(msg, "num_turns", None))
+                 cost=getattr(msg, "total_cost_usd", None), num_turns=getattr(msg, "num_turns", None),
+                 result=getattr(msg, "result", None), tokens=tokens)  # Outcome text + token total
     except Exception:
         pass  # telemetry must never break the run
 

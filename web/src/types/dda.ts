@@ -183,6 +183,8 @@ export interface StepEvent {
     // result
     cost?: number | null
     num_turns?: number | null
+    result?: string | null // the agent's final outcome text
+    tokens?: number // total tokens (input+output) for the agent
     // progress (deep-research phase tree)
     done?: number
     total?: number

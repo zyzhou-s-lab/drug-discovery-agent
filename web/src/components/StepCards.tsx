@@ -386,6 +386,9 @@ function SessionCard(props: { label: string; events: StepEvent[]; terminal?: boo
     const elapsed = fmtElapsed(end - start)
     const dotColor = running ? ORANGE : isError ? RED : GREEN
     const angle = ANGLE_LABEL[props.label] ?? props.label
+    const promptText = (evs.find((e) => e.type === 'session_start')?.prompt ?? '').trim()
+    const outcome = (result?.result ?? '').trim()
+    const tokens = result?.tokens
 
     return (
         <Card id={`dd-session-${props.label}`} className="overflow-hidden scroll-mt-4">
@@ -397,6 +400,7 @@ function SessionCard(props: { label: string; events: StepEvent[]; terminal?: boo
                 <span className="text-sm font-medium">会话 · {angle}</span>
                 <span className="ml-auto flex items-center gap-2 text-xs text-[var(--app-hint)]">
                     <span>{toolCount} 工具 · {thinkCount} 思考</span>
+                    {typeof tokens === 'number' && tokens > 0 && <span>{(tokens / 1000).toFixed(1)}k tok</span>}
                     {elapsed && <span>{elapsed}</span>}
                     {typeof result?.num_turns === 'number' && <span>{result.num_turns} 轮</span>}
                     {running && <span style={{ color: ORANGE }}>运行中</span>}
@@ -405,7 +409,25 @@ function SessionCard(props: { label: string; events: StepEvent[]; terminal?: boo
                     <span>{open ? '▾' : '▸'}</span>
                 </span>
             </button>
-            {open && <div className="flex flex-col gap-1.5 border-t border-[var(--app-border)] px-3 py-2">{timelineNodes(evs)}</div>}
+            {open && (
+                <div className="flex flex-col gap-2 border-t border-[var(--app-border)] px-3 py-2">
+                    {promptText && (
+                        <details className="text-xs">
+                            <summary className="cursor-pointer text-[var(--app-hint)]">Prompt</summary>
+                            <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap rounded bg-[var(--app-subtle-bg)] p-2 text-[11px] leading-relaxed">{promptText}</pre>
+                        </details>
+                    )}
+                    {(toolCount > 0 || thinkCount > 0) && (
+                        <div className="flex flex-col gap-1.5">{timelineNodes(evs)}</div>
+                    )}
+                    {outcome && (
+                        <div>
+                            <div className="mb-1 text-xs font-medium text-[var(--app-hint)]">结果</div>
+                            <p className="whitespace-pre-wrap text-sm">{outcome}</p>
+                        </div>
+                    )}
+                </div>
+            )}
         </Card>
     )
 }
