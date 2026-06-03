@@ -241,7 +241,8 @@ def survives(verdicts) -> bool:
 
 # ─── Orchestration ───
 async def research(question: str, angles: list, *, budget: Budget | None = None,
-                   sem=None, on_event=None, fetch_budget: int = MAX_FETCH) -> dict:
+                   sem=None, on_event=None, fetch_budget: int = MAX_FETCH,
+                   max_verify_claims: int = MAX_VERIFY_CLAIMS) -> dict:
     """Run Search→Fetch→Verify→Synthesize over pre-scoped `angles`.
 
     on_event(phase, message): optional progress callback (worker wires it to events.emit so
@@ -297,7 +298,7 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
     per_angle = await asyncio.gather(*[angle_chain(a) for a in angles])
     all_sources = [s for chain in per_angle for s in chain]
     all_claims = [c for s in all_sources for c in s["claims"]]
-    ranked = rank_claims(all_claims)
+    ranked = rank_claims(all_claims, max_verify_claims)
     ev("fetch", "抓取 " + str(len(all_sources)) + " 源 → " + str(len(all_claims)) +
        " claims → 验证前 " + str(len(ranked)))
 

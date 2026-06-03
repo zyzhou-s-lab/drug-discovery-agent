@@ -48,14 +48,20 @@ async def run_agent(phase, prompt, submit_name, schema, extra_mcp, budget, sem,
         setting_sources=[],
     )
     async with sem:
-        async for msg in query(prompt=prompt, options=opts):
-            if on_message is not None:
-                try:
-                    on_message(msg)
-                except Exception:  # noqa: BLE001 — streaming is best-effort
-                    pass
-            if type(msg).__name__ == "ResultMessage":
-                budget.add(phase, getattr(msg, "usage", None), getattr(msg, "total_cost_usd", 0) or 0)
+        try:
+            async for msg in query(prompt=prompt, options=opts):
+                if on_message is not None:
+                    try:
+                        on_message(msg)
+                    except Exception:  # noqa: BLE001 — streaming is best-effort
+                        pass
+                if type(msg).__name__ == "ResultMessage":
+                    budget.add(phase, getattr(msg, "usage", None), getattr(msg, "total_cost_usd", 0) or 0)
+        except Exception:  # noqa: BLE001
+            # An agent that errors (e.g. "max turns", a web agent that kept searching and
+            # never called submit_*) must NOT crash the whole gather. Drop it to None — the
+            # blueprint's resilience: fetch→drop source, verify→abstain (handled by survives()).
+            return cap.get("v")
     return cap.get("v")
 
 
