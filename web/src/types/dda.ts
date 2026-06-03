@@ -119,7 +119,6 @@ export interface ScopeAngle {
 
 export interface ScopeResult {
     question: string
-    summary: string
     angles: ScopeAngle[]
     budget?: { spent_tokens: number; by_phase: Record<string, unknown> }
     error?: string

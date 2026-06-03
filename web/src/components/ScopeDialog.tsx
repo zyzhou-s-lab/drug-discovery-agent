@@ -60,9 +60,6 @@ export function ScopeDialog(props: {
                     {error && <p className="text-sm text-[var(--app-badge-error-text,#dc2626)]">{error}</p>}
                     {result && (
                         <div className="flex flex-col gap-2">
-                            {result.summary && (
-                                <p className="text-sm text-[var(--app-hint)]">{result.summary}</p>
-                            )}
                             <ol className="flex flex-col gap-2">
                                 {result.angles.map((a, i) => (
                                     <li key={i} className="rounded-lg border border-[var(--app-border)] p-2.5">
