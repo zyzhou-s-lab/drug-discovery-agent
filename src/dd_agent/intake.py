@@ -90,9 +90,10 @@ async def validate_disease(raw: str) -> DiseaseIntake:
     )
     opts = ClaudeAgentOptions(
         system_prompt=system,
-        # the disease-name gate is hit on every new run — use a fast model tier so users
-        # don't wait on the heavy reasoning model. Override via DD_INTAKE_MODEL.
-        model=os.environ.get("DD_INTAKE_MODEL", "mimo-v2-flash"),
+        # the disease-name gate is hit on every new run — use a lighter/faster model tier
+        # (mimo-v2.5 base, vs the heavy mimo-v2.5-pro) so users don't wait. Override via
+        # DD_INTAKE_MODEL. (mimo has no "flash" tier; v2.5 base is the fast text model.)
+        model=os.environ.get("DD_INTAKE_MODEL", "mimo-v2.5"),
         mcp_servers={"intake": _intake_server(captured),
                      "otdisease": _disease_search_server()},
         allowed_tools=["mcp__intake__submit_intake", "mcp__otdisease__search_disease"],
