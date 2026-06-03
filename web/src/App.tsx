@@ -235,9 +235,11 @@ function ScopeAngles(props: { serverAngles: ScopeAngle[]; spentTokens?: number }
                 />
                 <Button size="sm" variant="outline" onClick={add}>添加角度</Button>
             </div>
-            {extra.length > 0 && (
-                <p className="mt-1 text-[10px] text-[var(--app-hint)]">自定义角度将用于后续检索阶段(M2)。</p>
-            )}
+            <p className="mt-1 text-[10px] text-[var(--app-hint)]">
+                {extra.length > 0
+                    ? `自定义角度是模型 ${props.serverAngles.length} 个角度之外的补充,会一并进入后续检索阶段(M2);角度越多检索成本越高。`
+                    : `模型自动拆解出 ${props.serverAngles.length} 个角度;可在此补充自定义角度,总数可超过 6。`}
+            </p>
         </Card>
     )
 }
