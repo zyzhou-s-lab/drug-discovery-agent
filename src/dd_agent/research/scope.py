@@ -73,6 +73,11 @@ async def scope(disease: str, budget: Budget | None = None, on_message=None) -> 
         mcp_servers={"scope": create_sdk_mcp_server("scope", "1.0.0", [_submit])},
         permission_mode="bypassPermissions",
         max_turns=6,
+        # Don't inherit the host's CLAUDE.md / settings. On gpu the user-level CLAUDE.md
+        # carries a "MemOS auto-memory" block (search_memory/add_message every turn); that
+        # MCP isn't mounted here, so the scope agent just ruminates about it in `thinking`.
+        # DeepSeek routing comes from the uvicorn process env, not settings.json, so [] is safe.
+        setting_sources=[],
     )
     async for msg in query(prompt=SCOPE_PROMPT.replace("{QUESTION}", disease), options=opts):
         if on_message is not None:
