@@ -101,7 +101,7 @@ def _patch_agent(fake):
 
 
 def test_research_happy_path_returns_report():
-    async def fake(phase, prompt, submit, schema, extra, budget, sem, on_message=None, max_turns=12):
+    async def fake(phase, prompt, submit, schema, extra, budget, sem, on_message=None, max_turns=12, **kw):
         return {
             "submit_results": {"results": [{"url": "https://x.com/a", "title": "A", "relevance": "high"}]},
             "submit_claims": {"sourceQuality": "primary",
@@ -121,7 +121,7 @@ def test_research_happy_path_returns_report():
 
 
 def test_research_no_claims_salvage():
-    async def fake(phase, prompt, submit, schema, extra, budget, sem, on_message=None, max_turns=12):
+    async def fake(phase, prompt, submit, schema, extra, budget, sem, on_message=None, max_turns=12, **kw):
         if submit == "submit_results":
             return {"results": [{"url": "https://x.com/a", "title": "A", "relevance": "high"}]}
         if submit == "submit_claims":
@@ -154,7 +154,7 @@ def test_bibliography_groups_cited_sources():
 
 
 def test_research_all_refuted_salvage():
-    async def fake(phase, prompt, submit, schema, extra, budget, sem, on_message=None, max_turns=12):
+    async def fake(phase, prompt, submit, schema, extra, budget, sem, on_message=None, max_turns=12, **kw):
         if submit == "submit_results":
             return {"results": [{"url": "https://x.com/a", "title": "A", "relevance": "high"}]}
         if submit == "submit_claims":

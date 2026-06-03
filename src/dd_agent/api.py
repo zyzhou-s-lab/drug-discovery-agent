@@ -126,6 +126,7 @@ async def rename_campaign_ep(campaign: str, req: RenameRequest) -> dict:
 
 @app.delete("/api/campaigns/{campaign}")
 async def delete_campaign_ep(campaign: str) -> dict:
+    _signal_stop(campaign)  # halt a running search before removing its records/artifacts
     get_index().delete_campaign(campaign)
     shutil.rmtree(os.path.join(ARTIFACTS, campaign), ignore_errors=True)  # events + artifacts
     return {"campaign": campaign, "deleted": True}
@@ -476,6 +477,12 @@ def research_scope(req: ScopeRequest) -> dict:
 # cards; the report + run status are persisted as artifacts and polled via GET /report.
 SEARCH_STAGE = "deep-research"
 
+# Cooperative-cancel registry: campaign -> threading.Event. Setting it makes research()
+# start no new agents (in-flight ones drain), bounding token spend. Set by POST /stop and
+# by DELETE so deleting a campaign also halts its running search.
+_search_stops: dict[str, "threading.Event"] = {}
+_search_lock = threading.Lock()
+
 
 def _read_json(path: str):
     try:
@@ -502,6 +509,10 @@ def _run_search(campaign: str, disease: str, angles: list[dict]) -> None:
     from .research.deep_research import research
     from .worker import _emit_stream
 
+    stop = threading.Event()
+    with _search_lock:
+        _search_stops[campaign] = stop
+
     events_dir_var.set(os.path.join(ARTIFACTS, campaign, "events"))
     status_path, report_path = _search_paths(campaign)
     _write_json(status_path, {"state": "running", "angles": len(angles)})
@@ -513,16 +524,22 @@ def _run_search(campaign: str, disease: str, angles: list[dict]) -> None:
                                                         done=done, total=total),
             # one expandable step card per agent (its thinking / tool calls / outcome)
             on_agent=lambda label, msg: _emit_stream(SEARCH_STAGE, label, msg, skip_text=True),
+            should_stop=stop.is_set,
             max_verify_claims=max_claims,
         ))
         _write_json(report_path, report)
-        _write_json(status_path, {"state": "done", "stats": report.get("stats", {})})
+        final = "stopped" if stop.is_set() else "done"
+        _write_json(status_path, {"state": final, "stats": report.get("stats", {})})
         emit(SEARCH_STAGE, "synthesize", "result",
              num_turns=(report.get("stats") or {}).get("agentCalls"))
     except Exception as exc:  # noqa: BLE001 — surface in log + status, never crash the server
         _write_json(status_path, {"state": "error", "error": repr(exc)})
         emit(SEARCH_STAGE, "search", "result", is_error=True)
         print(f"[search {campaign}] failed: {exc!r}")
+    finally:
+        with _search_lock:
+            if _search_stops.get(campaign) is stop:
+                _search_stops.pop(campaign, None)
 
 
 class SearchRequest(BaseModel):
@@ -557,10 +574,32 @@ async def start_search(campaign: str, req: SearchRequest) -> dict:
 
 @app.get("/api/campaigns/{campaign}/report")
 async def campaign_report(campaign: str) -> dict:
-    """Poll the Search phase: {status:{state}, report|null}. state ∈ none/running/done/error."""
+    """Poll the Search phase: {status:{state}, report|null}.
+    state ∈ none/running/stopping/stopped/done/error."""
     status_path, report_path = _search_paths(campaign)
     return {
         "campaign": campaign,
         "status": _read_json(status_path) or {"state": "none"},
         "report": _read_json(report_path),
     }
+
+
+def _signal_stop(campaign: str) -> bool:
+    """Set the cancel flag for a running search, if any. Returns True if one was running."""
+    with _search_lock:
+        ev = _search_stops.get(campaign)
+    if ev:
+        ev.set()
+        return True
+    return False
+
+
+@app.post("/api/campaigns/{campaign}/stop")
+async def stop_search(campaign: str) -> dict:
+    """Cooperatively stop a running search: no new agents start; in-flight ones drain."""
+    stopping = _signal_stop(campaign)
+    status_path, _ = _search_paths(campaign)
+    cur = _read_json(status_path) or {}
+    if cur.get("state") == "running":
+        _write_json(status_path, {**cur, "state": "stopping"})
+    return {"campaign": campaign, "stopping": stopping}

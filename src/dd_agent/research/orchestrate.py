@@ -11,7 +11,7 @@ from __future__ import annotations
 
 
 async def run_agent(phase, prompt, submit_name, schema, extra_mcp, budget, sem,
-                    on_message=None, max_turns: int = 12):
+                    on_message=None, max_turns: int = 12, should_stop=None):
     """One isolated forced-tool agent = deep-research's `agent({schema})` primitive.
 
     The Workflow engine's forced StructuredOutput isn't available in the SDK, so the
@@ -29,7 +29,10 @@ async def run_agent(phase, prompt, submit_name, schema, extra_mcp, budget, sem,
         ClaudeAgentOptions, create_sdk_mcp_server, query, tool,
     )
 
-    if budget.exhausted():
+    # cooperative cancel: a stopped run starts no new agents (in-flight ones drain naturally),
+    # which bounds further token spend. Checked before acquiring the semaphore so queued
+    # agents return immediately.
+    if (should_stop is not None and should_stop()) or budget.exhausted():
         return None
 
     cap: dict = {}

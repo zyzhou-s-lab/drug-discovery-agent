@@ -345,7 +345,7 @@ def _bibliography(confirmed, all_sources):
 
 # ─── Orchestration ───
 async def research(question: str, angles: list, *, budget: Budget | None = None,
-                   sem=None, on_event=None, on_progress=None, on_agent=None,
+                   sem=None, on_event=None, on_progress=None, on_agent=None, should_stop=None,
                    fetch_budget: int = MAX_FETCH,
                    max_verify_claims: int = MAX_VERIFY_CLAIMS) -> dict:
     """Run Search→Fetch→Verify→Synthesize over pre-scoped `angles`.
@@ -410,7 +410,7 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
     async def angle_chain(angle: dict) -> list:
         sr = await run_agent("search", SEARCH_PROMPT(question, angle), "submit_results",
                              SEARCH_SCHEMA, lit, budget, sem,
-                             on_message=amsg("search · " + angle["label"][:28]))
+                             on_message=amsg("search · " + angle["label"][:28]), should_stop=should_stop)
         if not sr or not sr.get("results"):
             ev("search", angle["label"] + ": 0 结果")
             await bump("search", ddone=1)
@@ -433,7 +433,7 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
             flabel = "fetch · " + ((source.get("title") or host or source.get("doi") or "source")[:28])
             ext = await run_agent("fetch", FETCH_PROMPT(question, source, angle["label"]),
                                   "submit_claims", EXTRACT_SCHEMA, lit, budget, sem,
-                                  on_message=amsg(flabel))
+                                  on_message=amsg(flabel), should_stop=should_stop)
             await bump("fetch", ddone=1)
             if not ext:
                 return None
@@ -477,7 +477,8 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
         verdicts = await asyncio.gather(*[
             run_agent("verify", VERIFY_PROMPT(question, claim, v), "submit_verdict",
                       VERDICT_SCHEMA, {}, budget, sem,
-                      on_message=amsg("verify · " + claim["claim"][:18] + " v" + str(v + 1)))
+                      on_message=amsg("verify · " + claim["claim"][:18] + " v" + str(v + 1)),
+                      should_stop=should_stop)
             for v in range(VOTES_PER_CLAIM)
         ])
         await bump("verify", ddone=VOTES_PER_CLAIM)
@@ -512,7 +513,7 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
     # ── synthesize ──
     report = await run_agent("synthesize", SYNTH_PROMPT(question, confirmed, killed),
                              "submit_report", REPORT_SCHEMA, {}, budget, sem,
-                             on_message=amsg("synthesize"))
+                             on_message=amsg("synthesize"), should_stop=should_stop)
     await bump("synthesize", ddone=1)
     sources_out = [{"url": s["url"], "quality": s["sourceQuality"], "angle": s["angle"],
                     "claimCount": len(s["claims"])} for s in all_sources]

@@ -192,7 +192,7 @@ function ScopeAngles(props: {
     serverAngles: ScopeAngle[]
     spentTokens?: number
     onSearch?: (angles: ScopeAngle[]) => void
-    searchState?: 'none' | 'running' | 'done' | 'error'
+    searchState?: 'none' | 'running' | 'stopping' | 'stopped' | 'done' | 'error'
 }) {
     const [extra, setExtra] = useState<string[]>([])
     const [draft, setDraft] = useState('')
@@ -276,8 +276,12 @@ function PhasesPanel(props: { events: import('@/types/dda').StepEvent[]; status:
         return m ? `${m}m${sec}s` : `${sec}s`
     }
     const agents = phases.reduce((n, [k]) => n + (prog[k]?.total ?? 0), 0)
-    const done = props.status === 'done'
-    const statusLabel = done ? '完成' : props.status === 'error' ? '失败' : '进行中'
+    const statusLabel =
+        props.status === 'done' ? '完成'
+        : props.status === 'stopped' ? '已停止'
+        : props.status === 'stopping' ? '停止中'
+        : props.status === 'error' ? '失败'
+        : '进行中'
     return (
         <Card className="p-4">
             <div className="mb-2 flex items-center gap-2 text-sm font-medium">
@@ -409,8 +413,21 @@ function DeepReportView(props: { report: DeepReport }) {
 function DeepResearchPage(props: { campaign: string; report: ReportResponse | null }) {
     const { events } = useStageEvents(props.campaign, 'deep-research')
     const state = props.report?.status.state ?? 'none'
+    const active = state === 'running' || state === 'stopping'
     return (
         <div className="flex flex-col gap-4">
+            {active && (
+                <div className="flex justify-end">
+                    <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={state === 'stopping'}
+                        onClick={() => ddaApi.stopSearch(props.campaign).catch(() => {})}
+                    >
+                        {state === 'stopping' ? '停止中…(在途 agent 跑完即止)' : '停止检索'}
+                    </Button>
+                </div>
+            )}
             <PhasesPanel events={events} status={state} />
             {state === 'error' && (
                 <Card className="p-4 text-sm text-[var(--app-badge-error-text,#dc2626)]">
@@ -430,7 +447,7 @@ function DeepResearchPage(props: { campaign: string; report: ReportResponse | nu
 function StageDetail(props: {
     campaign: string
     stage: string
-    searchState?: 'none' | 'running' | 'done' | 'error'
+    searchState?: 'none' | 'running' | 'stopping' | 'stopped' | 'done' | 'error'
     onSearch?: (angles: ScopeAngle[]) => void
 }) {
     const { detail, loading } = useStageDetail(props.campaign, props.stage)
@@ -707,7 +724,12 @@ export function App() {
                                     ? [{
                                           id: SEARCH_TAB,
                                           label: '检索简报',
-                                          badge: searchState === 'running' ? '进行中' : searchState === 'done' ? '完成' : '失败',
+                                          badge:
+                                              searchState === 'running' ? '进行中'
+                                              : searchState === 'stopping' ? '停止中'
+                                              : searchState === 'stopped' ? '已停止'
+                                              : searchState === 'done' ? '完成'
+                                              : '失败',
                                       }]
                                     : []
                             }

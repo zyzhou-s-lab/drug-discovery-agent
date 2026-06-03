@@ -151,7 +151,11 @@ export interface DeepReport {
 
 export interface ReportResponse {
     campaign: string
-    status: { state: 'none' | 'running' | 'done' | 'error'; stats?: Record<string, number>; error?: string }
+    status: {
+        state: 'none' | 'running' | 'stopping' | 'stopped' | 'done' | 'error'
+        stats?: Record<string, number>
+        error?: string
+    }
     report: DeepReport | null
 }
 

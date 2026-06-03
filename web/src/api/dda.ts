@@ -66,6 +66,8 @@ export const ddaApi = {
             return r.json() as Promise<{ started: boolean; angles: number }>
         }),
     report: (c: string) => getJson<ReportResponse>(`/campaigns/${encodeURIComponent(c)}/report`),
+    stopSearch: (c: string) =>
+        fetch(`${BASE}/campaigns/${encodeURIComponent(c)}/stop`, { method: 'POST' }).then((r) => r.json()),
 
     startRun: (body: { disease: string; campaign: string; real?: boolean; skip_intake?: boolean }) =>
         fetch(`${BASE}/campaigns`, {
