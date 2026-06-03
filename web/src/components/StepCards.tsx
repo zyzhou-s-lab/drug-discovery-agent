@@ -364,10 +364,13 @@ function timelineNodes(events: StepEvent[]): ReactNode[] {
     return nodes
 }
 
-function SessionCard(props: { label: string; events: StepEvent[] }) {
+function SessionCard(props: { label: string; events: StepEvent[]; terminal?: boolean }) {
     const evs = props.events
     const result = evs.find((e) => e.type === 'result')
-    const running = !result
+    // an agent with no result event is only "running" while the run is live; once the run is
+    // terminal (done/stopped/error) such a session was interrupted, not still running.
+    const running = !result && !props.terminal
+    const interrupted = !result && Boolean(props.terminal)
     const [open, setOpen] = useState(running)          // expanded while running
     const wasRunning = useRef(running)
     useEffect(() => {
@@ -397,6 +400,7 @@ function SessionCard(props: { label: string; events: StepEvent[] }) {
                     {elapsed && <span>{elapsed}</span>}
                     {typeof result?.num_turns === 'number' && <span>{result.num_turns} 轮</span>}
                     {running && <span style={{ color: ORANGE }}>运行中</span>}
+                    {interrupted && <span>已中断</span>}
                     {isError && <span style={{ color: RED }}>错误</span>}
                     <span>{open ? '▾' : '▸'}</span>
                 </span>
@@ -406,7 +410,7 @@ function SessionCard(props: { label: string; events: StepEvent[] }) {
     )
 }
 
-export function StepCards(props: { events: StepEvent[] }) {
+export function StepCards(props: { events: StepEvent[]; terminal?: boolean }) {
     const groups = useMemo(() => {
         const order: string[] = []
         const by = new Map<string, StepEvent[]>()
@@ -424,7 +428,7 @@ export function StepCards(props: { events: StepEvent[] }) {
     return (
         <div className="flex flex-col gap-2">
             {groups.map((g) => (
-                <SessionCard key={g.label} label={g.label} events={g.events} />
+                <SessionCard key={g.label} label={g.label} events={g.events} terminal={props.terminal} />
             ))}
         </div>
     )

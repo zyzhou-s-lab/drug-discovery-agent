@@ -436,7 +436,7 @@ function DeepResearchPage(props: { campaign: string; report: ReportResponse | nu
             )}
             {props.report?.report && <DeepReportView report={props.report.report} />}
             {events.length > 0 ? (
-                <StepCards events={events} />
+                <StepCards events={events} terminal={state === 'done' || state === 'stopped' || state === 'error'} />
             ) : state === 'running' ? (
                 <Card className="p-4 text-sm text-[var(--app-hint)]">检索启动中,各 agent 会话稍候出现…</Card>
             ) : null}
