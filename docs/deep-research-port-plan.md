@@ -148,12 +148,17 @@ clearly irrelevant for this disease:
 1. Disease definition, subtypes & clinical classification
 2. Affected tissues, cell types & key anatomy
 3. Core pathological mechanisms (molecular & cellular)
-4. Genetic architecture & key risk genes (GWAS / rare & LoF / Mendelian) — the strongest target prior
+4. Genetic architecture & heritability (risk loci to be identified by search) — the strongest target prior
 5. Dysregulated pathways & gene families
-6. Current therapeutics, known targets & clinical-trial landscape (background only)
+6. Therapeutic landscape & clinical-trial status
 
-For each angle: a `label`, a specific `query` (suited to web search + biomedical databases),
-and a 1-2 sentence `rationale` for why it matters to target discovery. Avoid redundancy.
+For each angle: a `label`, a `query`, and a 1-2 sentence `rationale` for why it matters to
+target discovery. Avoid redundancy.
+
+Write each `query` as a SEARCH GOAL — describe WHAT to find (specific about DIMENSION and
+METHODS: GWAS / rare & LoF / single-cell / pathway enrichment / approved drugs & trials).
+Do NOT pre-name specific genes, proteins, or drugs from prior knowledge — discovering those
+is the downstream search's job; pre-baking unverified names anchors the search and isn't traceable.
 
 Return: the disease (verbatim or lightly normalized), a 1-2 sentence decomposition strategy,
 and the angles. Call `submit_angles` exactly once with {question, summary, angles};
