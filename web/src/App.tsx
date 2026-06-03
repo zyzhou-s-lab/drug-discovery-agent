@@ -437,7 +437,6 @@ function DeepReportView(props: { report: DeepReport }) {
 // Dedicated page for the deep-research run (reached via the 检索简报 tab after 开始检索):
 // phase tree + per-agent session cards + the cited report.
 function DeepResearchPage(props: { campaign: string; report: ReportResponse | null }) {
-    const { events } = useStageEvents(props.campaign, 'deep-research')
     const { detail } = useStageDetail(props.campaign, 'disease-overview')
     const angles = detail?.output?.data?.angles ?? []
     const state = props.report?.status.state ?? 'none'
@@ -466,6 +465,22 @@ function DeepResearchPage(props: { campaign: string; report: ReportResponse | nu
                     </Button>
                 )}
             </div>
+            {/* key on the run id: a (re)start resets the event view (no mixed old/new cards) */}
+            <DeepResearchBody
+                key={props.report?.status.run ?? 'none'}
+                campaign={props.campaign}
+                report={props.report}
+            />
+        </div>
+    )
+}
+
+function DeepResearchBody(props: { campaign: string; report: ReportResponse | null }) {
+    const { events } = useStageEvents(props.campaign, 'deep-research')
+    const state = props.report?.status.state ?? 'none'
+    const terminal = state === 'done' || state === 'stopped' || state === 'error'
+    return (
+        <>
             <PhasesPanel events={events} status={state} terminal={terminal} />
             {state === 'error' && (
                 <Card className="p-4 text-sm text-[var(--app-badge-error-text,#dc2626)]">
@@ -476,7 +491,7 @@ function DeepResearchPage(props: { campaign: string; report: ReportResponse | nu
             {events.length === 0 && state === 'running' && (
                 <Card className="p-4 text-sm text-[var(--app-hint)]">检索启动中,各 agent 会话稍候出现…</Card>
             )}
-        </div>
+        </>
     )
 }
 

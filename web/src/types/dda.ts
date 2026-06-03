@@ -155,6 +155,7 @@ export interface ReportResponse {
         state: 'none' | 'running' | 'stopping' | 'stopped' | 'done' | 'error'
         stats?: Record<string, number>
         error?: string
+        run?: number // changes per (re)start so the frontend resets its event view
     }
     report: DeepReport | null
 }

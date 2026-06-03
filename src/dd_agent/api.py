@@ -22,6 +22,7 @@ import json
 import os
 import shutil
 import threading
+import time
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -190,7 +191,24 @@ def _run_context(idx: Index, campaign: str) -> str:
                 f"评审: converged={verdict.get('converged')} score={verdict.get('score')} "
                 f"reasons={verdict.get('reasons')} missing={verdict.get('missing')}"
             )
-    return "\n".join(parts)[:14000]
+
+    # deep-research Search phase (phase 2): the report lives in artifacts, not in the Index —
+    # feed it so the side-chat is grounded in the actual findings/sources, not just the scope.
+    report = _read_json(_search_paths(campaign)[1])
+    if report:
+        parts.append("## 检索简报(深度检索结果)")
+        if report.get("summary"):
+            parts.append(str(report["summary"])[:800])
+        for f in (report.get("findings") or [])[:15]:
+            srcs = ", ".join((f.get("sources") or [])[:2])
+            parts.append(f"- [{f.get('confidence')}] {f.get('claim')}" + (f" (来源: {srcs})" if srcs else ""))
+        refs = report.get("references") or []
+        if refs:
+            parts.append("参考文献: " + "; ".join(str(r.get("apa7", ""))[:140] for r in refs[:10]))
+        if report.get("caveats"):
+            parts.append("注意: " + str(report["caveats"])[:300])
+
+    return "\n".join(parts)[:16000]
 
 
 class ChatRequest(BaseModel):
@@ -518,9 +536,18 @@ def _run_search(campaign: str, disease: str, angles: list[dict]) -> None:
     with _search_lock:
         _search_stops[campaign] = (stop, holder)
 
-    events_dir_var.set(os.path.join(ARTIFACTS, campaign, "events"))
+    ev_dir = os.path.join(ARTIFACTS, campaign, "events")
+    events_dir_var.set(ev_dir)
     status_path, report_path = _search_paths(campaign)
-    _write_json(status_path, {"state": "running", "angles": len(angles)})
+    # restart hygiene: clear the prior run's report + this stage's event log so a re-search
+    # starts clean (no mixed old/new agent cards). Scope events (disease-overview.jsonl) kept.
+    for p in (report_path, os.path.join(ev_dir, f"{SEARCH_STAGE}.jsonl")):
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+    run_id = int(time.time() * 1000)  # changes per (re)start → frontend resets its event view
+    _write_json(status_path, {"state": "running", "angles": len(angles), "run": run_id})
     try:
         max_claims = int(os.environ.get("DD_DR_MAX_CLAIMS", "25"))
         task = loop.create_task(research(
@@ -536,15 +563,15 @@ def _run_search(campaign: str, disease: str, angles: list[dict]) -> None:
         report = loop.run_until_complete(task)
         _write_json(report_path, report)
         final = "stopped" if stop.is_set() else "done"
-        _write_json(status_path, {"state": final, "stats": report.get("stats", {})})
+        _write_json(status_path, {"state": final, "stats": report.get("stats", {}), "run": run_id})
         emit(SEARCH_STAGE, "synthesize", "result",
              num_turns=(report.get("stats") or {}).get("agentCalls"))
     except (asyncio.CancelledError, KeyboardInterrupt):
         # hard-stopped mid-run: no report, just mark stopped
-        _write_json(status_path, {"state": "stopped"})
+        _write_json(status_path, {"state": "stopped", "run": run_id})
         print(f"[search {campaign}] cancelled (stop)")
     except Exception as exc:  # noqa: BLE001 — surface in log + status, never crash the server
-        _write_json(status_path, {"state": "error", "error": repr(exc)})
+        _write_json(status_path, {"state": "error", "error": repr(exc), "run": run_id})
         emit(SEARCH_STAGE, "search", "result", is_error=True)
         print(f"[search {campaign}] failed: {exc!r}")
     finally:
