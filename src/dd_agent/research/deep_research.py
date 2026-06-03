@@ -309,12 +309,14 @@ def survives(verdicts) -> bool:
 
 # ─── Orchestration ───
 async def research(question: str, angles: list, *, budget: Budget | None = None,
-                   sem=None, on_event=None, fetch_budget: int = MAX_FETCH,
+                   sem=None, on_event=None, on_progress=None, fetch_budget: int = MAX_FETCH,
                    max_verify_claims: int = MAX_VERIFY_CLAIMS) -> dict:
     """Run Search→Fetch→Verify→Synthesize over pre-scoped `angles`.
 
-    on_event(phase, message): optional progress callback (worker wires it to events.emit so
-    the run UI shows live phase lines; the blueprint's log() lines map here).
+    on_event(phase, message): text progress callback (worker → events.emit text lines).
+    on_progress(phase, done, total): structured per-phase counters for the run UI's phase tree
+    (Search 5/5, Fetch 27/27, Verify 75/75, Synthesize 1/1). Totals for fetch/verify are not
+    known upfront (pipeline) and grow as the run proceeds.
     Returns the report dict (+ refuted/sources/stats/budget), or a salvage dict on empty paths.
     """
     budget = budget or Budget()
@@ -326,6 +328,26 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
                 on_event(phase, message)
             except Exception:  # noqa: BLE001
                 pass
+
+    # ── per-phase progress counters for the UI phase tree ──
+    prog = {"search": [0, len(angles)], "fetch": [0, 0], "verify": [0, 0], "synthesize": [0, 1]}
+    plock = asyncio.Lock()
+
+    def _emit_prog(phase: str) -> None:
+        if on_progress is not None:
+            try:
+                on_progress(phase, prog[phase][0], prog[phase][1])
+            except Exception:  # noqa: BLE001
+                pass
+
+    async def bump(phase: str, ddone: int = 0, dtotal: int = 0) -> None:
+        async with plock:
+            prog[phase][0] += ddone
+            prog[phase][1] += dtotal
+            _emit_prog(phase)
+
+    for _ph in prog:  # seed initial totals (search known; others grow)
+        _emit_prog(_ph)
 
     seen: dict = {}
     dupes: list = []
@@ -344,17 +366,21 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
                              SEARCH_SCHEMA, lit, budget, sem)
         if not sr or not sr.get("results"):
             ev("search", angle["label"] + ": 0 结果")
+            await bump("search", ddone=1)
             return []
         ev("search", angle["label"] + ": " + str(len(sr["results"])) + " 结果")
+        await bump("search", ddone=1)
         async with lock:
             novel = dedup_results(sr["results"], angle["label"], seen, slots, dupes, budget_dropped)
         if len(novel) < len(sr["results"]):
             ev("search", angle["label"] + ": " + str(len(novel)) + " 新 (" +
                str(len(sr["results"]) - len(novel)) + " 过滤)")
+        await bump("fetch", dtotal=len(novel))
 
         async def fetch_one(source: dict):
             ext = await run_agent("fetch", FETCH_PROMPT(question, source, angle["label"]),
                                   "submit_claims", EXTRACT_SCHEMA, lit, budget, sem)
+            await bump("fetch", ddone=1)
             if not ext:
                 return None
             sq = ext.get("sourceQuality")
@@ -391,12 +417,15 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
         }
 
     # ── verify: 3-vote adversarial (barrier — claim pool must be fully assembled first) ──
+    await bump("verify", dtotal=len(ranked) * VOTES_PER_CLAIM)
+
     async def verify_claim(claim: dict) -> dict:
         verdicts = await asyncio.gather(*[
             run_agent("verify", VERIFY_PROMPT(question, claim, v), "submit_verdict",
                       VERDICT_SCHEMA, {}, budget, sem)
             for v in range(VOTES_PER_CLAIM)
         ])
+        await bump("verify", ddone=VOTES_PER_CLAIM)
         valid = [v for v in verdicts if v]
         refuted = sum(1 for v in valid if v.get("refuted"))
         surv = survives(verdicts)
@@ -428,6 +457,7 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
     # ── synthesize ──
     report = await run_agent("synthesize", SYNTH_PROMPT(question, confirmed, killed),
                              "submit_report", REPORT_SCHEMA, {}, budget, sem)
+    await bump("synthesize", ddone=1)
     sources_out = [{"url": s["url"], "quality": s["sourceQuality"], "angle": s["angle"],
                     "claimCount": len(s["claims"])} for s in all_sources]
     stats = {

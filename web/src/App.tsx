@@ -260,6 +260,53 @@ function ScopeAngles(props: {
     )
 }
 
+function PhasesPanel(props: { events: import('@/types/dda').StepEvent[]; status: string }) {
+    const phases: [string, string][] = [
+        ['search', '检索'], ['fetch', '抓取'], ['verify', '核验'], ['synthesize', '汇总'],
+    ]
+    const prog: Record<string, { done: number; total: number }> = {}
+    for (const e of props.events) {
+        if (e.type === 'progress') prog[e.label] = { done: e.done ?? 0, total: e.total ?? 0 }
+    }
+    const ts = props.events.map((e) => e.ts).filter(Boolean)
+    const elapsed = ts.length ? Math.max(...ts) - Math.min(...ts) : 0
+    const fmt = (s: number) => {
+        const m = Math.floor(s / 60), sec = Math.floor(s % 60)
+        return m ? `${m}m${sec}s` : `${sec}s`
+    }
+    const agents = phases.reduce((n, [k]) => n + (prog[k]?.total ?? 0), 0)
+    const done = props.status === 'done'
+    const statusLabel = done ? '完成' : props.status === 'error' ? '失败' : '进行中'
+    return (
+        <Card className="p-4">
+            <div className="mb-2 flex items-center gap-2 text-sm font-medium">
+                深度检索
+                <span className="text-[10px] font-normal text-[var(--app-hint)]">
+                    {agents} agents{ts.length ? ` · ${fmt(elapsed)}` : ''} · {statusLabel}
+                </span>
+            </div>
+            <div className="flex flex-col gap-1.5">
+                {phases.map(([k, label]) => {
+                    const total = prog[k]?.total ?? 0
+                    const d = prog[k]?.done ?? 0
+                    const complete = total > 0 && d >= total
+                    const pct = total > 0 ? Math.min(100, Math.round((d / total) * 100)) : 0
+                    return (
+                        <div key={k} className="flex items-center gap-2 text-xs">
+                            <span className="w-3 text-[var(--app-button)]">{complete ? '✓' : d > 0 ? '·' : ''}</span>
+                            <span className="w-10 font-medium">{label}</span>
+                            <div className="h-1.5 flex-1 overflow-hidden rounded bg-[var(--app-subtle-bg)]">
+                                <div className="h-full bg-[var(--app-button)] transition-all" style={{ width: `${pct}%` }} />
+                            </div>
+                            <span className="w-12 text-right font-mono text-[var(--app-hint)]">{d}/{total || '—'}</span>
+                        </div>
+                    )
+                })}
+            </div>
+        </Card>
+    )
+}
+
 function DeepReportView(props: { report: DeepReport }) {
     const r = props.report
     const confVariant = (c: string) => (c === 'high' ? 'success' : c === 'medium' ? 'warning' : 'default') as
@@ -387,12 +434,7 @@ function StageDetail(props: { campaign: string; stage: string }) {
                     )}
                     {(searchState !== 'none' || searchEvents.length > 0) && (
                         <div className="flex flex-col gap-3">
-                            {searchState === 'running' && (
-                                <div className="flex items-center gap-2 text-sm text-[var(--app-hint)]">
-                                    <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--app-git-unstaged-color,#FF9500)]" />
-                                    检索 → 抽取 → 核验 → 汇总 进行中(全量约 10–15 分钟)…
-                                </div>
-                            )}
+                            <PhasesPanel events={searchEvents} status={searchState} />
                             {searchEvents.length > 0 && <StepCards events={searchEvents} />}
                             {report?.report && <DeepReportView report={report.report} />}
                             {searchState === 'error' && (

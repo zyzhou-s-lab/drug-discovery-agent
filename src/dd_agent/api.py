@@ -511,6 +511,8 @@ def _run_search(campaign: str, disease: str, angles: list[dict]) -> None:
         report = asyncio.run(research(
             disease, angles,
             on_event=lambda phase, msg: emit(SEARCH_STAGE, phase, "text", text=msg),
+            on_progress=lambda phase, done, total: emit(SEARCH_STAGE, phase, "progress",
+                                                        done=done, total=total),
             max_verify_claims=max_claims,
         ))
         _write_json(report_path, report)

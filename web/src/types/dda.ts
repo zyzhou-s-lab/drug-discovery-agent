@@ -152,7 +152,7 @@ export interface ReportResponse {
 }
 
 // One captured Agent SDK step (events.py / worker._emit_stream)
-export type StepEventType = 'session_start' | 'thinking' | 'text' | 'tool_use' | 'tool_result' | 'result'
+export type StepEventType = 'session_start' | 'thinking' | 'text' | 'tool_use' | 'tool_result' | 'result' | 'progress'
 
 export interface StepEvent {
     seq: number
@@ -174,4 +174,7 @@ export interface StepEvent {
     // result
     cost?: number | null
     num_turns?: number | null
+    // progress (deep-research phase tree)
+    done?: number
+    total?: number
 }
