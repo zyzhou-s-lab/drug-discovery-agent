@@ -86,3 +86,12 @@ DISCOVERY_PIPELINE: list[Stage] = [
     Stage("target-selection", rubric_prompt=_SEL_RUBRIC),
     Stage("target-validation", rubric_prompt=_VAL_RUBRIC, planner=True),
 ]
+
+# deep-research flow (M1): scope-only. No rubric → judge auto-passes (api_judge falls back
+# to dummy_judge when rubric_prompt==""); single stage + max_attempts=1 → the run ends at
+# scope output. The old _OVERVIEW_RUBRIC (expects a full brief) does NOT apply to a
+# research plan. search→verify→synth stages (M2) get appended here later.
+# Selected when DD_STAGE0=deep (api._run_pipeline).
+DEEP_RESEARCH_PIPELINE: list[Stage] = [
+    Stage("disease-overview", max_attempts=1),
+]

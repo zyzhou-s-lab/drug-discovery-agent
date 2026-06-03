@@ -30,7 +30,7 @@ from pydantic import BaseModel
 
 from .events import events_dir_var, read_stage_events
 from .index import Index
-from .pipeline import DISCOVERY_PIPELINE
+from .pipeline import DEEP_RESEARCH_PIPELINE, DISCOVERY_PIPELINE
 
 DB_PATH = os.environ.get("DD_DB", "/tmp/dd/state.sqlite")
 ARTIFACTS = os.environ.get("DD_ARTIFACTS", "/tmp/dd/artifacts")
@@ -51,11 +51,19 @@ def get_index() -> Index:
     return _index
 
 
+def _active_pipeline() -> list:
+    """DD_STAGE0=deep → the scope-only deep-research flow (1 stage); else full discovery.
+    Drives both execution (_run_pipeline) and display (pipeline/campaign view) so a deep
+    run shows just stage-0 and reaches a terminal state at scope output."""
+    return (DEEP_RESEARCH_PIPELINE if os.environ.get("DD_STAGE0", "").lower() == "deep"
+            else DISCOVERY_PIPELINE)
+
+
 def _pipeline_meta() -> list[dict]:
     return [
         {"name": s.name, "scatter": s.scatter, "angles": list(s.angles),
          "max_attempts": s.max_attempts}
-        for s in DISCOVERY_PIPELINE
+        for s in _active_pipeline()
     ]
 
 
@@ -64,7 +72,7 @@ def _campaign_view(idx: Index, campaign: str) -> dict:
     stages still appear (status='queued')."""
     recorded = {stage: (status, attempts) for stage, status, attempts in idx.all_states(campaign)}
     stages = []
-    for s in DISCOVERY_PIPELINE:
+    for s in _active_pipeline():
         status, attempts = recorded.get(s.name, ("queued", 0))
         stages.append({
             "name": s.name, "status": status, "attempts": attempts,
@@ -398,8 +406,10 @@ def _run_pipeline(campaign: str, disease: str, real: bool, skip_intake: bool = F
         if not skip_intake:
             from .intake import validate_disease
             intake_fn = validate_disease
+    # DD_STAGE0=deep → scope-only deep-research flow (ends at scope output, no
+    # disease-overview judge); otherwise the full discovery pipeline.
     try:
-        runner = Runner(run_idx, worker_fn, judge_fn, DISCOVERY_PIPELINE,
+        runner = Runner(run_idx, worker_fn, judge_fn, _active_pipeline(),
                         planner_fn=planner_fn, intake_fn=intake_fn)
         res = asyncio.run(runner.run(campaign, disease))
         if res.get("rejected"):
