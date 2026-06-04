@@ -136,15 +136,18 @@ export interface DeepFinding {
 export interface DeepReport {
     question: string
     summary: string
+    narrative?: string // presentation layer: polished Chinese Markdown report (api._present_report)
     findings: DeepFinding[]
     caveats?: string
     openQuestions?: string[]
     refuted?: { claim: string; vote: string; source: string }[]
     sources?: { url: string; quality: string; angle?: string; claimCount?: number }[]
-    // bibliography over confirmed-finding sources (M3.3): papers->APA7, web, database
-    references?: { n: number; doi: string; apa7: string; title?: string }[]
+    // unified numbered bibliography over ALL cited sources (paper→apa7 / database+web→title+url)
+    references?: { n: number; kind?: string; doi?: string; apa7?: string; title?: string; url?: string }[]
     webSources?: { title?: string; url: string }[]
     dbSources?: { title?: string; url: string }[]
+    // raw database records — always preserved & shown; status = its verify outcome (confirmed/refuted/unverified)
+    databaseFacts?: { claim?: string; quote?: string; source?: string; doi?: string; quality?: string; status?: string; raw?: string }[]
     stats?: Record<string, number>
     budget?: { spent_tokens: number; by_phase?: Record<string, unknown> }
 }

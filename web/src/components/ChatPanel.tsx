@@ -20,15 +20,17 @@ const preview = (s: string, n: number) => (s.length > n ? s.slice(0, n) + '…' 
 // into the next message.
 export function ChatPanel(props: {
     campaign: string
+    run?: number
     onClose: () => void
     attachments: string[]
     onRemoveAttachment: (i: number) => void
     onClearAttachments: () => void
 }) {
     const { width, onPointerDown } = useResizable({ key: 'dd-right-w2', def: 400, min: 220, max: 520, side: 'right' })
-    // per-run history persisted in localStorage (App keys this component by campaign,
-    // so it remounts on run switch and there's no stale-write race).
-    const STORE_KEY = `dd-chat-${props.campaign}`
+    // History persisted in localStorage, scoped to BOTH campaign and run id: App keys this
+    // component by `${campaign}-${run}`, so a (re)started deep-research run remounts with a
+    // fresh chat and never replays the prior run attempt's turns into the LLM context.
+    const STORE_KEY = `dd-chat-${props.campaign}-${props.run ?? 'scope'}`
     const [messages, setMessages] = useState<Msg[]>(() => {
         try {
             const s = localStorage.getItem(STORE_KEY)

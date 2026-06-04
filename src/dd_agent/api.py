@@ -192,11 +192,17 @@ def _run_context(idx: Index, campaign: str) -> str:
                 f"reasons={verdict.get('reasons')} missing={verdict.get('missing')}"
             )
 
-    # deep-research Search phase (phase 2): the report lives in artifacts, not in the Index —
-    # feed it so the side-chat is grounded in the actual findings/sources, not just the scope.
-    report = _read_json(_search_paths(campaign)[1])
+    # deep-research Search phase (phase 2): the report lives in artifacts, not in the Index.
+    # Feed the CURRENT run: the final report when it exists, otherwise a digest of the live
+    # run (status + executed sub-tasks + partial claims) so the side-chat reflects the run in
+    # progress — previously it was blind to any run without a finished report.json (running /
+    # stopped / restarted), so it only ever saw the scope.
+    status_path, report_path = _search_paths(campaign)
+    status = _read_json(status_path) or {}
+    report = _read_json(report_path)
+    state = status.get("state")
     if report:
-        parts.append("## 检索简报(深度检索结果)")
+        parts.append(f"## 检索简报(深度检索结果,状态: {state or 'done'})")
         if report.get("summary"):
             parts.append(str(report["summary"])[:800])
         for f in (report.get("findings") or [])[:15]:
@@ -207,8 +213,42 @@ def _run_context(idx: Index, campaign: str) -> str:
             parts.append("参考文献: " + "; ".join(str(r.get("apa7", ""))[:140] for r in refs[:10]))
         if report.get("caveats"):
             parts.append("注意: " + str(report["caveats"])[:300])
+    elif state in ("running", "stopping", "stopped", "error"):
+        parts.append(f"## 深度检索运行(状态: {state},角度 {status.get('angles', '?')} 个,尚无最终简报)")
+        parts.append(_live_run_digest(campaign))
 
     return "\n".join(parts)[:16000]
+
+
+def _live_run_digest(campaign: str) -> str:
+    """Digest the in-progress deep-research event log so the chat sees the CURRENT run
+    (executed search/fetch/verify sub-tasks + partial claims) before report.json exists."""
+    ev = read_stage_events(ARTIFACTS, campaign, SEARCH_STAGE)
+    if not ev:
+        return "(本次检索尚无可见进展。)"
+    phases: dict[str, list[str]] = {}   # phase prefix -> sub-task labels (label = "search · <angle>")
+    claims: list[str] = []
+    for e in ev:
+        if e.get("type") == "session_start":
+            lbl = str(e.get("label", ""))
+            ph, _, rest = lbl.partition(" · ")
+            phases.setdefault(ph or lbl, []).append(rest or lbl)
+        elif e.get("type") == "tool_use" and str(e.get("name", "")).startswith("submit_claims"):
+            inp = e.get("input")
+            if isinstance(inp, dict):  # large inputs get capped to a str by events._cap → skip those
+                for c in (inp.get("claims") or [])[:5]:
+                    if isinstance(c, dict) and c.get("claim"):
+                        claims.append(str(c["claim"])[:200])
+    lines: list[str] = []
+    for ph, items in phases.items():
+        uniq = list(dict.fromkeys(x for x in items if x))
+        head = "; ".join(uniq[:8])
+        lines.append(f"- {ph}: {len(uniq)} 个子任务" + (f"({head})" if head else ""))
+    if claims:
+        lines.append("已抽取的待核验论点(部分):")
+        lines.extend(f"  · {c}" for c in claims[:15])
+    lines.append("(以上为运行中/未完成检索的实时进展,最终简报尚未生成。)")
+    return "\n".join(lines)
 
 
 class ChatRequest(BaseModel):
@@ -521,6 +561,94 @@ def _search_paths(campaign: str) -> tuple[str, str]:
     return os.path.join(base, "search_status.json"), os.path.join(base, "report.json")
 
 
+def _present_report(report: dict, disease: str) -> str:
+    """Turn the structured (English) deep-research report into a polished Chinese Markdown
+    narrative — sections + tables + per-finding confidence/source — mirroring what a chat agent
+    does when presenting the workflow's JSON. Returns '' on any failure (never raises)."""
+    findings = report.get("findings") or []
+    if not findings:
+        return ""
+    token = os.environ.get("ANTHROPIC_AUTH_TOKEN")
+    key = os.environ.get("DD_JUDGE_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
+    if not (token or key):
+        return ""
+    # map each finding's sources to their numbered reference (DOI substring match) → an in-text
+    # superscript citation; the frontend renders the numbered reference list from the same data.
+    refs = report.get("references") or []
+    def _cite(f) -> str:
+        srcs = [str(s).lower() for s in (f.get("sources") or [])]
+        nums = sorted({r["n"] for r in refs
+                       if (r.get("doi") and any(str(r["doi"]).lower() in s for s in srcs))
+                       or (r.get("url") and any(r["url"] in s or s in r["url"] for s in srcs if s))})
+        return f"<sup>{','.join(map(str, nums))}</sup>" if nums else ""
+    # feed the FULL report (no per-field truncation), mirroring CC's main agent reading the whole
+    # workflow output; only a single generous total cap guards against a pathologically huge report.
+    parts = [f"## 执行摘要\n{report.get('summary') or ''}", "\n## 已确认发现"]
+    for i, f in enumerate(findings, 1):
+        parts.append(f"{i}. [{f.get('confidence')}] {f.get('claim')}{_cite(f)}"
+                     + (f"\n   详细证据: {f.get('evidence')}" if f.get("evidence") else ""))
+    refuted = report.get("refuted") or []
+    if refuted:
+        parts.append("\n## 被对抗式核验否决的声明(供透明性)\n"
+                     + "\n".join(f"- {x.get('claim')}(票 {x.get('vote')})" for x in refuted))
+    if report.get("caveats"):
+        parts.append("\n## 局限\n" + str(report["caveats"]))
+    if report.get("openQuestions"):
+        parts.append("\n## 开放问题\n" + "\n".join(f"- {q}" for q in report["openQuestions"]))
+    digest = "\n".join(parts)[:60000]   # single total safety cap; individual fields untruncated
+    system = (
+        "你是资深研究报告编辑。把用户给出的【已通过对抗式验证的结构化深度研究结果】整理、撰写成一份"
+        "详实、专业、可读性强的中文 Markdown 报告(不是清单,要有充分的叙述展开):\n"
+        "1) 分章节、有标题;可表格化的内容(分类/映射/亚型/基因-表型对应等)用 Markdown 表格呈现。"
+        "**表格必须列出数据中出现的每一条目,禁止用省略号(…/...)或'等'省略任何行——宁可表长也要完整。**\n"
+        "2) 每条发现都【展开成完整段落】,充分利用给定的「详细证据」,解释其含义、机制及对药物靶点发现的意义,"
+        "不要只复述一句话;标注置信度(高/中/低)。\n"
+        "3) 对关键启示/重要警示,用 Markdown 引用块(以 > 开头)+ 粗体小标题(如「关键启示」「重要警示」)强调,像综述里的 callout。**全文不要使用任何 emoji / 表情符号。**\n"
+        "4) 每条发现末尾的 <sup>数字</sup> 是引用编号,请【原样保留】;正文不要写出作者/期刊/DOI/PMID 等"
+        "来源全名,引用一律用这些 <sup> 上标。**严禁自行新增或重新编号引用——只能使用文本中已提供的 <sup> 编号,"
+        "不存在对应编号就不要加上标。**基因名、蛋白、本体 ID(如 MONDO:xxx)、英文缩写保留原文,不要翻译。\n"
+        "5) 设「局限」与「开放问题」两节;若提供了被否决声明,加一节简述(透明性)。\n"
+        "6) 忠于给定内容,不得编造未提供的事实或来源。\n"
+        "7) **不要**包含「研究概览/统计」数字概览章节(由系统单独以卡片展示),也**不要**生成「参考文献」章节"
+        "(由系统用结构化数据单独渲染)。\n"
+        "8) 只输出报告 Markdown 本身,不要任何前后缀说明或寒暄。"
+    )
+    try:
+        import anthropic
+        kw: dict = {}
+        base_url = os.environ.get("DD_JUDGE_BASE_URL") or os.environ.get("ANTHROPIC_BASE_URL")
+        if base_url:
+            kw["base_url"] = base_url
+        if key:
+            kw["api_key"] = key
+        elif token:
+            kw["auth_token"] = token
+        client = anthropic.Anthropic(**kw)
+        model = os.environ.get("DD_JUDGE_MODEL") or os.environ.get("ANTHROPIC_MODEL") or "claude-sonnet-4-5"
+        # This single call fires right after a 70+-agent run that may have saturated the backend
+        # (mimo 429 / overload). Without a retry it silently yields an empty narrative, so back off
+        # and retry a few times; only give up (and LOG, not swallow) after the last attempt.
+        last_exc: Exception | None = None
+        for attempt in range(5):
+            try:
+                msg = client.messages.create(
+                    model=model, max_tokens=8192, system=system,
+                    messages=[{"role": "user", "content": f"研究对象:{disease}\n\n{digest}"}],
+                )
+                # references are NOT written into the narrative — the frontend renders the numbered
+                # list from structured data; the narrative cites them via superscript numbers.
+                return "".join(getattr(b, "text", "") for b in msg.content).strip()
+            except Exception as exc:  # noqa: BLE001 — retry transient 429/overload/socket
+                last_exc = exc
+                if attempt < 4:
+                    time.sleep(2 ** attempt * 3)  # 3,6,12,24s
+        print(f"[present] giving up after retries: {last_exc!r}")
+        return ""
+    except Exception as exc:  # noqa: BLE001 — client setup failure
+        print(f"[present] setup failed: {exc!r}")
+        return ""
+
+
 def _run_search(campaign: str, disease: str, angles: list[dict]) -> None:
     """Background Search→Fetch→Verify→Synthesize over the approved angles (own loop/thread,
     like _run_pipeline). Emits step events under SEARCH_STAGE; writes status + report files."""
@@ -550,6 +678,10 @@ def _run_search(campaign: str, disease: str, angles: list[dict]) -> None:
     _write_json(status_path, {"state": "running", "angles": len(angles), "run": run_id})
     try:
         max_claims = int(os.environ.get("DD_DR_MAX_CLAIMS", "25"))
+        rkw: dict = {}
+        # DD_DR_MAX_FETCH (opt-in) caps the fetch phase for cheap/minimal smoke runs; default unchanged.
+        if os.environ.get("DD_DR_MAX_FETCH"):
+            rkw["fetch_budget"] = int(os.environ["DD_DR_MAX_FETCH"])
         task = loop.create_task(research(
             disease, angles,
             on_progress=lambda phase, done, total: emit(SEARCH_STAGE, phase, "progress",
@@ -559,14 +691,44 @@ def _run_search(campaign: str, disease: str, angles: list[dict]) -> None:
                                                      with_outcome=True),
             should_stop=stop.is_set,
             max_verify_claims=max_claims,
+            **rkw,
         ))
         holder["task"] = task
         report = loop.run_until_complete(task)
+        # Wall-clock for the meta card: derive from the event-log ts span (same source the
+        # frontend panel uses) so the two ALWAYS agree. Robust to backfill / restart / run_id
+        # drift, where `time.time() - run_id/1000` would diverge. Fall back to run_id delta.
+        elapsed = round(time.time() - run_id / 1000)
+        try:
+            tss = []
+            with open(os.path.join(ev_dir, f"{SEARCH_STAGE}.jsonl")) as fh:
+                for line in fh:
+                    try:
+                        t = json.loads(line).get("ts")
+                    except Exception:  # noqa: BLE001
+                        continue
+                    if t:
+                        tss.append(t)
+            if len(tss) >= 2:
+                elapsed = round(max(tss) - min(tss))
+        except OSError:
+            pass
+        report.setdefault("stats", {})["elapsedSec"] = elapsed
         _write_json(report_path, report)
         final = "stopped" if stop.is_set() else "done"
         _write_json(status_path, {"state": final, "stats": report.get("stats", {}), "run": run_id})
         emit(SEARCH_STAGE, "synthesize", "result",
              num_turns=(report.get("stats") or {}).get("agentCalls"))
+        # presentation layer (mirrors what a chat agent does with the workflow's JSON): turn the
+        # structured English report into a polished Chinese Markdown narrative. Written AFTER the
+        # report is live so the report tab shows immediately; the narrative fills in on next poll.
+        try:
+            nar = _present_report(report, disease)
+            if nar:
+                report["narrative"] = nar
+                _write_json(report_path, report)
+        except Exception as exc:  # noqa: BLE001 — presentation is best-effort, never fail the run
+            print(f"[present {campaign}] failed: {exc!r}")
     except (asyncio.CancelledError, KeyboardInterrupt):
         # hard-stopped mid-run: no report, just mark stopped
         _write_json(status_path, {"state": "stopped", "run": run_id})

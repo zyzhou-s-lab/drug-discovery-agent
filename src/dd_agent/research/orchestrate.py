@@ -125,6 +125,16 @@ async def run_agent(phase, prompt, submit_name, schema, extra_mcp, budget, sem,
     nudge = (f"You did not call `{submit_name}`. You MUST call `{submit_name}` to return your "
              f"answer — the tool input IS your answer, in the required schema. Call it now.")
 
+    import asyncio as _asyncio
+    import random as _random
+
+    # Transient backend failures surface two ways: (a) a ResultMessage with is_error whose text
+    # names a rate-limit / 5xx / socket condition, or (b) a raised transport exception. Both are
+    # worth retrying; a max-turns / prose-ended agent (no transient marker) is NOT.
+    _TRANSIENT = ("429", "too many requests", "overloaded", "rate limit", "rate_limit",
+                  "503", "502", "500", "socket", "connection", "timed out", "timeout", "reset")
+    state = {"transient": False}
+
     async def _drain(client):
         async for msg in client.receive_response():
             if on_message is not None:
@@ -134,28 +144,45 @@ async def run_agent(phase, prompt, submit_name, schema, extra_mcp, budget, sem,
                     pass
             if type(msg).__name__ == "ResultMessage":
                 budget.add(phase, getattr(msg, "usage", None), getattr(msg, "total_cost_usd", 0) or 0)
+                if getattr(msg, "is_error", False):
+                    r = str(getattr(msg, "result", "") or "").lower()
+                    if any(m in r for m in _TRANSIENT):
+                        state["transient"] = True
+
+    # Bounded retry on TRANSIENT errors only (429 / 5xx / socket), exponential backoff + jitter.
+    # Spacing retries out eases the very 429 bursts we're recovering from. CC's Workflow has NO
+    # such retry (a thrown agent → null); this is a gpu/mimo-specific addition. DD_DR_RETRY=0 → off.
+    max_retries = int(os.environ.get("DD_DR_RETRY", "2"))
 
     async with sem:
         if on_message is not None:
             try:
-                on_message({"__dd_prompt__": prompt})  # card's Prompt section (CC parity)
+                on_message({"__dd_prompt__": prompt})  # card's Prompt section (CC parity), once
             except Exception:  # noqa: BLE001
                 pass
-        try:
-            async with ClaudeSDKClient(options=opts) as client:
-                await client.query(prompt)
-                await _drain(client)
-                attempt = 0
-                while cap.get("v") is None and attempt < max_nudges:
-                    if (should_stop is not None and should_stop()) or budget.exhausted():
-                        break
-                    attempt += 1
-                    await client.query(nudge)
+        for attempt in range(max_retries + 1):
+            state["transient"] = False
+            try:
+                async with ClaudeSDKClient(options=opts) as client:
+                    await client.query(prompt)
                     await _drain(client)
-        except Exception:  # noqa: BLE001
-            # An agent that errors (max turns / failing tool loop) must NOT crash the gather —
-            # drop to None (fetch→drop source, verify→abstain via survives()).
-            return cap.get("v")
+                    n = 0
+                    while cap.get("v") is None and n < max_nudges:
+                        if (should_stop is not None and should_stop()) or budget.exhausted():
+                            break
+                        n += 1
+                        await client.query(nudge)
+                        await _drain(client)
+            except Exception:  # noqa: BLE001 — SDK/transport error; treat as transient (retryable)
+                state["transient"] = True
+            if cap.get("v") is not None:
+                return cap["v"]
+            if attempt < max_retries and state["transient"]:
+                if (should_stop is not None and should_stop()) or budget.exhausted():
+                    break
+                await _asyncio.sleep(2 ** attempt + _random.uniform(0, 1.0))
+                continue
+            break
     return cap.get("v")
 
 
