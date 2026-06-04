@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import { Card } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
@@ -366,47 +366,68 @@ function timelineNodes(events: StepEvent[]): ReactNode[] {
 
 function SessionCard(props: { label: string; events: StepEvent[]; terminal?: boolean }) {
     const evs = props.events
-    const result = evs.find((e) => e.type === 'result')
+    // 429/socket retries emit several result events per agent; the LAST is authoritative (an early
+    // failed attempt must NOT make a since-recovered agent show as errored). Tokens sum across attempts.
+    const resultEvents = evs.filter((e) => e.type === 'result')
+    const result = resultEvents[resultEvents.length - 1]
+    const retries = Math.max(0, resultEvents.length - 1)
     // an agent with no result event is only "running" while the run is live; once the run is
     // terminal (done/stopped/error) such a session was interrupted, not still running.
-    const running = !result && !props.terminal
-    const interrupted = !result && Boolean(props.terminal)
-    const [open, setOpen] = useState(running)          // expanded while running
-    const wasRunning = useRef(running)
-    useEffect(() => {
-        // auto-collapse the session card once it finishes (running -> done edge)
-        if (wasRunning.current && !running) setOpen(false)
-        wasRunning.current = running
-    }, [running])
-    const isError = result?.is_error
+    const [open, setOpen] = useState(false)            // #3: collapsed by default
+    // an agent "succeeded" if it landed its submit_* call (tool_result = "recorded") OR its last result
+    // is clean — even if a ResultMessage is_error (it then hit max_turns / a retried 429).
+    const submitIds = new Set(
+        evs.filter((e) => e.type === 'tool_use' && (e.name ?? '').includes('submit_')).map((e) => e.tool_id)
+    )
+    const submitOk = evs.some((e) => e.type === 'tool_result' && e.tool_id != null && submitIds.has(e.tool_id) && !e.is_error)
+    const succeeded = submitOk || (Boolean(result) && !result?.is_error)
+    const live = !props.terminal
+    // a failed result WHILE the run is still live is most likely a mid-retry (run_agent re-attempts
+    // transient 429/socket) — keep it "running"; only finalize as 错误 once the whole run is terminal.
+    const isError = !succeeded && Boolean(result?.is_error) && !live
+    const interrupted = !succeeded && !result && !live
+    const running = !succeeded && !isError && !interrupted
+    const retrying = running && Boolean(result?.is_error)
     const start = evs[0]?.ts ?? 0
     const end = result?.ts ?? evs[evs.length - 1]?.ts ?? start
     const toolCount = evs.filter((e) => e.type === 'tool_use').length
     const thinkCount = evs.filter((e) => e.type === 'thinking').length
-    const elapsed = fmtElapsed(end - start)
+    // #4: live timer — re-render every second while the session is still running
+    const [now, setNow] = useState(() => Date.now() / 1000)
+    useEffect(() => {
+        if (!running) return
+        const id = setInterval(() => setNow(Date.now() / 1000), 1000)
+        return () => clearInterval(id)
+    }, [running])
+    const elapsed = fmtElapsed((running ? now : end) - start)
     const dotColor = running ? ORANGE : isError ? RED : GREEN
     const angle = ANGLE_LABEL[props.label] ?? props.label
     const promptText = (evs.find((e) => e.type === 'session_start')?.prompt ?? '').trim()
     const outcome = (result?.result ?? '').trim()
-    const tokens = result?.tokens
+    const tokens = resultEvents.reduce((n, e) => n + (e.tokens ?? 0), 0) || undefined
 
     return (
         <Card id={`dd-session-${props.label}`} className="overflow-hidden scroll-mt-4">
             <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
-                <span
-                    className={'h-2 w-2 shrink-0 rounded-full ' + (running ? 'animate-pulse' : '')}
-                    style={{ background: dotColor }}
-                />
+                <span className="relative flex h-2.5 w-2.5 shrink-0 items-center justify-center">
+                    {running && (
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-75"
+                              style={{ background: dotColor }} />
+                    )}
+                    <span className="relative h-2.5 w-2.5 rounded-full" style={{ background: dotColor }} />
+                </span>
                 <span className="text-sm font-medium">会话 · {angle}</span>
-                <span className="ml-auto flex items-center gap-2 text-xs text-[var(--app-hint)]">
-                    <span>{toolCount} 工具 · {thinkCount} 思考</span>
-                    {typeof tokens === 'number' && tokens > 0 && <span>{(tokens / 1000).toFixed(1)}k tok</span>}
+                <span className="ml-auto flex flex-wrap items-center justify-end gap-x-2 gap-y-0.5 text-xs text-[var(--app-hint)]">
+                    <span>{toolCount} 次工具调用 · {thinkCount} 次思考</span>
+                    {typeof tokens === 'number' && tokens > 0 && <span>{(tokens / 1000).toFixed(1)}k tokens</span>}
                     {elapsed && <span>{elapsed}</span>}
                     {typeof result?.num_turns === 'number' && <span>{result.num_turns} 轮</span>}
-                    {running && <span style={{ color: ORANGE }}>运行中</span>}
+                    {retries > 0 && !running && <span style={{ color: ORANGE }}>重试 {retries}</span>}
+                    {retrying && <span style={{ color: ORANGE }}>重试中…</span>}
+                    {running && !retrying && <span style={{ color: ORANGE }}>运行中</span>}
                     {interrupted && <span>已中断</span>}
                     {isError && <span style={{ color: RED }}>错误</span>}
-                    <span>{open ? '▾' : '▸'}</span>
+                    <GroupChevron open={open} />
                 </span>
             </button>
             {open && (

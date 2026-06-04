@@ -60,6 +60,48 @@ def _clean(s: str | None) -> str:
     return html.unescape(_HTML_TAG.sub("", s or "")).strip()
 
 
+def ontology_lookup(query: str, ontology: str = "mondo,efo,hp,go", size: int = 12) -> list[dict]:
+    """Search disease/phenotype/gene ontologies via the EBI OLS4 /api/ (JSON, no JS) → structured
+    terms [{id,label,ontology,definition,iri}]. Returns [] on failure (never raises)."""
+    try:
+        params = {"q": query, "ontology": ontology, "rows": max(1, min(size, 20))}
+        data = _http_json("https://www.ebi.ac.uk/ols4/api/search?" + urllib.parse.urlencode(params))
+        out = []
+        for d in ((data.get("response") or {}).get("docs") or []):
+            desc = d.get("description")
+            out.append({
+                "id": d.get("obo_id") or d.get("short_form"),
+                "label": d.get("label"),
+                "ontology": d.get("ontology_name"),
+                "definition": (desc[0] if isinstance(desc, list) and desc else desc if isinstance(desc, str) else ""),
+                "iri": d.get("iri"),
+            })
+        return [o for o in out if o.get("label")]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _fetch_text(url: str, max_chars: int = 2500) -> str:
+    """Backend-only raw GET of a URL → JSON verbatim / HTML stripped to text. '' on failure.
+    Honors HTTP(S)_PROXY env (urllib), so it reaches sites via the host's proxy. Used to capture
+    the raw database record for display — NOT an agent tool (agents fetch via WebFetch)."""
+    if not (url or "").startswith(("http://", "https://")):
+        return ""
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; dd-agent/1.0)",
+                                                   "Accept": "application/json,text/html,*/*"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            ctype = (resp.headers.get("Content-Type") or "").lower()
+            body = resp.read(800_000).decode("utf-8", errors="replace")
+        if "json" not in ctype:
+            body = re.sub(r"(?is)<(script|style|head)\b.*?</\1>", " ", body)
+            body = html.unescape(_HTML_TAG.sub(" ", body))
+            body = re.sub(r"\s+", " ", body)
+        return body.strip()[:max_chars]
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _norm_doi(doi: str | None) -> str:
     """Strip URL/scheme prefixes and lowercase, so the same DOI dedups across sources."""
     if not doi:

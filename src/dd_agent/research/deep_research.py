@@ -117,7 +117,7 @@ def _lit_server():
 
     from claude_agent_sdk import create_sdk_mcp_server, tool
 
-    from ..tools.paperfetch import abstract_by_doi, search_literature_multi
+    from ..tools.paperfetch import abstract_by_doi, ontology_lookup, search_literature_multi
 
     @tool("search_literature",
           "Search peer-reviewed literature (OpenAlex + Semantic Scholar). Returns papers with "
@@ -147,7 +147,19 @@ def _lit_server():
             return {"content": [{"type": "text", "text": "NOT_FOUND"}]}
         return {"content": [{"type": "text", "text": _json.dumps(rec, ensure_ascii=False)}]}
 
-    _LIT = {"lit": create_sdk_mcp_server("lit", "1.0.0", [_search_lit, _get_paper])}
+    @tool("ontology_lookup",
+          "Look up disease/phenotype/gene terms in ontologies (MONDO/EFO/HP/GO via EBI OLS4 API). "
+          "Returns STRUCTURED records [{id,label,ontology,definition}]. Use this for ontology IDs / "
+          "subtypes / classifications instead of WebFetch-ing ontology web pages (which need JS).",
+          {"query": str})
+    async def _ontology(args):
+        try:
+            rows = await _aio.to_thread(ontology_lookup, args.get("query", ""), "mondo,efo,hp,go", 12)
+        except Exception:  # noqa: BLE001
+            rows = []
+        return {"content": [{"type": "text", "text": _json.dumps(rows, ensure_ascii=False) if rows else "[]"}]}
+
+    _LIT = {"lit": create_sdk_mcp_server("lit", "1.0.0", [_search_lit, _get_paper, _ontology])}
     return _LIT
 
 
@@ -162,16 +174,20 @@ def SEARCH_PROMPT(question: str, angle: dict) -> str:
         "2. **paper** — use the `search_literature` tool for peer-reviewed papers; return each paper's `doi`.\n"
         "3. **database** — when relevant, surface AUTHORITATIVE database / ontology API records and return their\n"
         "   record/API URL: disease ontologies (EFO/MONDO via EBI OLS4), gene/variant resources\n"
-        "   (Ensembl, MyGene, ClinVar), trial registries (ClinicalTrials.gov). Prefer primary databases.\n\n"
+        "   (Ensembl, MyGene, ClinVar), trial registries (ClinicalTrials.gov), and — when the angle touches\n"
+        "   genetics / expression / perturbation — functional-genomics & cohort resources: GWAS Catalog and\n"
+        "   population cohorts (UK Biobank, FinnGen), perturbation / screen atlases (LINCS L1000 & CMap,\n"
+        "   DepMap, Perturb-seq / CRISPR screens), and single-cell atlases (CELLxGENE, Human Cell Atlas,\n"
+        "   disease-specific atlases e.g. SEA-AD). Prefer primary databases.\n\n"
         "Tag every result with `source_type` (web | paper | database). For paper set `doi`; for web/database set `url`.\n"
         "Rank by relevance to the ORIGINAL question, not just the search query. Add a short snippet per result.\n\n"
         "BE FAST — this is only source DISCOVERY, not reading:\n"
         "- Make AT MOST ~2 WebSearch calls and ~1 `search_literature` call total, then submit. Do not loop.\n"
         "- Do NOT WebFetch / open pages here — just return the URLs/DOIs; a later step reads them.\n"
         "- A database result is just a known record/API URL (e.g. an OLS4 term URL); return it, don't fetch it.\n\n"
-        "GUARDRAIL: databases here are for IDENTIFICATION / CLASSIFICATION / qualitative facts (ontology IDs,\n"
-        "subtypes, gene roles) only. Do NOT fetch or eyeball quantitative association scores or target rankings\n"
-        "(e.g. OpenTargets association scores) — that is a separate downstream step."
+        "NOTE: database / dataset records are PRIMARY factual sources — freely surface them and capture the\n"
+        "exact field values as data, INCLUDING quantitative ones (GWAS associations, LINCS L1000 / CMap\n"
+        "signatures, DepMap dependencies, OpenTargets scores, cohort sizes). Record concrete values verbatim."
         + _END.format(tool="submit_results")
     )
 
@@ -183,9 +199,12 @@ def FETCH_PROMPT(question: str, source: dict, angle: str) -> str:
                     "   **DOI:** " + (source.get("doi") or "") + "\n"
                     "   (if it returns NOT_FOUND or an empty abstract, return claims: [] and sourceQuality: \"unreliable\")\n")
     elif st == "database":
-        retrieve = ("## Task\n1. Use WebFetch to GET this database / ontology API record and read its structured fields:\n"
+        retrieve = ("## Task\n1. Read this database / ontology record and extract its CONCRETE fields. For ontology\n"
+                    "   terms (MONDO/EFO/HP/GO) PREFER the `ontology_lookup` tool (returns structured records);\n"
+                    "   otherwise WebFetch the API / record URL:\n"
                     "   **URL:** " + (source.get("url") or "") + "\n"
-                    "   Treat it as a PRIMARY source; extract the concrete records (IDs, classifications, qualitative facts).\n")
+                    "   Treat it as a PRIMARY source; capture the EXACT record fields/values (IDs, gene-subtype\n"
+                    "   mappings, counts, classifications) — not a vague prose summary.\n")
     else:
         retrieve = ("## Task\n1. Use WebFetch to retrieve the page content:\n"
                     "   **URL:** " + (source.get("url") or "") + "\n")
@@ -216,7 +235,8 @@ def VERIFY_PROMPT(question: str, claim: dict, v: int) -> str:
         "**Supporting quote:** \"" + claim.get("quote", "") + "\"\n\n"
         "## Checklist\n"
         "1. Is the claim actually supported by the quote, or is it an overreach/misread?\n"
-        "2. WebSearch for contradicting evidence — does any credible source dispute or heavily qualify this?\n"
+        "2. WebSearch for contradicting evidence — does any credible source dispute or heavily qualify this? "
+        "Use WebFetch to read a page; for peer-reviewed papers use `search_literature` / `get_paper`.\n"
         "3. Is the source quality sufficient for the claim's strength? (extraordinary claims need primary sources)\n"
         "4. Is the claim outdated? (check dates — old claims about fast-moving fields are suspect)\n"
         "5. Is this a marketing claim / press release / cherry-picked benchmark / forum speculation?\n\n"
@@ -305,10 +325,19 @@ def dedup_results(results, angle, seen, slots, dupes, budget_dropped):
 
 
 def rank_claims(claims, limit: int = MAX_VERIFY_CLAIMS):
-    return sorted(
+    """Rank by (importance, source quality), then verify AT LEAST the whole top tier
+    (central importance + primary source) so the highest-value claims are never dropped.
+    `limit` (DD_DR_MAX_CLAIMS) is the floor; 80 is a safety ceiling on the expensive verify phase."""
+    ranked = sorted(
         claims,
         key=lambda c: (IMP_RANK.get(c.get("importance"), 3), QUAL_RANK.get(c.get("sourceQuality"), 5)),
-    )[:limit]
+    )
+    n_cp = sum(1 for c in claims
+               if c.get("importance") == "central" and c.get("sourceQuality") == "primary")
+    # cap is DYNAMIC per run = the number of central+primary claims (they sort first, so this
+    # verifies exactly that tier). Fall back to `limit` only when there are none; 80 = safety ceiling.
+    cap = min(n_cp, 80) if n_cp else limit
+    return ranked[:cap]
 
 
 def survives(verdicts) -> bool:
@@ -335,7 +364,10 @@ def _bibliography(confirmed, all_sources):
         doi = (c.get("doi") or "").strip().lower()
         cited.add(("doi:" + doi) if doi else norm_url(c.get("sourceUrl", "")))
 
-    refs, web, db, seen = [], [], [], set()
+    # ONE unified, sequentially-numbered reference list over ALL confirmed-backing sources
+    # (paper / database / web) so every in-text superscript ¹²… maps to a real entry — previously
+    # only papers were numbered, so citations to DB/web sources dangled past the list length.
+    refs, seen = [], set()
     for s in all_sources:
         doi = (s.get("doi") or "").strip().lower()
         key = ("doi:" + doi) if doi else norm_url(s.get("url", ""))
@@ -343,17 +375,17 @@ def _bibliography(confirmed, all_sources):
             continue
         seen.add(key)
         st = s.get("source_type") or "web"
+        n = len(refs) + 1
         if st == "paper" and s.get("doi"):
             try:
                 apa = cite_by_doi(s["doi"])
             except Exception:  # noqa: BLE001
                 apa = None
-            refs.append({"n": len(refs) + 1, "doi": s["doi"], "apa7": apa or "", "title": s.get("title")})
-        elif st == "database":
-            db.append({"title": s.get("title"), "url": s.get("url")})
+            refs.append({"n": n, "kind": "paper", "doi": s["doi"], "apa7": apa or "", "title": s.get("title")})
         else:
-            web.append({"title": s.get("title"), "url": s.get("url")})
-    return refs, web, db
+            refs.append({"n": n, "kind": "database" if st == "database" else "web",
+                         "title": s.get("title"), "url": s.get("url")})
+    return refs
 
 
 # ─── Orchestration ───
@@ -454,10 +486,19 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
             st = source.get("source_type") or "web"
             doi = source.get("doi") or None
             url = source.get("url") or (f"https://doi.org/{doi}" if doi else "")
+            # for DATABASE sources, deterministically capture the RAW record (JSON/page text) so the
+            # report shows the actual data, not just the agent's summary claim. Best-effort.
+            raw = ""
+            if st == "database" and url:
+                from ..tools.paperfetch import _fetch_text
+                try:
+                    raw = await asyncio.to_thread(_fetch_text, url)
+                except Exception:  # noqa: BLE001
+                    raw = ""
             return {
                 "url": url, "title": source.get("title"), "angle": angle["label"],
                 "source_type": st, "doi": doi, "sourceQuality": sq, "publishDate": ext.get("publishDate"),
-                "claims": [{**c, "sourceUrl": url, "doi": doi, "source_type": st, "sourceQuality": sq}
+                "claims": [{**c, "sourceUrl": url, "doi": doi, "source_type": st, "sourceQuality": sq, "raw": raw}
                            for c in (ext.get("claims") or [])],
             }
 
@@ -467,12 +508,17 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
     per_angle = await asyncio.gather(*[angle_chain(a) for a in angles])
     all_sources = [s for chain in per_angle for s in chain]
     all_claims = [c for s in all_sources for c in s["claims"]]
+    # database records (a MONDO term, a UK Biobank cohort, an L1000 signature) are tracked separately so
+    # their RAW data is ALWAYS preserved & shown, even if a derived claim is refuted. They still go THROUGH
+    # verify (for a quality signal) like web/paper claims — but unlike them, their data is never dropped.
+    db_facts = [c for c in all_claims if c.get("source_type") == "database"]
     ranked = rank_claims(all_claims, max_verify_claims)
     ev("fetch", "抓取 " + str(len(all_sources)) + " 源 → " + str(len(all_claims)) +
-       " claims → 验证前 " + str(len(ranked)))
+       " claims(数据库记录 " + str(len(db_facts)) + ",数据保留)→ 验证前 " + str(len(ranked)))
 
     stats_base = {"angles": len(angles), "sources": len(all_sources),
-                  "claims": len(all_claims), "dupes": len(dupes), "budgetDropped": len(budget_dropped)}
+                  "claims": len(all_claims), "dupes": len(dupes), "budgetDropped": len(budget_dropped),
+                  "databaseFacts": len(db_facts)}
 
     if not ranked:
         return {
@@ -489,7 +535,7 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
     async def verify_claim(claim: dict) -> dict:
         verdicts = await asyncio.gather(*[
             run_agent("verify", VERIFY_PROMPT(question, claim, v), "submit_verdict",
-                      VERDICT_SCHEMA, {}, budget, sem,
+                      VERDICT_SCHEMA, lit, budget, sem,
                       on_message=amsg("verify · " + claim["claim"][:18] + " v" + str(v + 1)),
                       should_stop=should_stop)
             for v in range(VOTES_PER_CLAIM)
@@ -503,7 +549,7 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
            + ((" (" + str(abstained) + " 弃权)") if abstained else "") + (" ✓" if surv else " ✗"))
         return {**claim, "verdicts": valid, "refutedVotes": refuted, "survives": surv}
 
-    voted = await asyncio.gather(*[verify_claim(c) for c in ranked])
+    voted = await asyncio.gather(*[verify_claim(c) for c in ranked]) if ranked else []
     confirmed = [c for c in voted if c["survives"]]
     killed = [c for c in voted if not c["survives"]]
     ev("verify", "验证完成:" + str(len(voted)) + " → 确认 " + str(len(confirmed)) + ",否决 " + str(len(killed)))
@@ -511,12 +557,24 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
     refuted_out = [{"claim": c["claim"], "vote": str(len(c["verdicts"]) - c["refutedVotes"]) + "-"
                     + str(c["refutedVotes"]), "source": c.get("sourceUrl")} for c in killed]
 
+    # raw database data — ALWAYS preserved & shown, annotated with its verify status (db claims went
+    # through verify for a signal, but their data is never dropped, even if refuted / not reached).
+    _ok = {(c.get("claim"), c.get("sourceUrl")) for c in confirmed}
+    _no = {(c.get("claim"), c.get("sourceUrl")) for c in killed}
+    def _db_status(c) -> str:
+        k = (c.get("claim"), c.get("sourceUrl"))
+        return "confirmed" if k in _ok else "refuted" if k in _no else "unverified"
+    db_out = [{"claim": c.get("claim"), "quote": c.get("quote"), "source": c.get("sourceUrl"),
+               "doi": c.get("doi"), "quality": c.get("sourceQuality"), "status": _db_status(c),
+               "raw": c.get("raw")}
+              for c in db_facts]
+
     if not confirmed:
         return {
             "question": question,
             "summary": "All " + str(len(voted)) + " claims refuted by adversarial verification. "
                        "Research inconclusive — sources may be low-quality or claims overstated.",
-            "findings": [], "refuted": refuted_out,
+            "findings": [], "refuted": refuted_out, "databaseFacts": db_out,
             "sources": [{"url": s["url"], "quality": s["sourceQuality"], "claimCount": len(s["claims"])}
                         for s in all_sources],
             "stats": {**stats_base, "verified": len(voted), "confirmed": 0, "killed": len(killed)},
@@ -534,9 +592,10 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
         **stats_base, "verified": len(voted), "confirmed": len(confirmed), "killed": len(killed),
         "agentCalls": 1 + len(angles) + len(all_sources) + len(voted) * VOTES_PER_CLAIM + 1,
     }
-    # bibliography over the sources that backed CONFIRMED claims (papers→APA7, web, database)
-    references, web_sources, db_sources = _bibliography(confirmed, all_sources)
-    biblio = {"references": references, "webSources": web_sources, "dbSources": db_sources}
+    # unified numbered bibliography over ALL confirmed-backing sources (paper/db/web) so every
+    # in-text superscript ¹²… maps to a real entry
+    references = _bibliography(confirmed, all_sources)
+    biblio = {"references": references, "databaseFacts": db_out}
 
     if not report:
         return {

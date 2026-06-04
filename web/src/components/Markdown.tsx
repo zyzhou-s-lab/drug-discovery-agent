@@ -1,4 +1,5 @@
 import ReactMarkdown from 'react-markdown'
+import rehypeRaw from 'rehype-raw'
 import remarkGfm from 'remark-gfm'
 
 // Lightweight markdown for chat answers (headers / bold / lists / code / links / tables).
@@ -17,13 +18,16 @@ const MD_CLASS =
     '[&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-[var(--app-code-bg)] [&_pre]:p-2.5 [&_pre]:text-xs ' +
     '[&_pre_code]:bg-transparent [&_pre_code]:p-0 ' +
     '[&_blockquote]:border-l-2 [&_blockquote]:border-[var(--app-border)] [&_blockquote]:pl-3 [&_blockquote]:text-[var(--app-hint)] ' +
-    '[&_table]:my-2 [&_table]:w-full [&_table]:border-collapse [&_th]:border [&_th]:border-[var(--app-border)] [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_td]:border [&_td]:border-[var(--app-border)] [&_td]:px-2 [&_td]:py-1'
+    '[&_table]:my-2 [&_table]:w-full [&_table]:border-collapse [&_th]:border [&_th]:border-[var(--app-border)] [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_td]:border [&_td]:border-[var(--app-border)] [&_td]:px-2 [&_td]:py-1 ' +
+    // citation superscripts (<sup>n</sup>): larger + colored so they read as references, not tiny glyphs
+    '[&_sup]:text-[0.8em] [&_sup]:font-semibold [&_sup]:text-[var(--app-link)] [&_sup]:ml-0.5'
 
 export function Markdown(props: { text: string }) {
     return (
         <div className={MD_CLASS}>
             <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
+                rehypePlugins={[rehypeRaw]}
                 components={{
                     // open links in a new tab
                     a: ({ node: _node, ...p }) => <a {...p} target="_blank" rel="noreferrer" />,

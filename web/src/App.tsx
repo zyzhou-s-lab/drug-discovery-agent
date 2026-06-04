@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -8,6 +8,7 @@ import { StepCards } from '@/components/StepCards'
 import { Sidebar } from '@/components/Sidebar'
 import { SessionHeader } from '@/components/SessionHeader'
 import { ChatPanel } from '@/components/ChatPanel'
+import { Markdown } from '@/components/Markdown'
 import { SelectionPopup } from '@/components/SelectionPopup'
 import { FilesPage } from '@/components/FilesDialog'
 
@@ -274,7 +275,14 @@ function PhasesPanel(props: {
         if (e.type === 'progress') prog[e.label] = { done: e.done ?? 0, total: e.total ?? 0 }
     }
     const ts = props.events.map((e) => e.ts).filter(Boolean)
-    const elapsed = ts.length ? Math.max(...ts) - Math.min(...ts) : 0
+    // tick every second while live so the header timer advances between events (not only on new ones)
+    const [nowTs, setNowTs] = useState(() => Date.now() / 1000)
+    useEffect(() => {
+        if (props.terminal) return
+        const id = setInterval(() => setNowTs(Date.now() / 1000), 1000)
+        return () => clearInterval(id)
+    }, [props.terminal])
+    const elapsed = ts.length ? (props.terminal ? Math.max(...ts) : nowTs) - Math.min(...ts) : 0
     const fmt = (s: number) => {
         const m = Math.floor(s / 60), sec = Math.floor(s % 60)
         return m ? `${m}m${sec}s` : `${sec}s`
@@ -286,7 +294,8 @@ function PhasesPanel(props: {
         : props.status === 'stopping' ? '停止中'
         : props.status === 'error' ? '失败'
         : '进行中'
-    const [openPhase, setOpenPhase] = useState<string | null>(null)
+    // #2: auto-open the first phase (检索) so its agent cards show on arrival
+    const [openPhase, setOpenPhase] = useState<string | null>('search')
     const phaseEventsOf = (k: string) =>
         props.events.filter((e) => e.label === k || e.label.startsWith(k + ' · '))
     const sessionsOf = (k: string) =>
@@ -294,9 +303,9 @@ function PhasesPanel(props: {
     const selEvents = openPhase ? phaseEventsOf(openPhase) : []
     return (
         <>
-            <Card className="p-4">
+            <Card className="border border-[var(--app-border)] bg-[var(--app-bg)] p-4">
                 <div className="mb-2 flex items-center gap-2 text-sm font-medium">
-                    深度检索
+                    深度研究
                     <span className="text-[10px] font-normal text-[var(--app-hint)]">
                         {agents} agents{ts.length ? ` · ${fmt(elapsed)}` : ''} · {statusLabel}
                     </span>
@@ -316,8 +325,10 @@ function PhasesPanel(props: {
                                 key={k}
                                 onClick={() => setOpenPhase(open ? null : k)}
                                 disabled={sessions === 0}
-                                className={'flex w-full items-center gap-2 rounded px-1 py-0.5 text-xs disabled:cursor-default '
-                                    + (open ? 'bg-[var(--app-subtle-bg)]' : '')}
+                                className={'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors disabled:cursor-default '
+                                    + (open
+                                        ? 'bg-[var(--app-subtle-bg)] ring-1 ring-inset ring-[var(--app-button)] font-medium shadow-sm'
+                                        : 'hover:bg-[var(--app-subtle-bg)]/60')}
                             >
                                 <span className="w-3 text-[var(--app-button)]">{complete ? '✓' : d > 0 ? '·' : ''}</span>
                                 <span className="w-10 text-left font-medium">{label}</span>
@@ -325,7 +336,7 @@ function PhasesPanel(props: {
                                     <div className="h-full bg-[var(--app-button)] transition-all" style={{ width: `${pct}%` }} />
                                 </div>
                                 <span className="w-16 text-right font-mono text-[var(--app-hint)]">{d}/{total || '—'}</span>
-                                <span className="w-8 text-right text-[10px] text-[var(--app-hint)]">{sessions > 0 ? `${sessions} 会话` : ''}</span>
+                                <span className="w-14 shrink-0 whitespace-nowrap text-right text-[10px] text-[var(--app-hint)]">{sessions > 0 ? `${sessions} 会话` : ''}</span>
                             </button>
                         )
                     })}
@@ -338,13 +349,100 @@ function PhasesPanel(props: {
     )
 }
 
+function fmtDur(s?: number): string {
+    if (!s || s <= 0) return '—'
+    const m = Math.floor(s / 60)
+    return m ? `${m}m${s % 60}s` : `${s}s`
+}
+
 function DeepReportView(props: { report: DeepReport }) {
     const r = props.report
     const confVariant = (c: string) => (c === 'high' ? 'success' : c === 'medium' ? 'warning' : 'default') as
         'success' | 'warning' | 'default'
+    const st = r.stats
+    const metaItems: [string, string | number | undefined][] = st
+        ? [
+              ['子智能体', st.agentCalls],
+              ['消耗 token', r.budget?.spent_tokens?.toLocaleString()],
+              ['耗时', fmtDur(st.elapsedSec)],
+              ['研究角度', st.angles],
+              ['来源', st.sources],
+              ['抽取声明', st.claims],
+              ['进入核验', st.verified],
+              ['确认', st.confirmed],
+              ['否决', st.killed],
+              ['最终发现', st.afterSynthesis],
+          ]
+        : []
     return (
-        <Card className="p-4">
-            <div className="mb-2 text-sm font-medium">检索简报</div>
+        <div className="flex flex-col gap-4">
+            {/* meta card: run statistics (agents / tokens / elapsed / pipeline counts) */}
+            {metaItems.filter(([, v]) => v != null && v !== '').length > 0 && (
+                <Card className="p-4">
+                    <div className="mb-2 text-sm font-medium">研究概览</div>
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm sm:grid-cols-3">
+                        {metaItems
+                            .filter(([, v]) => v != null && v !== '')
+                            .map(([k, v]) => (
+                                <div key={k} className="flex items-baseline justify-between gap-2 border-b border-[var(--app-border)] pb-1">
+                                    <span className="text-[var(--app-hint)]">{k}</span>
+                                    <span className="font-medium tabular-nums">{v}</span>
+                                </div>
+                            ))}
+                    </div>
+                </Card>
+            )}
+            {/* presentation layer: polished Chinese narrative (api._present_report), shown first */}
+            {r.narrative && (
+                <Card className="p-5">
+                    <Markdown text={r.narrative} />
+                </Card>
+            )}
+            {/* references rendered from structured data (ReferenceItem); narrative cites via ¹²³ */}
+            {r.narrative && r.references && r.references.length > 0 && (
+                <Card className="p-4">
+                    <div className="mb-2 text-sm font-medium">参考文献</div>
+                    <ol className="flex flex-col gap-1.5">
+                        {r.references.map((ref) => (
+                            <UnifiedRefItem key={ref.n} r={ref} />
+                        ))}
+                    </ol>
+                </Card>
+            )}
+            {/* raw database records carried past verification (factual data, not adversarially tested) */}
+            {r.databaseFacts && r.databaseFacts.length > 0 && (
+                <Card className="p-4">
+                    <div className="mb-2 text-sm font-medium">数据库数据 <span className="text-xs font-normal text-[var(--app-hint)]">(一手记录,数据保留;附核验状态)</span></div>
+                    <ul className="flex flex-col gap-2">
+                        {r.databaseFacts.map((d, i) => {
+                            const sv = d.status === 'confirmed' ? 'success' : d.status === 'refuted' ? 'warning' : 'default'
+                            const sl = d.status === 'confirmed' ? '已确认' : d.status === 'refuted' ? '已否决' : '未核验'
+                            return (
+                                <li key={i} className="rounded-lg border border-[var(--app-border)] p-2.5 text-sm">
+                                    <div className="flex items-start gap-2">
+                                        <Badge variant={sv as 'success' | 'warning' | 'default'} className="shrink-0 whitespace-nowrap">{sl}</Badge>
+                                        <span>{d.claim}</span>
+                                    </div>
+                                    {d.quote && <div className="mt-1 font-mono text-xs text-[var(--app-hint)]">“{d.quote}”</div>}
+                                    {d.raw && (
+                                        <details className="mt-1">
+                                            <summary className="cursor-pointer text-[11px] text-[var(--app-hint)]">原始记录</summary>
+                                            <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-[var(--app-subtle-bg)] p-2 text-[10px] leading-relaxed">{d.raw}</pre>
+                                        </details>
+                                    )}
+                                    {d.source && (
+                                        <a href={d.source} target="_blank" rel="noreferrer" className="mt-1 block break-all font-mono text-[10px] text-[var(--app-link,#2563eb)] hover:underline">
+                                            {d.source}
+                                        </a>
+                                    )}
+                                </li>
+                            )
+                        })}
+                    </ul>
+                </Card>
+            )}
+            <Card className="p-4">
+            <div className="mb-2 text-sm font-medium">{r.narrative ? '结构化数据' : '检索简报'}</div>
             {r.summary && <p className="text-sm leading-relaxed">{r.summary}</p>}
             {r.findings?.length > 0 && (
                 <ol className="mt-3 flex flex-col gap-2">
@@ -378,12 +476,12 @@ function DeepReportView(props: { report: DeepReport }) {
                     </ul>
                 </div>
             )}
-            {r.references && r.references.length > 0 && (
+            {!r.narrative && r.references && r.references.length > 0 && (
                 <div className="mt-3">
                     <p className="mb-1 text-sm font-medium">参考文献</p>
                     <ol className="flex flex-col gap-1.5">
                         {r.references.map((ref) => (
-                            <ReferenceItem key={ref.n} r={{ n: ref.n, doi: ref.doi, apa7: ref.apa7 }} />
+                            <UnifiedRefItem key={ref.n} r={ref} />
                         ))}
                     </ol>
                 </div>
@@ -424,13 +522,9 @@ function DeepReportView(props: { report: DeepReport }) {
                     </ul>
                 </details>
             )}
-            {r.stats && (
-                <p className="mt-3 border-t border-[var(--app-border)] pt-2 text-[10px] text-[var(--app-hint)]">
-                    角度 {r.stats.angles} · 源 {r.stats.sources} · claims {r.stats.claims} · 确认 {r.stats.confirmed} · 否决 {r.stats.killed}
-                    {r.budget?.spent_tokens != null && ` · tokens ${r.budget.spent_tokens}`}
-                </p>
-            )}
-        </Card>
+            {/* run statistics moved to the 研究概览 meta card at the top */}
+            </Card>
+        </div>
     )
 }
 
@@ -452,7 +546,7 @@ function DeepResearchPage(props: { campaign: string; report: ReportResponse | nu
                         disabled={state === 'stopping'}
                         onClick={() => ddaApi.stopSearch(props.campaign).catch(() => {})}
                     >
-                        {state === 'stopping' ? '停止中…' : '停止检索'}
+                        {state === 'stopping' ? '停止中…' : '停止研究'}
                     </Button>
                 )}
                 {terminal && angles.length > 0 && (
@@ -461,7 +555,7 @@ function DeepResearchPage(props: { campaign: string; report: ReportResponse | nu
                         variant="outline"
                         onClick={() => ddaApi.startSearch(props.campaign, angles).catch(() => {})}
                     >
-                        重新检索
+                        重新研究
                     </Button>
                 )}
             </div>
@@ -487,9 +581,9 @@ function DeepResearchBody(props: { campaign: string; report: ReportResponse | nu
                     检索失败:{props.report?.status.error}
                 </Card>
             )}
-            {props.report?.report && <DeepReportView report={props.report.report} />}
+            {/* #5: the report now lives in its own 检索简报 tab, not inline under progress */}
             {events.length === 0 && state === 'running' && (
-                <Card className="p-4 text-sm text-[var(--app-hint)]">检索启动中,各 agent 会话稍候出现…</Card>
+                <Card className="p-4 text-sm text-[var(--app-hint)]">研究启动中,各 agent 会话稍候出现…</Card>
             )}
         </>
     )
@@ -623,6 +717,25 @@ function ReferenceItem(props: { r: Reference }) {
     )
 }
 
+// one entry of the unified reference list: paper → APA7 (ReferenceItem); database/web → title + link
+function UnifiedRefItem(props: { r: { n: number; doi?: string; apa7?: string; title?: string; url?: string } }) {
+    const { r } = props
+    if (r.apa7) return <ReferenceItem r={{ n: r.n, doi: r.doi ?? '', apa7: r.apa7 }} />
+    return (
+        <li className="flex gap-2 text-sm leading-relaxed">
+            <span className="shrink-0 text-[var(--app-hint)]">{r.n}.</span>
+            <span>
+                {r.title ? r.title + ' ' : ''}
+                {r.url && (
+                    <a href={r.url} target="_blank" rel="noreferrer" className="break-all text-[var(--app-link,#2563eb)] hover:underline">
+                        {r.url}
+                    </a>
+                )}
+            </span>
+        </li>
+    )
+}
+
 function Bibliography(props: { campaign: string }) {
     const [data, setData] = useState<ReferencesResponse | null>(null)
     useEffect(() => {
@@ -668,7 +781,17 @@ export function App() {
     const { report, refresh: refreshReport } = useReport(campaign)
     const searchState = report?.status.state ?? 'none'
     const [selected, setSelected] = useState<string | null>(null)
-    const SEARCH_TAB = '__search__'
+    const SEARCH_TAB = '__search__'   // 深度研究 (live progress)
+    const REPORT_TAB = '__report__'   // 检索简报 (final report, its own page — #5)
+    // #5: when the report first lands, jump from the progress tab to the report tab — once per run
+    const autoReportRun = useRef<number | undefined>(undefined)
+    useEffect(() => {
+        const run = report?.status.run
+        if (report?.report && run != null && autoReportRun.current !== run && selected === SEARCH_TAB) {
+            autoReportRun.current = run
+            setSelected(REPORT_TAB)
+        }
+    }, [report?.report, report?.status.run, selected])
     const onStartSearch = (angles: ScopeAngle[]) => {
         if (!campaign) return
         ddaApi
@@ -770,11 +893,12 @@ export function App() {
                             stages={view.stages}
                             selected={selected}
                             onSelect={setSelected}
-                            extra={
-                                searchState !== 'none'
+                            extra={[
+                                // 深度研究 = live progress tab
+                                ...(searchState !== 'none'
                                     ? [{
                                           id: SEARCH_TAB,
-                                          label: '检索简报',
+                                          label: '深度研究',
                                           badge:
                                               searchState === 'running' ? '进行中'
                                               : searchState === 'stopping' ? '停止中'
@@ -782,15 +906,20 @@ export function App() {
                                               : searchState === 'done' ? '完成'
                                               : '失败',
                                       }]
-                                    : []
-                            }
+                                    : []),
+                                // 检索简报 = final report, its own page (#5); appears once the report exists
+                                ...(report?.report ? [{ id: REPORT_TAB, label: '检索简报' }] : []),
+                            ]}
                         />
                     )}
 
                     {campaign && selected === SEARCH_TAB && (
                         <DeepResearchPage campaign={campaign} report={report} />
                     )}
-                    {campaign && selected && selected !== SEARCH_TAB && (
+                    {campaign && selected === REPORT_TAB && report?.report && (
+                        <DeepReportView report={report.report} />
+                    )}
+                    {campaign && selected && selected !== SEARCH_TAB && selected !== REPORT_TAB && (
                         <StageDetail
                             campaign={campaign}
                             stage={selected}
@@ -805,8 +934,9 @@ export function App() {
 
             {chatOpen && campaign && (
                 <ChatPanel
-                    key={campaign}
+                    key={`${campaign}-${report?.status.run ?? 'scope'}`}
                     campaign={campaign}
+                    run={report?.status.run}
                     onClose={() => setChatOpen(false)}
                     attachments={pendingRefs}
                     onRemoveAttachment={(i) => setPendingRefs((p) => p.filter((_, j) => j !== i))}
