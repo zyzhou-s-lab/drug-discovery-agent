@@ -334,9 +334,9 @@ def rank_claims(claims, limit: int = MAX_VERIFY_CLAIMS):
     )
     n_cp = sum(1 for c in claims
                if c.get("importance") == "central" and c.get("sourceQuality") == "primary")
-    # cap is DYNAMIC per run = the number of central+primary claims (they sort first, so this
-    # verifies exactly that tier). Fall back to `limit` only when there are none; 80 = safety ceiling.
-    cap = min(n_cp, 80) if n_cp else limit
+    # cap = AT LEAST `limit` (the floor, so high-value claims are never dropped below it) and
+    # AT LEAST the whole central+primary tier (n_cp, they sort first), with 80 as a safety ceiling.
+    cap = min(max(n_cp, limit), 80)
     return ranked[:cap]
 
 
@@ -350,9 +350,10 @@ def survives(verdicts) -> bool:
 
 
 def _bibliography(confirmed, all_sources):
-    """From the sources that backed CONFIRMED claims, split into APA7 references (papers),
-    web sources, and database sources. cite_by_doi is a deterministic network format step
-    (OpenAlex), run only over confirmed papers. Returns (references, webSources, dbSources)."""
+    """From the sources that backed CONFIRMED claims, build ONE unified, sequentially-numbered
+    reference list. Each entry is tagged kind=paper|web|database; papers get an APA7 string via
+    cite_by_doi (a deterministic OpenAlex format step, run only over confirmed papers).
+    Returns that single reference list (uncited sources excluded)."""
     try:
         from ..tools.paperfetch import cite_by_doi
     except Exception:  # noqa: BLE001 — offline tests / paperfetch unavailable

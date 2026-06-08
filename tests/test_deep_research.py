@@ -65,10 +65,11 @@ def test_rank_claims_importance_then_quality():
     assert [c["claim"] for c in ranked] == ["c3", "c2", "c1"]
 
 
-def test_rank_claims_caps_at_max():
+def test_rank_claims_caps_at_ceiling():
+    # whole central+primary tier is verified, but capped at the 80 safety ceiling
     claims = [{"claim": f"c{i}", "importance": "central", "sourceQuality": "primary"}
-              for i in range(MAX_VERIFY_CLAIMS + 10)]
-    assert len(rank_claims(claims)) == MAX_VERIFY_CLAIMS
+              for i in range(90)]
+    assert len(rank_claims(claims)) == 80
 
 
 def test_survives_needs_quorum_and_few_refutes():
@@ -162,10 +163,13 @@ def test_bibliography_groups_cited_sources():
         {"source_type": "database", "url": "https://ebi.ac.uk/ols4/efo", "title": "EFO"},
         {"source_type": "web", "url": "https://uncited.com/z", "title": "Z"},  # not in confirmed
     ]
-    refs, web, db = _bibliography(confirmed, all_sources)
-    assert refs == []  # no paper sources → no network/APA7
-    assert [w["url"] for w in web] == ["https://a.com/x"]  # uncited excluded
-    assert [d["title"] for d in db] == ["EFO"]
+    refs = _bibliography(confirmed, all_sources)
+    # ONE unified, sequentially-numbered list; uncited source excluded; no paper sources
+    assert [r["n"] for r in refs] == [1, 2]
+    assert [r["url"] for r in refs if r["kind"] == "web"] == ["https://a.com/x"]
+    assert [r["title"] for r in refs if r["kind"] == "database"] == ["EFO"]
+    assert all(r["kind"] != "paper" for r in refs)
+    assert "https://uncited.com/z" not in [r.get("url") for r in refs]
 
 
 def test_research_all_refuted_salvage():
