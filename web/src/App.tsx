@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { LoadingState } from '@/components/LoadingState'
-import { StepCards } from '@/components/StepCards'
+import { StepCards, ToolMetrics } from '@/components/StepCards'
 import { Sidebar } from '@/components/Sidebar'
 import { SessionHeader } from '@/components/SessionHeader'
 import { ChatPanel } from '@/components/ChatPanel'
@@ -410,120 +410,179 @@ function DeepReportView(props: { report: DeepReport }) {
                 </Card>
             )}
             {/* raw database records carried past verification (factual data, not adversarially tested) */}
-            {r.databaseFacts && r.databaseFacts.length > 0 && (
-                <Card className="p-4">
-                    <div className="mb-2 text-sm font-medium">数据库数据 <span className="text-xs font-normal text-[var(--app-hint)]">(一手记录,数据保留;附核验状态)</span></div>
-                    <ul className="flex flex-col gap-2">
-                        {r.databaseFacts.map((d, i) => {
-                            const sv = d.status === 'confirmed' ? 'success' : d.status === 'refuted' ? 'warning' : 'default'
-                            const sl = d.status === 'confirmed' ? '已确认' : d.status === 'refuted' ? '已否决' : '未核验'
-                            return (
-                                <li key={i} className="rounded-lg border border-[var(--app-border)] p-2.5 text-sm">
-                                    <div className="flex items-start gap-2">
-                                        <Badge variant={sv as 'success' | 'warning' | 'default'} className="shrink-0 whitespace-nowrap">{sl}</Badge>
-                                        <span>{d.claim}</span>
+            {r.databaseFacts && r.databaseFacts.length > 0 && (() => {
+                // parse [tool_name]\nJSON blocks separated by --- from the raw field
+                const SKIP_TOOLS = new Set(['Bash', 'WebFetch', 'WebSearch', 'Read', 'Write', 'Edit', 'Glob', 'Grep'])
+                const parseRaw = (raw: string): { tool: string; data: unknown }[] => {
+                    const blocks = raw.split(/\n---\n/)
+                    const seen = new Set<string>()
+                    const result: { tool: string; data: unknown }[] = []
+                    for (const blk of blocks) {
+                        const m = blk.match(/^\[([^\]]+)\]\s*([\s\S]*)$/)
+                        if (!m) continue
+                        const tool = m[1]
+                        if (SKIP_TOOLS.has(tool)) continue
+                        try {
+                            const parsed = JSON.parse(m[2])
+                            const dedup = (arr: Record<string, unknown>[]) =>
+                                arr.filter(obj => {
+                                    const key = String(obj.id || obj.doi || obj.iri || obj.label || obj.title || '').toLowerCase() ||
+                                                JSON.stringify(obj, Object.keys(obj).sort()).toLowerCase()
+                                    if (seen.has(key)) return false
+                                    seen.add(key)
+                                    return true
+                                })
+                            const data = Array.isArray(parsed) ? dedup(parsed) : parsed
+                            const isEmpty = Array.isArray(data) ? data.length === 0 : !data
+                            if (!isEmpty) result.push({ tool, data })
+                        } catch { /* not json */ }
+                    }
+                    return result
+                }
+                const SKIP = new Set(['content', 'data', 'bash', 'type', 'text', 'is_error', 'tool_use_id', 'abstract', 'citation_count', 'authors'])
+                const meaningfulKeys = (obj: Record<string, unknown>) =>
+                    Object.keys(obj).filter(k => {
+                        if (SKIP.has(k)) return false
+                        const v = obj[k]
+                        if (v == null || v === '' || v === false) return false
+                        if (Array.isArray(v) && v.length === 0) return false
+                        if (typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0) return false
+                        return true
+                    })
+                const ontologyWebUrl = (obj: Record<string, unknown>): string => {
+                    const ont = String(obj.ontology || obj.ontology_name || '').toLowerCase()
+                    const rawId = String(obj.obo_id || obj.id || obj.short_form || '')
+                    if (ont && rawId) return `https://www.ebi.ac.uk/ols4/ontologies/${ont}/terms?obo_id=${encodeURIComponent(rawId)}`
+                    if (obj.iri) return String(obj.iri)
+                    return ''
+                }
+                // render structured fields from a parsed record, adapting to whatever keys exist
+                const renderFields = (obj: Record<string, unknown>, i: number) => {
+                    const prefer = ['id', 'label', 'ontology', 'definition', 'doi', 'title', 'year', 'venue', 'iri',
+                                    'obo_id', 'short_form', 'ontology_name', 'tldr']
+                    const mk = meaningfulKeys(obj)
+                    const keys = [...prefer.filter(k => mk.includes(k)), ...mk.filter(k => !prefer.includes(k))]
+                    if (keys.length === 0) return null
+                    return (
+                        <div key={i} className={i > 0 ? 'mt-2 border-t border-[var(--app-border)] pt-2' : ''}>
+                            {keys.map(k => {
+                                const v = obj[k]
+                                const display = Array.isArray(v)
+                                    ? v.map(x => typeof x === 'object' ? JSON.stringify(x) : String(x)).join(', ')
+                                    : typeof v === 'object' ? JSON.stringify(v) : String(v)
+                                let valueNode: React.ReactNode = display
+                                if (k === 'doi') {
+                                    valueNode = <a href={`https://doi.org/${display}`} target="_blank" rel="noreferrer" className="break-words text-[var(--app-link,#2563eb)] hover:underline">{display}</a>
+                                } else if (k === 'iri') {
+                                    valueNode = <a href={display} target="_blank" rel="noreferrer" className="break-words text-[var(--app-link,#2563eb)] hover:underline">{display}</a>
+                                }
+                                return <div key={k} className="flex gap-1 text-xs"><span className="w-24 shrink-0 text-right text-[var(--app-hint)]">{k}</span><span className="min-w-0 break-words">{valueNode}</span></div>
+                            })}
+                            {(() => { const ols = ontologyWebUrl(obj); return ols && ols !== String(obj.iri || '') ? (
+                                <div className="flex gap-1 text-xs"><span className="w-24 shrink-0 text-right text-[var(--app-hint)]">link</span><span className="min-w-0 break-words"><a href={ols} target="_blank" rel="noreferrer" className="text-[var(--app-link,#2563eb)] hover:underline">{ols}</a></span></div>
+                            ) : null })()}
+                        </div>
+                    )
+                }
+                return (
+                    <Card className="p-4">
+                        <div className="mb-2 text-sm font-medium">数据库数据 <span className="text-xs font-normal text-[var(--app-hint)]">({r.databaseFacts.length} 条原始记录)</span></div>
+                        <div className="flex flex-col gap-3">
+                            {r.databaseFacts.map((d, i) => {
+                                const sv = d.status === 'confirmed' ? 'success' : d.status === 'refuted' ? 'warning' : 'default'
+                                const sl = d.status === 'confirmed' ? '已确认' : d.status === 'refuted' ? '已否决' : '未核验'
+                                const blocks = d.raw ? parseRaw(d.raw as string) : []
+                                const src = d.source || ''
+                                const linkUrl = src.startsWith('10.') ? `https://doi.org/${src}` : src
+                                const hasStructured = blocks.some(b => {
+                                    const arr = Array.isArray(b.data) ? b.data : [b.data]
+                                    return arr.some(o => o && typeof o === 'object' && meaningfulKeys(o as Record<string, unknown>).length > 0)
+                                })
+                                return (
+                                    <div key={i} className="rounded-lg border border-[var(--app-border)] p-3">
+                                        <div className="mb-2 flex items-center gap-2">
+                                            <span className="text-xs text-[var(--app-hint)]">#{i + 1}</span>
+                                            <Badge variant={sv as 'success' | 'warning' | 'default'} className="whitespace-nowrap">{sl}</Badge>
+                                            {linkUrl && (
+                                                <a href={linkUrl} target="_blank" rel="noreferrer"
+                                                   className="truncate text-xs text-[var(--app-link,#2563eb)] hover:underline">{linkUrl}</a>
+                                            )}
+                                        </div>
+                                        {/* original content: show only when no structured data to avoid duplication */}
+                                        {!hasStructured && (d.claim || d.quote) && (
+                                            <div className="mb-2 rounded bg-[var(--app-subtle-bg)] p-2">
+                                                {d.claim && <div className="text-sm">{d.claim}</div>}
+                                                {d.quote && <div className="mt-0.5 font-mono text-[10px] text-[var(--app-hint)]">"{d.quote}"</div>}
+                                            </div>
+                                        )}
+                                        {/* structured summary from parsed tool results */}
+                                        {hasStructured && (
+                                            <div className="rounded border border-[var(--app-border)] bg-[var(--app-bg)] p-2">
+                                                {blocks.map((b, bi) => {
+                                                    const arr = Array.isArray(b.data) ? b.data as Record<string, unknown>[] : [b.data as Record<string, unknown>]
+                                                    const valid = arr.filter(o => o && typeof o === 'object' && Object.keys(o).length > 0)
+                                                    if (valid.length === 0) return null
+                                                    return (
+                                                        <div key={bi}>
+                                                            <div className="mb-1 text-[10px] font-medium text-[var(--app-hint)]">[{b.tool}]</div>
+                                                            {valid.slice(0, 5).map((obj, oi) => renderFields(obj, oi))}
+                                                        </div>
+                                                    )
+                                                })}
+                                            </div>
+                                        )}
+                                        {/* raw fallback when no structured data parsed */}
+                                        {!hasStructured && d.raw && (
+                                            <details>
+                                                <summary className="cursor-pointer text-xs text-[var(--app-hint)]">原始数据</summary>
+                                                <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-[var(--app-subtle-bg)] p-2 text-[10px] leading-relaxed">{d.raw}</pre>
+                                            </details>
+                                        )}
                                     </div>
-                                    {d.quote && <div className="mt-1 font-mono text-xs text-[var(--app-hint)]">“{d.quote}”</div>}
-                                    {d.raw && (
-                                        <details className="mt-1">
-                                            <summary className="cursor-pointer text-[11px] text-[var(--app-hint)]">原始记录</summary>
-                                            <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-[var(--app-subtle-bg)] p-2 text-[10px] leading-relaxed">{d.raw}</pre>
-                                        </details>
-                                    )}
-                                    {d.source && (
-                                        <a href={d.source} target="_blank" rel="noreferrer" className="mt-1 block break-all font-mono text-[10px] text-[var(--app-link,#2563eb)] hover:underline">
-                                            {d.source}
-                                        </a>
-                                    )}
-                                </li>
-                            )
-                        })}
+                                )
+                            })}
+                        </div>
+                    </Card>
+                )
+            })()}
+            {/* unified Claim section: confirmed findings + refuted claims */}
+            {((r.findings?.length ?? 0) > 0 || (r.refuted?.length ?? 0) > 0) && (
+                <Card className="p-4">
+                    <div className="mb-2 text-sm font-medium">Claim <span className="text-xs font-normal text-[var(--app-hint)]">
+                        (确认 {(r.findings?.length ?? 0)}, 否决 {(r.refuted?.length ?? 0)})
+                    </span></div>
+                    <ul className="flex flex-col gap-2">
+                        {(r.findings ?? []).map((f, i) => (
+                            <li key={`c${i}`} className="rounded-lg border border-[var(--app-border)] p-2.5">
+                                <div className="flex items-start gap-2">
+                                    <Badge variant="success" className="shrink-0">确认</Badge>
+                                    <Badge variant={confVariant(f.confidence)} className="shrink-0">{f.confidence}</Badge>
+                                    {f.angle && <Badge variant="default" className="shrink-0">{f.angle}</Badge>}
+                                    <span className="text-sm font-medium">{f.claim}</span>
+                                </div>
+                                {f.evidence && <div className="mt-1 text-xs text-[var(--app-hint)]">{f.evidence}</div>}
+                                {f.sources?.length > 0 && (
+                                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                                        {f.sources.map((s, j) => (
+                                            <a key={j} href={s} target="_blank" rel="noreferrer"
+                                               className="break-all font-mono text-[10px] text-[var(--app-link,#2563eb)] hover:underline">{s}</a>
+                                        ))}
+                                    </div>
+                                )}
+                            </li>
+                        ))}
+                        {(r.refuted ?? []).map((c, i) => (
+                            <li key={`r${i}`} className="rounded-lg border border-[var(--app-border)] p-2.5 opacity-70">
+                                <div className="flex items-start gap-2">
+                                    <Badge variant="warning" className="shrink-0">否决</Badge>
+                                    <span className="text-sm">{c.claim}</span>
+                                </div>
+                                <div className="mt-1 text-xs text-[var(--app-hint)]">票: {c.vote}</div>
+                            </li>
+                        ))}
                     </ul>
                 </Card>
             )}
-            <Card className="p-4">
-            <div className="mb-2 text-sm font-medium">{r.narrative ? '结构化数据' : '检索简报'}</div>
-            {r.summary && <p className="text-sm leading-relaxed">{r.summary}</p>}
-            {r.findings?.length > 0 && (
-                <ol className="mt-3 flex flex-col gap-2">
-                    {r.findings.map((f, i) => (
-                        <li key={i} className="rounded-lg border border-[var(--app-border)] p-2.5">
-                            <div className="flex items-start gap-2">
-                                <Badge variant={confVariant(f.confidence)}>{f.confidence}</Badge>
-                                <span className="text-sm font-medium">{f.claim}</span>
-                            </div>
-                            {f.evidence && <div className="mt-1 text-xs text-[var(--app-hint)]">{f.evidence}</div>}
-                            {f.sources?.length > 0 && (
-                                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
-                                    {f.sources.map((s, j) => (
-                                        <a key={j} href={s} target="_blank" rel="noreferrer"
-                                           className="break-all font-mono text-[10px] text-[var(--app-link,#2563eb)] hover:underline">{s}</a>
-                                    ))}
-                                </div>
-                            )}
-                        </li>
-                    ))}
-                </ol>
-            )}
-            {r.caveats && (
-                <p className="mt-3 text-xs text-[var(--app-hint)]"><span className="font-medium">注意:</span> {r.caveats}</p>
-            )}
-            {r.openQuestions && r.openQuestions.length > 0 && (
-                <div className="mt-3">
-                    <p className="mb-1 text-sm font-medium">开放问题</p>
-                    <ul className="list-disc pl-5 text-sm text-[var(--app-hint)]">
-                        {r.openQuestions.map((q, i) => <li key={i}>{q}</li>)}
-                    </ul>
-                </div>
-            )}
-            {!r.narrative && r.references && r.references.length > 0 && (
-                <div className="mt-3">
-                    <p className="mb-1 text-sm font-medium">参考文献</p>
-                    <ol className="flex flex-col gap-1.5">
-                        {r.references.map((ref) => (
-                            <UnifiedRefItem key={ref.n} r={ref} />
-                        ))}
-                    </ol>
-                </div>
-            )}
-            {r.dbSources && r.dbSources.length > 0 && (
-                <div className="mt-3">
-                    <p className="mb-1 text-sm font-medium">数据库来源</p>
-                    <ul className="flex flex-col gap-0.5">
-                        {r.dbSources.map((s, i) => (
-                            <li key={i} className="text-xs">
-                                <a href={s.url} target="_blank" rel="noreferrer" className="text-[var(--app-link,#2563eb)] hover:underline">
-                                    {s.title || s.url}
-                                </a>
-                            </li>
-                        ))}
-                    </ul>
-                </div>
-            )}
-            {r.webSources && r.webSources.length > 0 && (
-                <div className="mt-3">
-                    <p className="mb-1 text-sm font-medium">网络来源</p>
-                    <ul className="flex flex-col gap-0.5">
-                        {r.webSources.map((s, i) => (
-                            <li key={i} className="text-xs">
-                                <a href={s.url} target="_blank" rel="noreferrer" className="text-[var(--app-link,#2563eb)] hover:underline">
-                                    {s.title || s.url}
-                                </a>
-                            </li>
-                        ))}
-                    </ul>
-                </div>
-            )}
-            {r.refuted && r.refuted.length > 0 && (
-                <details className="mt-3">
-                    <summary className="cursor-pointer text-xs text-[var(--app-hint)]">被对抗式核验否决的 claim（{r.refuted.length}）</summary>
-                    <ul className="mt-1 list-disc pl-5 text-xs text-[var(--app-hint)]">
-                        {r.refuted.map((c, i) => <li key={i}>{c.claim}（票 {c.vote}）</li>)}
-                    </ul>
-                </details>
-            )}
-            {/* run statistics moved to the 研究概览 meta card at the top */}
-            </Card>
         </div>
     )
 }
@@ -576,12 +635,18 @@ function DeepResearchBody(props: { campaign: string; report: ReportResponse | nu
     return (
         <>
             <PhasesPanel events={events} status={state} terminal={terminal} />
+            {events.some(e => e.type === 'tool_error' || e.type === 'agent_retry' || e.type === 'agent_error') && (
+                <details>
+                    <summary className="cursor-pointer text-xs text-[var(--app-hint)]">工具调用详情</summary>
+                    <ToolMetrics events={events} />
+                </details>
+            )}
             {state === 'error' && (
                 <Card className="p-4 text-sm text-[var(--app-badge-error-text,#dc2626)]">
                     检索失败:{props.report?.status.error}
                 </Card>
             )}
-            {/* #5: the report now lives in its own 检索简报 tab, not inline under progress */}
+            {/* report now lives in the Claim tab, not inline under progress */}
             {events.length === 0 && state === 'running' && (
                 <Card className="p-4 text-sm text-[var(--app-hint)]">研究启动中,各 agent 会话稍候出现…</Card>
             )}
@@ -782,8 +847,8 @@ export function App() {
     const searchState = report?.status.state ?? 'none'
     const [selected, setSelected] = useState<string | null>(null)
     const SEARCH_TAB = '__search__'   // 深度研究 (live progress)
-    const REPORT_TAB = '__report__'   // 检索简报 (final report, its own page — #5)
-    // #5: when the report first lands, jump from the progress tab to the report tab — once per run
+    const REPORT_TAB = '__report__'   // 检索简报 (narrative + db data + claims)
+    // when the report first lands, jump to the report tab — once per run
     const autoReportRun = useRef<number | undefined>(undefined)
     useEffect(() => {
         const run = report?.status.run
@@ -907,7 +972,7 @@ export function App() {
                                               : '失败',
                                       }]
                                     : []),
-                                // 检索简报 = final report, its own page (#5); appears once the report exists
+                                // 检索简报 = narrative + db data + claims
                                 ...(report?.report ? [{ id: REPORT_TAB, label: '检索简报' }] : []),
                             ]}
                         />
@@ -945,7 +1010,7 @@ export function App() {
             )}
 
             <SelectionPopup onAdd={addRef} />
-            <FilesPage campaign={filesOpen} onClose={() => setFilesOpen(null)} />
+            <FilesPage campaign={filesOpen} disease={campaigns?.find(c => c.campaign === filesOpen)?.disease ?? null} onClose={() => setFilesOpen(null)} />
         </div>
     )
 }
