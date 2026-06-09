@@ -95,9 +95,16 @@ _ANGLE = [{"label": "g", "query": "q", "rationale": "r"}]
 
 
 def _patch_agent(fake):
-    """Swap deep_research.run_agent for a fake; return a restore() callable."""
+    """Swap deep_research.run_agent for a fake; return a restore() callable.
+    run_agent now returns (result, tools); wrap single-value fakes so each call still
+    yields just the result with an empty tool list — keeps the fakes terse."""
     orig = dr.run_agent
-    dr.run_agent = fake
+
+    async def adapted(*a, **kw):
+        out = await fake(*a, **kw)
+        return out if isinstance(out, tuple) else (out, [])
+
+    dr.run_agent = adapted
     return lambda: setattr(dr, "run_agent", orig)
 
 

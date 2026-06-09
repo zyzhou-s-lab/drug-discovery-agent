@@ -17,6 +17,9 @@ Config via env: DD_DB (sqlite path), DD_ARTIFACTS (artifact root).
 """
 from __future__ import annotations
 
+from dotenv import load_dotenv
+load_dotenv(override=True)
+
 import asyncio
 import json
 import os
@@ -371,6 +374,43 @@ async def stage_events(campaign: str, stage: str) -> dict:
     return {"events": read_stage_events(ARTIFACTS, campaign, stage)}
 
 
+@app.get("/api/campaigns/{campaign}/stages/{stage}/metrics")
+async def stage_metrics(campaign: str, stage: str) -> dict:
+    """Aggregated tool-call metrics: success/error counts, retries, failures."""
+    events = read_stage_events(ARTIFACTS, campaign, stage)
+    # pair tool_use → tool_result by tool_id
+    id_to_name: dict[str, str] = {}
+    for e in events:
+        if e.get("type") == "tool_use" and e.get("tool_id"):
+            id_to_name[e["tool_id"]] = e.get("name", "")
+    tool_calls: dict[str, dict] = {}
+    tool_errors: list[dict] = []
+    retries: list[dict] = []
+    agent_errors: list[dict] = []
+    for e in events:
+        t = e.get("type")
+        if t == "tool_result":
+            name = id_to_name.get(e.get("tool_id", ""), "?")
+            if name not in tool_calls:
+                tool_calls[name] = {"success": 0, "error": 0}
+            if e.get("is_error"):
+                tool_calls[name]["error"] += 1
+            else:
+                tool_calls[name]["success"] += 1
+        elif t == "tool_error":
+            tool_errors.append({"tool": e.get("tool"), "error": e.get("error"),
+                                "label": e.get("label"), "ts": e.get("ts")})
+        elif t == "agent_retry":
+            retries.append({"phase": e.get("label"), "attempt": e.get("attempt"),
+                            "max": e.get("max_retries"), "reason": e.get("reason"),
+                            "backoff": e.get("backoff_sec"), "ts": e.get("ts")})
+        elif t == "agent_error":
+            agent_errors.append({"phase": e.get("label"), "attempts": e.get("attempts"),
+                                 "error": e.get("last_error"), "ts": e.get("ts")})
+    return {"toolCalls": tool_calls, "toolErrors": tool_errors,
+            "retries": retries, "agentErrors": agent_errors}
+
+
 @app.get("/api/campaigns/{campaign}/stages/{stage}/events/stream")
 async def stage_events_stream(campaign: str, stage: str, request: Request) -> StreamingResponse:
     """SSE: tail the stage's step-event log; pushes new events as the worker writes them."""
@@ -561,7 +601,7 @@ def _search_paths(campaign: str) -> tuple[str, str]:
     return os.path.join(base, "search_status.json"), os.path.join(base, "report.json")
 
 
-def _present_report(report: dict, disease: str) -> str:
+def _present_report(report: dict, disease: str, angles: list[dict] | None = None) -> str:
     """Turn the structured (English) deep-research report into a polished Chinese Markdown
     narrative — sections + tables + per-finding confidence/source — mirroring what a chat agent
     does when presenting the workflow's JSON. Returns '' on any failure (never raises)."""
@@ -583,10 +623,25 @@ def _present_report(report: dict, disease: str) -> str:
         return f"<sup>{','.join(map(str, nums))}</sup>" if nums else ""
     # feed the FULL report (no per-field truncation), mirroring CC's main agent reading the whole
     # workflow output; only a single generous total cap guards against a pathologically huge report.
-    parts = [f"## 执行摘要\n{report.get('summary') or ''}", "\n## 已确认发现"]
-    for i, f in enumerate(findings, 1):
-        parts.append(f"{i}. [{f.get('confidence')}] {f.get('claim')}{_cite(f)}"
-                     + (f"\n   详细证据: {f.get('evidence')}" if f.get("evidence") else ""))
+    parts = [f"## 执行摘要\n{report.get('summary') or ''}"]
+    # group findings by angle so the digest preserves the angle structure.
+    # If the synthesis agent omitted the angle field, fall back to positional mapping:
+    # findings are produced in the same order as the angles list.
+    angle_labels = [a["label"] for a in (angles or [])]
+    has_angle = any(f.get("angle") for f in findings)
+    from collections import OrderedDict
+    angle_groups: OrderedDict[str, list] = OrderedDict()
+    for i, f in enumerate(findings):
+        if has_angle:
+            a = f.get("angle") or "未分类"
+        else:
+            a = angle_labels[i] if i < len(angle_labels) else "未分类"
+        angle_groups.setdefault(a, []).append(f)
+    for angle, fs in angle_groups.items():
+        parts.append(f"\n## 研究角度: {angle}")
+        for i, f in enumerate(fs, 1):
+            parts.append(f"{i}. [{f.get('confidence')}] {f.get('claim')}{_cite(f)}"
+                         + (f"\n   详细证据: {f.get('evidence')}" if f.get("evidence") else ""))
     refuted = report.get("refuted") or []
     if refuted:
         parts.append("\n## 被对抗式核验否决的声明(供透明性)\n"
@@ -599,7 +654,9 @@ def _present_report(report: dict, disease: str) -> str:
     system = (
         "你是资深研究报告编辑。把用户给出的【已通过对抗式验证的结构化深度研究结果】整理、撰写成一份"
         "详实、专业、可读性强的中文 Markdown 报告(不是清单,要有充分的叙述展开):\n"
-        "1) 分章节、有标题;可表格化的内容(分类/映射/亚型/基因-表型对应等)用 Markdown 表格呈现。"
+        "1) **按研究角度分节**:数据中每个「研究角度」对应报告的一个独立章节(二级标题)。"
+        "必须按照数据中给出的角度顺序和名称逐一撰写,每个角度一节,不多不少。"
+        "可表格化的内容(分类/映射/亚型/基因-表型对应等)用 Markdown 表格呈现。"
         "**表格必须列出数据中出现的每一条目,禁止用省略号(…/...)或'等'省略任何行——宁可表长也要完整。**\n"
         "2) 每条发现都【展开成完整段落】,充分利用给定的「详细证据」,解释其含义、机制及对药物靶点发现的意义,"
         "不要只复述一句话;标注置信度(高/中/低)。\n"
@@ -701,7 +758,7 @@ def _run_search(campaign: str, disease: str, angles: list[dict]) -> None:
         elapsed = round(time.time() - run_id / 1000)
         try:
             tss = []
-            with open(os.path.join(ev_dir, f"{SEARCH_STAGE}.jsonl")) as fh:
+            with open(os.path.join(ev_dir, f"{SEARCH_STAGE}.jsonl"), encoding="utf-8") as fh:
                 for line in fh:
                     try:
                         t = json.loads(line).get("ts")
@@ -723,7 +780,7 @@ def _run_search(campaign: str, disease: str, angles: list[dict]) -> None:
         # structured English report into a polished Chinese Markdown narrative. Written AFTER the
         # report is live so the report tab shows immediately; the narrative fills in on next poll.
         try:
-            nar = _present_report(report, disease)
+            nar = _present_report(report, disease, angles)
             if nar:
                 report["narrative"] = nar
                 _write_json(report_path, report)
