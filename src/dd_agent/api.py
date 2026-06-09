@@ -18,12 +18,14 @@ Config via env: DD_DB (sqlite path), DD_ARTIFACTS (artifact root).
 from __future__ import annotations
 
 from dotenv import load_dotenv
-# default behavior (no override): only set vars absent from the environment, so explicit
-# deployment/ops-set env vars always win over a stray .env file.
-load_dotenv()
+# override=False (the default, made explicit): only set vars ABSENT from the environment, so
+# explicit deployment/ops-set env vars always win over a stray .env file. A local .env only
+# fills gaps — review it if a dev machine picks up unexpected creds.
+load_dotenv(override=False)
 
 import asyncio
 import json
+import logging
 import os
 import shutil
 import threading
@@ -40,6 +42,8 @@ from .pipeline import PIPELINE
 
 DB_PATH = os.environ.get("DD_DB", "/tmp/dd/state.sqlite")
 ARTIFACTS = os.environ.get("DD_ARTIFACTS", "/tmp/dd/artifacts")
+
+_log = logging.getLogger(__name__)
 
 app = FastAPI(title="dd-agent observer", version="0.1.0")
 # Read-only cross-origin access for the Vite dev frontend. No credentials.
@@ -635,12 +639,10 @@ def _present_report(report: dict, disease: str, angles: list[dict] | None = None
     # in order. If counts differ, the mapping is unreliable — warn (don't silently mislabel) so
     # the misalignment is observable in logs rather than surfacing as a wrong-looking report.
     if not has_angle and angle_labels and len(findings) != len(angle_labels):
-        import logging
-        logging.getLogger(__name__).warning(
+        _log.warning(
             "_present_report: %d findings vs %d angles and no angle field — "
             "positional fallback may mislabel findings", len(findings), len(angle_labels))
-    from collections import OrderedDict
-    angle_groups: OrderedDict[str, list] = OrderedDict()
+    angle_groups: dict[str, list] = {}  # dict is insertion-ordered (py3.7+)
     for i, f in enumerate(findings):
         if has_angle:
             a = f.get("angle") or "未分类"

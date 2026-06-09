@@ -20,12 +20,15 @@ See docs/deep-research-port-plan.md §3–§6 and the blueprint
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from urllib.parse import urlparse
 
 # current_dr_label lives in orchestrate (next to run_agent, which sets it from its dr_label
 # arg); imported here so the MCP tool-error emitters can read the current agent's label.
 from .orchestrate import Budget, run_agent, current_dr_label
+
+_log = logging.getLogger(__name__)
 
 # ─── Structural constants (verbatim from blueprint) ───
 VOTES_PER_CLAIM = 3
@@ -367,8 +370,7 @@ def SYNTH_PROMPT(question: str, confirmed: list, killed: list,
     # Observability for the context-window risk: the per-record + MAX_DB_RAW caps bound raw DB
     # data, but confirmed/killed claims are uncapped, so log the final size (warn past ~120k chars,
     # a rough proxy for nearing typical context limits) instead of letting it truncate silently.
-    import logging
-    _log = logging.getLogger(__name__)
+    # Only the length is logged — never the prompt body (it contains claim text).
     (_log.warning if len(prompt) > 120_000 else _log.info)("SYNTH_PROMPT length: %d chars", len(prompt))
     return prompt
 
@@ -644,9 +646,10 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
                       dr_label="verify · " + claim["claim"][:18] + " v" + str(v + 1))
             for v in range(VOTES_PER_CLAIM)
         ])
-        # run_agent always returns a (result, tools) tuple; keep verdicts whose result is present.
-        # Test `is not None` (not truthiness) so a structurally-valid but empty-ish verdict object
-        # isn't silently dropped from the vote tally.
+        # run_agent always returns a (result, tools) tuple; keep the result of each vote that
+        # actually submitted one. `is not None` (not truthiness) so the unpack is explicit about
+        # the skipped/errored case (run_agent returns (None, []) — a missing verdict, dropped here
+        # as an abstention via `valid` below), distinct from a submitted verdict.
         verdicts = [vr[0] for vr in raw_verdicts if vr is not None and vr[0] is not None]
         await bump("verify", ddone=VOTES_PER_CLAIM)
         valid = [v for v in verdicts if v]
