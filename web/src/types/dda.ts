@@ -126,6 +126,7 @@ export interface ScopeResult {
 
 // deep-research Search phase report (api.py /campaigns/{c}/report -> research.research())
 export interface DeepFinding {
+    angle?: string // research angle this finding addresses (REPORT_SCHEMA.findings[].angle)
     claim: string
     confidence: 'high' | 'medium' | 'low'
     sources: string[]
