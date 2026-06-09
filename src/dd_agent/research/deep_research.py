@@ -20,21 +20,19 @@ See docs/deep-research-port-plan.md §3–§6 and the blueprint
 from __future__ import annotations
 
 import asyncio
-import contextvars
 import os
 from urllib.parse import urlparse
 
-from .orchestrate import Budget, run_agent
-
-# ContextVar for the current agent label, set by search/fetch phases so MCP tool
-# error events can attribute failures to the specific agent session.
-_current_dr_label: contextvars.ContextVar[str] = contextvars.ContextVar("_dr_label", default="mcp")
+# _current_dr_label lives in orchestrate (next to run_agent, which sets it from its dr_label
+# arg); imported here so the MCP tool-error emitters can read the current agent's label.
+from .orchestrate import Budget, run_agent, _current_dr_label
 
 # ─── Structural constants (verbatim from blueprint) ───
 VOTES_PER_CLAIM = 3
 REFUTATIONS_REQUIRED = 2
 MAX_FETCH = 15
 MAX_VERIFY_CLAIMS = 25
+MAX_DB_RAW = 80_000  # chars — total cap on raw DB records appended to SYNTH_PROMPT
 
 REL_RANK = {"high": 0, "medium": 1, "low": 2}
 IMP_RANK = {"central": 0, "supporting": 1, "tangential": 2}
@@ -145,8 +143,9 @@ def _lit_server():
                 emit("deep-research", _current_dr_label.get(), "tool_error",
                      tool="search_literature", error=str(e)[:500],
                      args_summary=str(args.get("query", ""))[:200])
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as emit_err:  # noqa: BLE001 — diagnostics must never crash the tool
+                import logging
+                logging.getLogger(__name__).debug("emit tool_error failed: %s", emit_err)
             return {"content": [{"type": "text", "text": "[]"}]}
 
     @tool("get_paper", "Fetch a paper's abstract + metadata by DOI (for claim extraction).",
@@ -160,8 +159,9 @@ def _lit_server():
                 emit("deep-research", _current_dr_label.get(), "tool_error",
                      tool="get_paper", error=str(e)[:500],
                      args_summary=str(args.get("doi", ""))[:200])
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as emit_err:  # noqa: BLE001 — diagnostics must never crash the tool
+                import logging
+                logging.getLogger(__name__).debug("emit tool_error failed: %s", emit_err)
             rec = None
         if not rec:
             return {"content": [{"type": "text", "text": "NOT_FOUND"}]}
@@ -181,8 +181,9 @@ def _lit_server():
                 emit("deep-research", _current_dr_label.get(), "tool_error",
                      tool="ontology_lookup", error=str(e)[:500],
                      args_summary=str(args.get("query", ""))[:200])
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as emit_err:  # noqa: BLE001 — diagnostics must never crash the tool
+                import logging
+                logging.getLogger(__name__).debug("emit tool_error failed: %s", emit_err)
             rows = []
         return {"content": [{"type": "text", "text": _json.dumps(rows, ensure_ascii=False) if rows else "[]"}]}
 
@@ -288,10 +289,17 @@ def _synth_block(confirmed: list, db_context: list | None = None) -> str:
         )
     # Append raw database records so the synthesize agent can cite concrete field values
     # (IDs, scores, counts, classifications) instead of paraphrasing into vague summaries.
+    # Per-record cap (12k) bounds one huge record; a single generous TOTAL cap then guards
+    # against many database sources together overflowing the LLM context window.
     if db_context:
         parts.append("\n## Raw database records (authoritative — cite values directly)\n")
+        total_db = 0
         for rec in db_context:
             raw_text = str(rec.get("raw", ""))[:12000]
+            if total_db + len(raw_text) > MAX_DB_RAW:
+                parts.append("\n(... remaining database records truncated to stay within token limits ...)\n")
+                break
+            total_db += len(raw_text)
             parts.append(
                 "### " + str(rec.get("sourceUrl")) + " (" + str(rec.get("sourceQuality")) + ")\n"
                 "```\n" + raw_text + "\n```\n"
@@ -524,10 +532,10 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
 
     # ── pipeline: search → dedup → fetch+extract (link-level concurrency, one barrier at the end) ──
     async def angle_chain(angle: dict) -> list:
-        _current_dr_label.set("search · " + angle["label"][:28])
         sr, _sr_tools = await run_agent("search", SEARCH_PROMPT(question, angle), "submit_results",
                              SEARCH_SCHEMA, lit, budget, sem,
-                             on_message=amsg("search · " + angle["label"][:28]), should_stop=should_stop)
+                             on_message=amsg("search · " + angle["label"][:28]), should_stop=should_stop,
+                             dr_label="search · " + angle["label"][:28])
         if not sr or not sr.get("results"):
             ev("search", angle["label"] + ": 0 结果")
             await bump("search", ddone=1)
@@ -548,10 +556,9 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
             except Exception:  # noqa: BLE001
                 host = ""
             flabel = "fetch · " + ((source.get("title") or host or source.get("doi") or "source")[:28])
-            _current_dr_label.set(flabel)
             ext, fetch_tool_results = await run_agent("fetch", FETCH_PROMPT(question, source, angle["label"]),
                                   "submit_claims", EXTRACT_SCHEMA, lit, budget, sem,
-                                  on_message=amsg(flabel), should_stop=should_stop)
+                                  on_message=amsg(flabel), should_stop=should_stop, dr_label=flabel)
             await bump("fetch", ddone=1)
             if not ext:
                 return None
@@ -622,12 +629,12 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
     await bump("verify", dtotal=len(ranked) * VOTES_PER_CLAIM)
 
     async def verify_claim(claim: dict) -> dict:
-        _current_dr_label.set("verify · " + (claim.get("claim", "")[:28]))
         raw_verdicts = await asyncio.gather(*[
             run_agent("verify", VERIFY_PROMPT(question, claim, v), "submit_verdict",
                       VERDICT_SCHEMA, lit, budget, sem,
                       on_message=amsg("verify · " + claim["claim"][:18] + " v" + str(v + 1)),
-                      should_stop=should_stop)
+                      should_stop=should_stop,
+                      dr_label="verify · " + claim["claim"][:18] + " v" + str(v + 1))
             for v in range(VOTES_PER_CLAIM)
         ])
         verdicts = [vr[0] for vr in raw_verdicts if vr and vr[0]]
@@ -680,11 +687,10 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
         {"sourceUrl": c.get("sourceUrl"), "sourceQuality": c.get("sourceQuality"), "raw": c.get("raw")}
         for c in all_claims if c.get("source_type") == "database" and c.get("raw")
     ]
-    _current_dr_label.set("synthesize")
     synth_report, _synth_tools = await run_agent("synthesize",
                              SYNTH_PROMPT(question, confirmed, killed, db_raw_context, angles),
                              "submit_report", REPORT_SCHEMA, {}, budget, sem,
-                             on_message=amsg("synthesize"), should_stop=should_stop)
+                             on_message=amsg("synthesize"), should_stop=should_stop, dr_label="synthesize")
     await bump("synthesize", ddone=1)
     sources_out = [{"url": s["url"], "quality": s["sourceQuality"], "angle": s["angle"],
                     "claimCount": len(s["claims"])} for s in all_sources]

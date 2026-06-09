@@ -18,7 +18,9 @@ Config via env: DD_DB (sqlite path), DD_ARTIFACTS (artifact root).
 from __future__ import annotations
 
 from dotenv import load_dotenv
-load_dotenv(override=True)
+# default behavior (no override): only set vars absent from the environment, so explicit
+# deployment/ops-set env vars always win over a stray .env file.
+load_dotenv()
 
 import asyncio
 import json

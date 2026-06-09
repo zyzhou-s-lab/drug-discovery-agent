@@ -9,6 +9,14 @@ See docs/deep-research-port-plan.md §0, §4.
 """
 from __future__ import annotations
 
+import contextvars
+
+# Current agent label, used so MCP tool-error events can attribute a failure to the specific
+# agent session. It lives here (next to run_agent) and is set INSIDE run_agent from the
+# `dr_label` arg — set in run_agent's own context, right before the SDK spawns its tool tasks,
+# so sibling agents running concurrently under asyncio.gather can't clobber each other's label.
+_current_dr_label: contextvars.ContextVar[str] = contextvars.ContextVar("_dr_label", default="mcp")
+
 
 def _schema_errors(args, schema) -> list[str]:
     """Shallow JSON-Schema check (top-level required / type / enum). Mirrors CC's
@@ -49,7 +57,8 @@ def _schema_errors(args, schema) -> list[str]:
 
 
 async def run_agent(phase, prompt, submit_name, schema, extra_mcp, budget, sem,
-                    on_message=None, max_turns: int = 12, should_stop=None):
+                    on_message=None, max_turns: int = 12, should_stop=None,
+                    dr_label: str | None = None):
     """One isolated forced-tool agent = deep-research's `agent({schema})` primitive.
 
     The Workflow engine's forced StructuredOutput isn't available in the SDK, so the
@@ -72,6 +81,11 @@ async def run_agent(phase, prompt, submit_name, schema, extra_mcp, budget, sem,
     # agents return immediately.
     if (should_stop is not None and should_stop()) or budget.exhausted():
         return None
+
+    # Set the tool-error attribution label in THIS agent's own context (not the caller's),
+    # right before the SDK starts the session — so concurrent sibling agents don't race on it.
+    if dr_label is not None:
+        _current_dr_label.set(dr_label)
 
     cap: dict = {}
 

@@ -398,8 +398,37 @@ function DeepReportView(props: { report: DeepReport }) {
                     <Markdown text={r.narrative} />
                 </Card>
             )}
-            {/* references rendered from structured data (ReferenceItem); narrative cites via ¹²³ */}
-            {r.narrative && r.references && r.references.length > 0 && (
+            {/* fallback: the narrative is best-effort and silently yields "" on MiMo 429/overload
+                (api.py _present_report). When it's missing, the structured fields are still computed —
+                render summary / caveats / openQuestions so the report isn't a near-blank page. */}
+            {!r.narrative && (r.summary || r.caveats || (r.openQuestions?.length ?? 0) > 0) && (
+                <Card className="flex flex-col gap-3 p-5">
+                    {r.summary && (
+                        <div>
+                            <div className="mb-1 text-sm font-medium">摘要</div>
+                            <Markdown text={r.summary} />
+                        </div>
+                    )}
+                    {r.caveats && (
+                        <div>
+                            <div className="mb-1 text-sm font-medium">注意事项</div>
+                            <Markdown text={r.caveats} />
+                        </div>
+                    )}
+                    {(r.openQuestions?.length ?? 0) > 0 && (
+                        <div>
+                            <div className="mb-1 text-sm font-medium">开放问题</div>
+                            <ul className="flex list-disc flex-col gap-1 pl-5 text-sm">
+                                {r.openQuestions!.map((q, i) => <li key={i}>{q}</li>)}
+                            </ul>
+                        </div>
+                    )}
+                </Card>
+            )}
+            {/* references rendered from structured data (UnifiedRefItem); the narrative cites them
+                via ¹²³ when present, but the bibliography is shown whenever it exists — including the
+                narrative-failed fallback above, so refs don't vanish with the narrative. */}
+            {r.references && r.references.length > 0 && (
                 <Card className="p-4">
                     <div className="mb-2 text-sm font-medium">参考文献</div>
                     <ol className="flex flex-col gap-1.5">
