@@ -23,9 +23,9 @@ import asyncio
 import os
 from urllib.parse import urlparse
 
-# _current_dr_label lives in orchestrate (next to run_agent, which sets it from its dr_label
+# current_dr_label lives in orchestrate (next to run_agent, which sets it from its dr_label
 # arg); imported here so the MCP tool-error emitters can read the current agent's label.
-from .orchestrate import Budget, run_agent, _current_dr_label
+from .orchestrate import Budget, run_agent, current_dr_label
 
 # ─── Structural constants (verbatim from blueprint) ───
 VOTES_PER_CLAIM = 3
@@ -140,7 +140,7 @@ def _lit_server():
         except Exception as e:  # noqa: BLE001 — never raise: a failing tool makes the agent loop
             try:
                 from .events import emit
-                emit("deep-research", _current_dr_label.get(), "tool_error",
+                emit("deep-research", current_dr_label.get(), "tool_error",
                      tool="search_literature", error=str(e)[:500],
                      args_summary=str(args.get("query", ""))[:200])
             except Exception as emit_err:  # noqa: BLE001 — diagnostics must never crash the tool
@@ -156,7 +156,7 @@ def _lit_server():
         except Exception as e:  # noqa: BLE001 — never raise (a hanging DOI looped a fetch agent)
             try:
                 from .events import emit
-                emit("deep-research", _current_dr_label.get(), "tool_error",
+                emit("deep-research", current_dr_label.get(), "tool_error",
                      tool="get_paper", error=str(e)[:500],
                      args_summary=str(args.get("doi", ""))[:200])
             except Exception as emit_err:  # noqa: BLE001 — diagnostics must never crash the tool
@@ -178,7 +178,7 @@ def _lit_server():
         except Exception as e:  # noqa: BLE001
             try:
                 from .events import emit
-                emit("deep-research", _current_dr_label.get(), "tool_error",
+                emit("deep-research", current_dr_label.get(), "tool_error",
                      tool="ontology_lookup", error=str(e)[:500],
                      args_summary=str(args.get("query", ""))[:200])
             except Exception as emit_err:  # noqa: BLE001 — diagnostics must never crash the tool
@@ -347,7 +347,7 @@ def SYNTH_PROMPT(question: str, confirmed: list, killed: list,
             "Do NOT write a generic literature review. Address each angle individually.\n"
         )
 
-    return (
+    prompt = (
         "## Synthesis: research report\n\n"
         "**Question:** " + question + "\n\n"
         + str(len(confirmed)) + " claims survived " + str(VOTES_PER_CLAIM) + "-vote adversarial verification. "
@@ -364,6 +364,13 @@ def SYNTH_PROMPT(question: str, confirmed: list, killed: list,
         + db_instruction
         + _END.format(tool="submit_report")
     )
+    # Observability for the context-window risk: the per-record + MAX_DB_RAW caps bound raw DB
+    # data, but confirmed/killed claims are uncapped, so log the final size (warn past ~120k chars,
+    # a rough proxy for nearing typical context limits) instead of letting it truncate silently.
+    import logging
+    _log = logging.getLogger(__name__)
+    (_log.warning if len(prompt) > 120_000 else _log.info)("SYNTH_PROMPT length: %d chars", len(prompt))
+    return prompt
 
 
 # ─── Pure logic (unit-tested offline; no SDK) ───
@@ -637,7 +644,10 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
                       dr_label="verify · " + claim["claim"][:18] + " v" + str(v + 1))
             for v in range(VOTES_PER_CLAIM)
         ])
-        verdicts = [vr[0] for vr in raw_verdicts if vr and vr[0]]
+        # run_agent always returns a (result, tools) tuple; keep verdicts whose result is present.
+        # Test `is not None` (not truthiness) so a structurally-valid but empty-ish verdict object
+        # isn't silently dropped from the vote tally.
+        verdicts = [vr[0] for vr in raw_verdicts if vr is not None and vr[0] is not None]
         await bump("verify", ddone=VOTES_PER_CLAIM)
         valid = [v for v in verdicts if v]
         refuted = sum(1 for v in valid if v.get("refuted"))

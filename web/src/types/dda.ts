@@ -165,6 +165,9 @@ export interface ReportResponse {
 
 // One captured Agent SDK step (events.py / worker._emit_stream)
 export type StepEventType = 'session_start' | 'thinking' | 'text' | 'tool_use' | 'tool_result' | 'result' | 'progress'
+    // diagnostics emitted by the deep-research engine (events.py): MCP tool failures + agent
+    // retry/giving-up. Consumed by ToolMetrics and the "工具调用详情" panel in App.tsx.
+    | 'tool_error' | 'agent_retry' | 'agent_error'
 
 export interface StepEvent {
     seq: number
@@ -191,4 +194,14 @@ export interface StepEvent {
     // progress (deep-research phase tree)
     done?: number
     total?: number
+    // tool_error
+    tool?: string
+    error?: string
+    // agent_retry / agent_error
+    attempt?: number
+    max_retries?: number
+    reason?: string
+    backoff_sec?: number
+    attempts?: number
+    last_error?: string
 }

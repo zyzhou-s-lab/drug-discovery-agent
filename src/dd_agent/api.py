@@ -631,6 +631,14 @@ def _present_report(report: dict, disease: str, angles: list[dict] | None = None
     # findings are produced in the same order as the angles list.
     angle_labels = [a["label"] for a in (angles or [])]
     has_angle = any(f.get("angle") for f in findings)
+    # Positional fallback only lines up when the synthesis agent produced one finding per angle
+    # in order. If counts differ, the mapping is unreliable — warn (don't silently mislabel) so
+    # the misalignment is observable in logs rather than surfacing as a wrong-looking report.
+    if not has_angle and angle_labels and len(findings) != len(angle_labels):
+        import logging
+        logging.getLogger(__name__).warning(
+            "_present_report: %d findings vs %d angles and no angle field — "
+            "positional fallback may mislabel findings", len(findings), len(angle_labels))
     from collections import OrderedDict
     angle_groups: OrderedDict[str, list] = OrderedDict()
     for i, f in enumerate(findings):

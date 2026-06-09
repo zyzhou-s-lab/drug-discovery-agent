@@ -64,7 +64,12 @@ export function FilesPage(props: { campaign: string | null; disease: string | nu
         load(props.campaign)
     }, [props.campaign])
 
-    const filtered = files.filter((f) => !search || f.path.toLowerCase().includes(search.toLowerCase()))
+    // memoize so `grouped`'s [filtered] dep is stable across renders (a fresh array each render
+    // would defeat its useMemo entirely); recompute only when files or the search term change.
+    const filtered = useMemo(
+        () => files.filter((f) => !search || f.path.toLowerCase().includes(search.toLowerCase())),
+        [files, search],
+    )
 
     // Group files by stage for structured display
     const grouped = useMemo(() => {
