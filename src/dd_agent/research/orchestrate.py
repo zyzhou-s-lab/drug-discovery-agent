@@ -198,33 +198,34 @@ async def run_agent(phase, prompt, submit_name, schema, extra_mcp, budget, sem,
                 on_message({"__dd_prompt__": prompt})  # card's Prompt section (CC parity), once
             except Exception:  # noqa: BLE001
                 pass
-        for attempt in range(max_retries + 1):
-            state["transient"] = False
-            tool_uses.clear()          # only the winning attempt's tool results are returned
-            tool_results.clear()
-            try:
-                async with ClaudeSDKClient(options=opts) as client:
-                    await client.query(prompt)
-                    await _drain(client)
-                    n = 0
-                    while cap.get("v") is None and n < max_nudges:
-                        if (should_stop is not None and should_stop()) or budget.exhausted():
-                            break
-                        n += 1
-                        await client.query(nudge)
+        try:
+            for attempt in range(max_retries + 1):
+                state["transient"] = False
+                tool_uses.clear()          # only the winning attempt's tool results are returned
+                tool_results.clear()
+                try:
+                    async with ClaudeSDKClient(options=opts) as client:
+                        await client.query(prompt)
                         await _drain(client)
-            except Exception:  # noqa: BLE001 — SDK/transport error; treat as transient (retryable)
-                state["transient"] = True
-            if cap.get("v") is not None:
-                _restore_label()
-                return cap["v"], tool_results
-            if attempt < max_retries and state["transient"]:
-                if (should_stop is not None and should_stop()) or budget.exhausted():
-                    break
-                await _asyncio.sleep(2 ** attempt + _random.uniform(0, 1.0))
-                continue
-            break
-    _restore_label()
+                        n = 0
+                        while cap.get("v") is None and n < max_nudges:
+                            if (should_stop is not None and should_stop()) or budget.exhausted():
+                                break
+                            n += 1
+                            await client.query(nudge)
+                            await _drain(client)
+                except Exception:  # noqa: BLE001 — SDK/transport error; treat as transient (retryable)
+                    state["transient"] = True
+                if cap.get("v") is not None:
+                    return cap["v"], tool_results
+                if attempt < max_retries and state["transient"]:
+                    if (should_stop is not None and should_stop()) or budget.exhausted():
+                        break
+                    await _asyncio.sleep(2 ** attempt + _random.uniform(0, 1.0))
+                    continue
+                break
+        finally:
+            _restore_label()
     return cap.get("v"), tool_results
 
 

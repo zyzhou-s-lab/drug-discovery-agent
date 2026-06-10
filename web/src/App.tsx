@@ -468,13 +468,10 @@ function DeepReportView(props: { report: DeepReport }) {
                     const parts = name.trim().split(/\s+/)
                     if (parts.length < 2) return name
                     const last = parts[parts.length - 1]
-                    const first = parts[0]
-                    // initials already (e.g. "J.Y. Wang", "J. Wang")
-                    if (first.length <= 2 || /\./.test(first)) return `${last}, ${first.charAt(0)}.`
-                    // "Wang J" style
-                    if (last.length <= 2) return `${first}, ${last.charAt(0)}.`
-                    // standard "Firstname Lastname"
-                    return `${last}, ${first.charAt(0)}.`
+                    const initials = parts.slice(0, -1).map(p =>
+                        p.length <= 2 || /\./.test(p) ? p.charAt(0).toUpperCase() + '.' : p.charAt(0).toUpperCase() + '.'
+                    )
+                    return `${last}, ${initials.join(' ')}`
                 }
                 // APA7 formatter: all authors (year). Title. Venue. DOI
                 const fmtApa7 = (ref: Record<string, unknown>): string => {
@@ -486,9 +483,13 @@ function DeepReportView(props: { report: DeepReport }) {
                     let authStr = ''
                     if (authors && authors.length > 0) {
                         const formatted = authors.map(fmtAuthor)
-                        authStr = formatted.length <= 2
-                            ? formatted.join(' & ')
-                            : formatted.slice(0, -1).join(', ') + ' & ' + formatted[formatted.length - 1]
+                        if (formatted.length > 20) {
+                            authStr = formatted.slice(0, 19).join(', ') + ', ... ' + formatted[formatted.length - 1]
+                        } else {
+                            authStr = formatted.length <= 2
+                                ? formatted.join(' & ')
+                                : formatted.slice(0, -1).join(', ') + ' & ' + formatted[formatted.length - 1]
+                        }
                     }
                     let s = ''
                     if (authStr) s += authStr + ' '
@@ -605,7 +606,6 @@ function DeepReportView(props: { report: DeepReport }) {
                                                     const valid = arr.filter(o => o && typeof o === 'object' && Object.keys(o).length > 0)
                                                     if (valid.length === 0) return null
                                                     const prefer = ['id', 'label', 'ontology', 'definition', 'doi', 'title', 'year', 'venue', 'iri', 'obo_id', 'short_form', 'ontology_name', 'tldr']
-                                                    const SKIP2 = new Set(['content', 'data', 'bash', 'type', 'text', 'is_error', 'tool_use_id', 'abstract', 'citation_count', 'authors'])
                                                     const allCols = new Set<string>()
                                                     for (const obj of valid) {
                                                         for (const k of Object.keys(obj)) {

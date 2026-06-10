@@ -840,7 +840,7 @@ async def start_search(campaign: str, req: SearchRequest) -> dict:
         try:
             angles = angles[:int(_max_a)]
         except (ValueError, TypeError):
-            pass
+            _log.debug("DD_DR_MAX_ANGLES=%r is not a valid integer, ignoring", _max_a)
     disease = req.disease
     if not disease:  # fall back to the scope stage's recorded question
         out = get_index().output(campaign, "disease-overview") or {}
