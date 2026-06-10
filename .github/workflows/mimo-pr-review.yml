@@ -47,9 +47,12 @@ jobs:
             core.setOutput("has_review", hasReviewForCurrentHead ? "true" : "false");
             core.setOutput("is_follow_up", isFollowUp ? "true" : "false");
             core.setOutput("latest_review_id", latestBotReview ? String(latestBotReview.id) : "");
+            core.setOutput("latest_review_commit", latestBotReview?.commit_id || "");
 
             if (hasReviewForCurrentHead) {
               core.info(`Review already exists for ${currentHeadSha}; skipping.`);
+            } else if (isFollowUp) {
+              core.info(`Latest bot review was for ${latestBotReview.commit_id}; running follow-up for ${currentHeadSha}.`);
             }
 
       - name: Checkout
@@ -59,125 +62,38 @@ jobs:
           ref: refs/pull/${{ github.event.pull_request.number }}/merge
           fetch-depth: 0
 
-      - name: Fetch PR diff and context
+      - name: Pre-fetch base and head refs
         if: steps.check_bot.outputs.has_review != 'true'
-        id: pr_context
+        run: |
+          git fetch --no-tags origin \
+            ${{ github.event.pull_request.base.ref }} \
+            +refs/pull/${{ github.event.pull_request.number }}/head
+
+      - name: Run Claude Code (MiMo) for PR review
+        if: steps.check_bot.outputs.has_review != 'true'
+        uses: anthropics/claude-code-base-action@v0.0.63
         env:
+          # Point Claude Code at the MiMo Anthropic-compatible endpoint.
+          ANTHROPIC_BASE_URL: ${{ vars.MIMO_BASE_URL || 'https://token-plan-cn.xiaomimimo.com/anthropic' }}
+          # MiMo exposes a single model; remap Claude Code's size aliases to it so
+          # internal small-model calls don't hit a non-existent model.
+          ANTHROPIC_DEFAULT_OPUS_MODEL: mimo-v2.5-pro
+          ANTHROPIC_DEFAULT_SONNET_MODEL: mimo-v2.5-pro
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: mimo-v2.5-pro
+          # Context for the agentic prompt to fetch on its own.
           GH_TOKEN: ${{ github.token }}
-        run: |
-          PR_NUMBER=${{ github.event.pull_request.number }}
-          REPO=${{ github.repository }}
-
-          gh pr view "$PR_NUMBER" -R "$REPO" --json number,title,body,author,additions,deletions,changedFiles > /tmp/pr_meta.json
-          gh pr diff "$PR_NUMBER" -R "$REPO" | head -c 80000 > /tmp/pr_diff.txt
-
-          if [ "${{ steps.check_bot.outputs.is_follow_up }}" = "true" ] && [ -n "${{ steps.check_bot.outputs.latest_review_id }}" ]; then
-            gh api "repos/$REPO/pulls/$PR_NUMBER/reviews/${{ steps.check_bot.outputs.latest_review_id }}" > /tmp/prev_review.json 2>/dev/null || true
-            gh api "repos/$REPO/pulls/$PR_NUMBER/reviews/${{ steps.check_bot.outputs.latest_review_id }}/comments" > /tmp/prev_comments.json 2>/dev/null || true
-          fi
-
-      - name: Call MiMo API for review
-        if: steps.check_bot.outputs.has_review != 'true'
-        id: mimo
-        env:
-          MIMO_API_KEY: ${{ secrets.MIMO_API_KEY }}
-          MIMO_BASE_URL: ${{ vars.MIMO_BASE_URL || 'https://token-plan-cn.xiaomimimo.com/anthropic' }}
-        run: |
-          PROMPT=$(cat .github/prompts/mimo-pr-review.md)
-          PR_META=$(cat /tmp/pr_meta.json)
-          PR_DIFF=$(cat /tmp/pr_diff.txt)
-
-          # On follow-up reviews, feed the previous review + inline comments back in
-          # so the model does an incremental review instead of starting from scratch.
-          PREV_CONTEXT=""
-          if [ "${{ steps.check_bot.outputs.is_follow_up }}" = "true" ] && [ -f /tmp/prev_review.json ]; then
-            PREV_BODY=$(jq -r '.body // ""' /tmp/prev_review.json 2>/dev/null)
-            PREV_INLINE=""
-            if [ -f /tmp/prev_comments.json ]; then
-              PREV_INLINE=$(jq -r 'if type=="array" then [.[] | "- \(.path):\(.line // .original_line // "?") — \(.body)"] | join("\n") else "" end' /tmp/prev_comments.json 2>/dev/null || echo "")
-            fi
-            PREV_CONTEXT="## Your Previous Review (on an earlier commit of this PR)
-          ${PREV_BODY}
-
-          ### Your previous inline comments
-          ${PREV_INLINE}
-
-          The author has pushed new commits since this review. Re-review the current diff above with this prior context in mind: confirm which of these issues are now resolved, do NOT repeat issues that are already fixed, and flag any new problems introduced by the new commits."
-          fi
-
-          SYSTEM="You are a code review assistant. Follow the instructions in the prompt exactly."
-
-          USER_MSG="## PR Metadata
-          \`\`\`json
-          ${PR_META}
-          \`\`\`
-
-          ## PR Diff
-          \`\`\`diff
-          ${PR_DIFF}
-          \`\`\`
-
-          ${PREV_CONTEXT}
-
-          Review mode: $([ "${{ steps.check_bot.outputs.is_follow_up }}" = "true" ] && echo "follow-up after new commits" || echo "initial")
-
-          Current HEAD SHA: ${{ steps.check_bot.outputs.current_head_sha }}
-
-          Please review this PR following the instructions in the system prompt."
-
-          RESPONSE=$(curl -s -X POST "${MIMO_BASE_URL}/v1/messages" \
-            -H "Content-Type: application/json" \
-            -H "x-api-key: ${MIMO_API_KEY}" \
-            -H "anthropic-version: 2023-06-01" \
-            -d "$(jq -n \
-              --arg system "$PROMPT" \
-              --arg user "$USER_MSG" \
-              '{
-                model: "mimo-v2.5-pro",
-                max_tokens: 16000,
-                system: $system,
-                messages: [{role: "user", content: $user}]
-              }')")
-
-          REVIEW_TEXT=$(echo "$RESPONSE" | jq -r '.content[] | select(.type=="text") | .text' 2>/dev/null)
-
-          if [ -z "$REVIEW_TEXT" ] || [ "$REVIEW_TEXT" = "null" ]; then
-            echo "API call failed or returned empty response"
-            echo "$RESPONSE" | head -500
-            exit 1
-          fi
-
-          echo "$REVIEW_TEXT" > /tmp/review_text.md
-          echo "Review generated successfully ($(wc -c < /tmp/review_text.md) bytes)"
-
-      - name: Post review to PR
-        if: steps.check_bot.outputs.has_review != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          PR_NUMBER=${{ github.event.pull_request.number }}
-          REPO=${{ github.repository }}
-          CURRENT_SHA=${{ steps.check_bot.outputs.current_head_sha }}
-
-          LIVE_SHA=$(gh pr view "$PR_NUMBER" -R "$REPO" --json headRefOid -q .headRefOid)
-          if [ "$LIVE_SHA" != "$CURRENT_SHA" ]; then
-            echo "PR head moved from $CURRENT_SHA to $LIVE_SHA; skip stale review."
-            exit 0
-          fi
-
-          REVIEW_BODY=$(cat /tmp/review_text.md)
-
-          PAYLOAD=$(jq -n \
-            --arg body "$REVIEW_BODY" \
-            --arg sha "$CURRENT_SHA" \
-            '{
-              event: "COMMENT",
-              commit_id: $sha,
-              body: $body
-            }')
-
-          echo "$PAYLOAD" | gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" \
-            --method POST \
-            --input -
-
-          echo "Review posted successfully."
+          GITHUB_TOKEN: ${{ github.token }}
+          CURRENT_HEAD_SHA: ${{ steps.check_bot.outputs.current_head_sha }}
+          LATEST_BOT_REVIEW_ID: ${{ steps.check_bot.outputs.latest_review_id }}
+          LATEST_BOT_REVIEW_COMMIT: ${{ steps.check_bot.outputs.latest_review_commit }}
+          IS_FOLLOW_UP_REVIEW: ${{ steps.check_bot.outputs.is_follow_up }}
+        with:
+          anthropic_api_key: ${{ secrets.MIMO_API_KEY }}
+          prompt_file: .github/prompts/mimo-pr-review.md
+          model: mimo-v2.5-pro
+          max_turns: "40"
+          timeout_minutes: "10"
+          # Write is allowed only so the agent can stage the review JSON payload in
+          # /tmp before posting; the prompt forbids repo edits (matches upstream hapi,
+          # which grants full sandbox access and relies on the prompt instruction).
+          allowed_tools: "Bash,Read,Grep,Glob,Write"
