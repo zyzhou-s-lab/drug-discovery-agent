@@ -11,6 +11,7 @@ concurrency:
 jobs:
   auto-response:
     if: |
+      !endsWith(github.actor, '[bot]') &&
       !contains(github.event.issue.labels.*.name, 'duplicate') &&
       !contains(github.event.issue.labels.*.name, 'spam') &&
       !contains(github.event.issue.labels.*.name, 'bot-skip')
@@ -46,7 +47,7 @@ jobs:
         if: steps.check_bot.outputs.has_bot != 'true'
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Run Claude Code (MiMo) for issue response
         if: steps.check_bot.outputs.has_bot != 'true'

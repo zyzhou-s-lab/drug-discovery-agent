@@ -65,9 +65,9 @@ Exit immediately (post nothing) if any:
 *Drug Discovery Bot*
 ```
 
-## Post to GitHub (MANDATORY — always post exactly one comment)
+## Post to GitHub (skip conditions take precedence)
 
-Build the reply body (a temp file is fine for long Chinese text) and post it:
+If a Skip Condition above is met, exit without posting. Otherwise post exactly one comment. Build the reply body (a temp file is fine for long Chinese text) and post it:
 
 ```bash
 gh issue comment "$issue_number" -R "$repo" --body-file /tmp/dda-issue-reply.md
