@@ -94,4 +94,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.MIMO_API_KEY }}
           prompt_file: .github/prompts/mimo-pr-review.md
-          claude_args: "--model mimo-v2.5-pro --max-turns 40 --allowedTools Bash,Read,Grep,Glob,Write"
+          model: mimo-v2.5-pro
+          max_turns: "40"
+          # Allow the tools the agent needs, auto-approved (no interactive approver in CI).
+          allowed_tools: "Bash,Read,Grep,Glob,Write"
