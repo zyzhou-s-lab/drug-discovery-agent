@@ -118,7 +118,7 @@ fi
   - `body: "{SUMMARY}"` (the full Chinese summary, beginning with the mode line, ending with `*Drug Discovery Bot*`)
   - `comments: [...]` containing every inline finding comment (`path`, `line`, `side: "RIGHT"`, `body`)
 - If there are no findings, submit a summary-only review with the same `event`, `commit_id`, and `body`.
-- Write the JSON payload to a temp file and post it with `gh api --input`.
+- Build the JSON payload with a Bash command (e.g. `jq -n` or a heredoc — you do not have a file-writing tool) and post it with `gh api --input`.
 
 ```bash
 gh api "repos/$repo/pulls/$pr_number/reviews" \

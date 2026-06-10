@@ -95,6 +95,9 @@ jobs:
           anthropic_api_key: ${{ secrets.MIMO_API_KEY }}
           prompt_file: .github/prompts/mimo-pr-review.md
           model: mimo-v2.5-pro
-          max_turns: "40"
-          # Allow the tools the agent needs, auto-approved (no interactive approver in CI).
-          allowed_tools: "Bash,Read,Grep,Glob,Write"
+          max_turns: "25"
+          timeout_minutes: "10"
+          # Read-only review: the agent uses Bash (gh/git/jq) to fetch context and
+          # post the review, and Read/Grep/Glob to inspect code. No Write — it must
+          # not modify the repo. Auto-approved (no interactive approver in CI).
+          allowed_tools: "Bash,Read,Grep,Glob"
