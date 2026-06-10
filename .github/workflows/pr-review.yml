@@ -1,11 +1,11 @@
-name: MiMo PR Review
+name: PR Review
 
 on:
   pull_request_target:
     types: [opened, reopened, ready_for_review, synchronize]
 
 concurrency:
-  group: mimo-pr-review-${{ github.event.pull_request.number }}
+  group: pr-review-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
@@ -69,14 +69,14 @@ jobs:
             ${{ github.event.pull_request.base.ref }} \
             +refs/pull/${{ github.event.pull_request.number }}/head
 
-      - name: Run Claude Code (MiMo) for PR review
+      - name: Run review agent
         if: steps.check_bot.outputs.has_review != 'true'
         uses: anthropics/claude-code-base-action@v0.0.63
         env:
-          # Point Claude Code at the MiMo Anthropic-compatible endpoint.
+          # Point the agent at the Anthropic-compatible endpoint.
           ANTHROPIC_BASE_URL: ${{ vars.MIMO_BASE_URL || 'https://token-plan-cn.xiaomimimo.com/anthropic' }}
-          # MiMo exposes a single model; remap Claude Code's size aliases to it so
-          # internal small-model calls don't hit a non-existent model.
+          # The endpoint exposes a single model; remap the agent's size aliases to it
+          # so internal small-model calls don't hit a non-existent model.
           ANTHROPIC_DEFAULT_OPUS_MODEL: mimo-v2.5-pro
           ANTHROPIC_DEFAULT_SONNET_MODEL: mimo-v2.5-pro
           ANTHROPIC_DEFAULT_HAIKU_MODEL: mimo-v2.5-pro
@@ -89,7 +89,7 @@ jobs:
           IS_FOLLOW_UP_REVIEW: ${{ steps.check_bot.outputs.is_follow_up }}
         with:
           anthropic_api_key: ${{ secrets.MIMO_API_KEY }}
-          prompt_file: .github/prompts/mimo-pr-review.md
+          prompt_file: .github/prompts/pr-review.md
           model: mimo-v2.5-pro
           max_turns: "40"
           timeout_minutes: "10"
