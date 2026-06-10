@@ -3,10 +3,6 @@ name: MiMo PR Review
 on:
   pull_request_target:
     types: [opened, reopened, ready_for_review, synchronize]
-  # TEMP: verify the agentic rewrite from this branch (same-repo PRs get secrets).
-  # REMOVE this `pull_request` trigger before merging to master.
-  pull_request:
-    types: [opened, reopened, ready_for_review, synchronize]
 
 concurrency:
   group: mimo-pr-review-${{ github.event.pull_request.number }}
