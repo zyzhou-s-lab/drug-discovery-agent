@@ -87,6 +87,24 @@ jobs:
           PR_META=$(cat /tmp/pr_meta.json)
           PR_DIFF=$(cat /tmp/pr_diff.txt)
 
+          # On follow-up reviews, feed the previous review + inline comments back in
+          # so the model does an incremental review instead of starting from scratch.
+          PREV_CONTEXT=""
+          if [ "${{ steps.check_bot.outputs.is_follow_up }}" = "true" ] && [ -f /tmp/prev_review.json ]; then
+            PREV_BODY=$(jq -r '.body // ""' /tmp/prev_review.json 2>/dev/null)
+            PREV_INLINE=""
+            if [ -f /tmp/prev_comments.json ]; then
+              PREV_INLINE=$(jq -r 'if type=="array" then [.[] | "- \(.path):\(.line // .original_line // "?") — \(.body)"] | join("\n") else "" end' /tmp/prev_comments.json 2>/dev/null || echo "")
+            fi
+            PREV_CONTEXT="## Your Previous Review (on an earlier commit of this PR)
+          ${PREV_BODY}
+
+          ### Your previous inline comments
+          ${PREV_INLINE}
+
+          The author has pushed new commits since this review. Re-review the current diff above with this prior context in mind: confirm which of these issues are now resolved, do NOT repeat issues that are already fixed, and flag any new problems introduced by the new commits."
+          fi
+
           SYSTEM="You are a code review assistant. Follow the instructions in the prompt exactly."
 
           USER_MSG="## PR Metadata
@@ -98,6 +116,8 @@ jobs:
           \`\`\`diff
           ${PR_DIFF}
           \`\`\`
+
+          ${PREV_CONTEXT}
 
           Review mode: $([ "${{ steps.check_bot.outputs.is_follow_up }}" = "true" ] && echo "follow-up after new commits" || echo "initial")
 
