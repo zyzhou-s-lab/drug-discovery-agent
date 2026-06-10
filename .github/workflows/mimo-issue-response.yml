@@ -47,7 +47,7 @@ jobs:
         if: steps.check_bot.outputs.has_bot != 'true'
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0
 
       - name: Run Claude Code (MiMo) for issue response
         if: steps.check_bot.outputs.has_bot != 'true'
