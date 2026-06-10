@@ -25,6 +25,7 @@ Key docs: `README.md`. Conventions: Python; keep changes minimal and consistent 
 - `TARGET_NUMBER` — issue or PR number
 - `EVENT_TYPE` — `issue_comment` or `pr_review_comment`
 - `IS_PR` — `true` if the context is a PR
+- `DEFAULT_BRANCH` — the repo's default branch (branch from / PR to this)
 
 ## Context Loading (required)
 
@@ -76,23 +77,23 @@ Default: if ambiguous, choose `question` (safer).
 - Research thoroughly; answer with `path:line` evidence; post as a comment reply. No code changes.
 
 ### `fix` / `feature`
-1. Branch from `master`:
+1. Branch from the default branch:
    ```bash
    branch_name="dd-bot/$target_number-$(echo "$comment_id" | tail -c 8)"
-   git checkout -b "$branch_name" origin/master
+   git checkout -b "$branch_name" "origin/$DEFAULT_BRANCH"
    ```
 2. Implement minimal changes following repo conventions (Python; match surrounding style).
-3. Commit:
+3. Commit — stage only the files you intentionally changed (do NOT use `git add -A`, which can pick up stray scratch files):
    ```bash
-   git add -A
+   git add path/to/changed_file.py path/to/other_file.py
    git commit -m "fix: description
 
    Requested by @$comment_author in #$target_number"
    ```
-4. Push and open a PR targeting `master`:
+4. Push and open a PR targeting the default branch:
    ```bash
    git push -u origin "$branch_name"
-   gh pr create --base master \
+   gh pr create --base "$DEFAULT_BRANCH" \
      --title "fix: description" \
      --body "## Summary
    Description of changes
@@ -136,7 +137,7 @@ gh issue comment "$target_number" -R "$repo" --body "YOUR_RESPONSE
 
 ## Constraints
 
-- **Branch discipline**: always branch from `master`, always PR to `master`. Never commit directly to `master`.
+- **Branch discipline**: always branch from `$DEFAULT_BRANCH`, always PR to `$DEFAULT_BRANCH`. Never commit directly to the default branch.
 - **No force push**: never use `--force`.
 - **No direct commits**: all code changes go through a PR (which the maintainer merges manually).
 - **Size limit**: for large changes (>10 files), describe a plan first and ask for confirmation instead of implementing.
