@@ -834,6 +834,13 @@ async def start_search(campaign: str, req: SearchRequest) -> dict:
                        "rationale": (a.get("rationale") or "")})
     if not angles:
         raise HTTPException(status_code=400, detail="no angles provided")
+    # DD_DR_MAX_ANGLES: truncate angles for lightweight testing
+    _max_a = os.environ.get("DD_DR_MAX_ANGLES")
+    if _max_a:
+        try:
+            angles = angles[:int(_max_a)]
+        except (ValueError, TypeError):
+            pass
     disease = req.disease
     if not disease:  # fall back to the scope stage's recorded question
         out = get_index().output(campaign, "disease-overview") or {}

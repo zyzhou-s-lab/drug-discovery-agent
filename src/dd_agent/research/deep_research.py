@@ -136,7 +136,8 @@ def _lit_server():
             # carry abstract + tldr so the agent can extract claims from the search result
             # directly (no extra get_paper round-trip), like the paper-fetch skill's search.
             slim = [{"doi": r.get("doi"), "title": r.get("title"), "year": r.get("year"),
-                     "venue": r.get("venue"), "citation_count": r.get("citation_count"),
+                     "venue": r.get("venue"), "authors": r.get("authors") or [],
+                     "citation_count": r.get("citation_count"),
                      "tldr": r.get("tldr") or "", "abstract": r.get("abstract") or ""}
                     for r in rows if r.get("title")]
             return {"content": [{"type": "text", "text": _json.dumps(slim, ensure_ascii=False)}]}
@@ -600,6 +601,13 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
                     if text.strip():
                         parts.append(f"[{tool_name}]\n{text}")
                 raw = "\n---\n".join(parts)
+            # fallback: if MCP tools returned nothing, try direct URL fetch
+            if not raw and st == "database" and url:
+                from ..tools.paperfetch import _fetch_text
+                try:
+                    raw = await _aio.to_thread(_fetch_text, url)
+                except Exception:
+                    raw = ""
             return {
                 "url": url, "title": source.get("title"), "angle": angle["label"],
                 "source_type": st, "doi": doi, "sourceQuality": sq, "publishDate": ext.get("publishDate"),

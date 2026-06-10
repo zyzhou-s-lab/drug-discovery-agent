@@ -214,7 +214,7 @@ class Index:
         os.makedirs(d, exist_ok=True)
         path = os.path.join(d, f"{name}-{h}.json")
         tmp = path + ".tmp"
-        with open(tmp, "w") as f:        # atomic: write tmp then rename (ARCHITECTURE §3.8)
+        with open(tmp, "w", encoding="utf-8") as f:        # atomic: write tmp then rename (ARCHITECTURE §3.8)
             f.write(data)
         os.replace(tmp, path)
         return path
