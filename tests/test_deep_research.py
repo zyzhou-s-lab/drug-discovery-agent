@@ -87,7 +87,8 @@ def test_survives_all_abstain_fails():
 
 
 # ─── Orchestration (run_agent monkeypatched — no network) ───
-import asyncio  # noqa: E402
+import asyncio
+import pytest  # noqa: E402
 
 from dd_agent.research import deep_research as dr  # noqa: E402
 
@@ -95,9 +96,16 @@ _ANGLE = [{"label": "g", "query": "q", "rationale": "r"}]
 
 
 def _patch_agent(fake):
-    """Swap deep_research.run_agent for a fake; return a restore() callable."""
+    """Swap deep_research.run_agent for a fake; return a restore() callable.
+    run_agent now returns (result, tools); wrap single-value fakes so each call still
+    yields just the result with an empty tool list — keeps the fakes terse."""
     orig = dr.run_agent
-    dr.run_agent = fake
+
+    async def adapted(*a, **kw):
+        out = await fake(*a, **kw)
+        return out if isinstance(out, tuple) else (out, [])
+
+    dr.run_agent = adapted
     return lambda: setattr(dr, "run_agent", orig)
 
 
@@ -189,3 +197,46 @@ def test_research_all_refuted_salvage():
         restore()
     assert r["findings"] == [] and r["stats"]["confirmed"] == 0
     assert len(r["refuted"]) == 1 and "refuted" in r["summary"]
+
+
+# ─── _synth_block: raw DB records appended to SYNTH_PROMPT (MAX_DB_RAW total cap) ───
+def test_synth_block_includes_db_records_under_cap():
+    from dd_agent.research.deep_research import _synth_block
+    db = [{"sourceUrl": "db://efo", "sourceQuality": "primary", "raw": "EFO:0001 label=AMD"}]
+    out = _synth_block([], db)
+    assert "db://efo" in out and "EFO:0001 label=AMD" in out
+    assert "truncated" not in out
+
+
+def test_synth_block_caps_total_db_raw():
+    from dd_agent.research.deep_research import MAX_DB_RAW, _synth_block
+    big = "x" * 12000  # each record is capped per-record at 12000 chars
+    db = [{"sourceUrl": f"db://{i}", "sourceQuality": "primary", "raw": big} for i in range(10)]
+    out = _synth_block([], db)
+    assert "truncated to stay within token limits" in out
+    included = out.count("```") // 2          # each kept record wraps its raw in a ``` fence pair
+    assert included == MAX_DB_RAW // 12000     # 80000 // 12000 = 6 records kept, rest truncated
+    assert included < len(db)
+
+
+# ─── _present_report: positional angle fallback must warn (not silently mislabel) ───
+def test_present_report_warns_on_angle_findings_mismatch(monkeypatch, caplog):
+    import logging
+    pytest.importorskip("anthropic")
+    import anthropic
+    from dd_agent import api
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "test-token")  # pass the creds gate
+    # Construction raises → _present_report returns "" fast (no network / no retry sleeps), but
+    # only AFTER the angle/findings digest is built — which is where the mismatch warning fires.
+    class _Boom:
+        def __init__(self, *a, **k):
+            raise RuntimeError("no backend in test")
+    monkeypatch.setattr(anthropic, "Anthropic", _Boom)
+    report = {"summary": "s", "findings": [
+        {"claim": "c1", "confidence": "high", "sources": [], "evidence": "e1"},
+        {"claim": "c2", "confidence": "low", "sources": [], "evidence": "e2"}]}
+    angles = [{"label": "A"}, {"label": "B"}, {"label": "C"}]  # 3 angles vs 2 findings, no angle field
+    with caplog.at_level(logging.WARNING):
+        out = api._present_report(report, "disease", angles)
+    assert out == ""
+    assert any("positional fallback" in r.getMessage() for r in caplog.records)

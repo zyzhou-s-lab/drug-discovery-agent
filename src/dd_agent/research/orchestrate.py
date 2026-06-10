@@ -9,6 +9,14 @@ See docs/deep-research-port-plan.md §0, §4.
 """
 from __future__ import annotations
 
+import contextvars
+
+# Current agent label, used so MCP tool-error events can attribute a failure to the specific
+# agent session. It lives here (next to run_agent) and is set INSIDE run_agent from the
+# `dr_label` arg — set in run_agent's own context, right before the SDK spawns its tool tasks,
+# so sibling agents running concurrently under asyncio.gather can't clobber each other's label.
+current_dr_label: contextvars.ContextVar[str] = contextvars.ContextVar("_dr_label", default="mcp")
+
 
 def _schema_errors(args, schema) -> list[str]:
     """Shallow JSON-Schema check (top-level required / type / enum). Mirrors CC's
@@ -49,13 +57,17 @@ def _schema_errors(args, schema) -> list[str]:
 
 
 async def run_agent(phase, prompt, submit_name, schema, extra_mcp, budget, sem,
-                    on_message=None, max_turns: int = 12, should_stop=None):
+                    on_message=None, max_turns: int = 12, should_stop=None,
+                    dr_label: str | None = None):
     """One isolated forced-tool agent = deep-research's `agent({schema})` primitive.
 
     The Workflow engine's forced StructuredOutput isn't available in the SDK, so the
     "force" is prompt-driven: the prompt's only completion action is to call `submit_name`.
-    Returns the submitted args dict, or None if the agent never called it (prose-ended /
-    errored / budget-exhausted) — callers treat None as "drop this unit / salvage".
+    Returns a `(result, tool_results)` tuple: `result` is the submitted args dict, or None if
+    the agent never called it (prose-ended / errored / budget-exhausted) — callers treat a None
+    result as "drop this unit / salvage". `tool_results` is the list of MCP tool results the
+    agent saw ({tool, content, is_error}), so callers can preserve structured data verbatim;
+    it is `[]` when no tools were used or the agent was skipped.
 
     Tool strategy = "default + additive" (plan §2.1): only mcp_servers is set, allowed_tools
     is NOT narrowed, so the agent keeps the default toolset (WebSearch/WebFetch) plus these
@@ -64,14 +76,25 @@ async def run_agent(phase, prompt, submit_name, schema, extra_mcp, budget, sem,
     import asyncio  # noqa: F401  (kept local; engine is import-light for testability)
 
     from claude_agent_sdk import (
-        ClaudeAgentOptions, ClaudeSDKClient, create_sdk_mcp_server, tool,
+        AssistantMessage, ClaudeAgentOptions, ClaudeSDKClient, ToolResultBlock,
+        ToolUseBlock, UserMessage, create_sdk_mcp_server, tool,
     )
 
     # cooperative cancel: a stopped run starts no new agents (in-flight ones drain naturally),
     # which bounds further token spend. Checked before acquiring the semaphore so queued
     # agents return immediately.
     if (should_stop is not None and should_stop()) or budget.exhausted():
-        return None
+        return None, []
+
+    # Set the tool-error attribution label in THIS agent's own context (not the caller's),
+    # right before the SDK starts the session — so concurrent sibling agents don't race on it.
+    # Keep the token so we reset() on every exit and never leak the label into whatever the
+    # caller's context does next (e.g. a second, label-less run_agent in the same task).
+    label_token = current_dr_label.set(dr_label) if dr_label is not None else None
+
+    def _restore_label():
+        if label_token is not None:
+            current_dr_label.reset(label_token)
 
     cap: dict = {}
 
@@ -134,6 +157,11 @@ async def run_agent(phase, prompt, submit_name, schema, extra_mcp, budget, sem,
     _TRANSIENT = ("429", "too many requests", "overloaded", "rate limit", "rate_limit",
                   "503", "502", "500", "socket", "connection", "timed out", "timeout", "reset")
     state = {"transient": False}
+    # Capture the agent's MCP tool results so callers can preserve the structured data the agent
+    # actually saw (e.g. fetch_one keeps DATABASE tool output verbatim instead of re-fetching a
+    # URL). tool_uses maps a ToolUseBlock id → tool name so each ToolResultBlock can be labelled.
+    tool_uses: dict[str, str] = {}
+    tool_results: list[dict] = []
 
     async def _drain(client):
         async for msg in client.receive_response():
@@ -142,6 +170,16 @@ async def run_agent(phase, prompt, submit_name, schema, extra_mcp, budget, sem,
                     on_message(msg)
                 except Exception:  # noqa: BLE001 — streaming is best-effort
                     pass
+            if isinstance(msg, AssistantMessage):
+                for b in msg.content:
+                    if isinstance(b, ToolUseBlock):
+                        tool_uses[b.id] = b.name
+            elif isinstance(msg, UserMessage) and isinstance(msg.content, list):
+                for b in msg.content:
+                    if isinstance(b, ToolResultBlock):
+                        tool_results.append({"tool": tool_uses.get(b.tool_use_id, ""),
+                                             "content": b.content,
+                                             "is_error": bool(getattr(b, "is_error", False))})
             if type(msg).__name__ == "ResultMessage":
                 budget.add(phase, getattr(msg, "usage", None), getattr(msg, "total_cost_usd", 0) or 0)
                 if getattr(msg, "is_error", False):
@@ -160,30 +198,35 @@ async def run_agent(phase, prompt, submit_name, schema, extra_mcp, budget, sem,
                 on_message({"__dd_prompt__": prompt})  # card's Prompt section (CC parity), once
             except Exception:  # noqa: BLE001
                 pass
-        for attempt in range(max_retries + 1):
-            state["transient"] = False
-            try:
-                async with ClaudeSDKClient(options=opts) as client:
-                    await client.query(prompt)
-                    await _drain(client)
-                    n = 0
-                    while cap.get("v") is None and n < max_nudges:
-                        if (should_stop is not None and should_stop()) or budget.exhausted():
-                            break
-                        n += 1
-                        await client.query(nudge)
+        try:
+            for attempt in range(max_retries + 1):
+                state["transient"] = False
+                tool_uses.clear()          # only the winning attempt's tool results are returned
+                tool_results.clear()
+                try:
+                    async with ClaudeSDKClient(options=opts) as client:
+                        await client.query(prompt)
                         await _drain(client)
-            except Exception:  # noqa: BLE001 — SDK/transport error; treat as transient (retryable)
-                state["transient"] = True
-            if cap.get("v") is not None:
-                return cap["v"]
-            if attempt < max_retries and state["transient"]:
-                if (should_stop is not None and should_stop()) or budget.exhausted():
-                    break
-                await _asyncio.sleep(2 ** attempt + _random.uniform(0, 1.0))
-                continue
-            break
-    return cap.get("v")
+                        n = 0
+                        while cap.get("v") is None and n < max_nudges:
+                            if (should_stop is not None and should_stop()) or budget.exhausted():
+                                break
+                            n += 1
+                            await client.query(nudge)
+                            await _drain(client)
+                except Exception:  # noqa: BLE001 — SDK/transport error; treat as transient (retryable)
+                    state["transient"] = True
+                if cap.get("v") is not None:
+                    return cap["v"], tool_results
+                if attempt < max_retries and state["transient"]:
+                    if (should_stop is not None and should_stop()) or budget.exhausted():
+                        break
+                    await _asyncio.sleep(2 ** attempt + _random.uniform(0, 1.0))
+                    continue
+                break
+        finally:
+            _restore_label()
+    return cap.get("v"), tool_results
 
 
 def usage_dict(u) -> dict:

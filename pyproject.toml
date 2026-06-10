@@ -2,7 +2,7 @@
 name = "dd-agent"
 version = "0.0.1"
 description = "Drug target-discovery agent harness (Phase A)"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
     "pydantic>=2",          # M0/dummy + OpenTargets tool (stdlib) need only this
 ]

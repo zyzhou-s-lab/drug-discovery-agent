@@ -20,16 +20,22 @@ See docs/deep-research-port-plan.md §3–§6 and the blueprint
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from urllib.parse import urlparse
 
-from .orchestrate import Budget, run_agent
+# current_dr_label lives in orchestrate (next to run_agent, which sets it from its dr_label
+# arg); imported here so the MCP tool-error emitters can read the current agent's label.
+from .orchestrate import Budget, run_agent, current_dr_label
+
+_log = logging.getLogger(__name__)
 
 # ─── Structural constants (verbatim from blueprint) ───
 VOTES_PER_CLAIM = 3
 REFUTATIONS_REQUIRED = 2
 MAX_FETCH = 15
 MAX_VERIFY_CLAIMS = 25
+MAX_DB_RAW = 80_000  # chars — total cap on raw DB records appended to SYNTH_PROMPT
 
 REL_RANK = {"high": 0, "medium": 1, "low": 2}
 IMP_RANK = {"central": 0, "supporting": 1, "tangential": 2}
@@ -82,8 +88,9 @@ REPORT_SCHEMA = {
     "properties": {
         "summary": {"type": "string"},
         "findings": {"type": "array", "items": {
-            "type": "object", "required": ["claim", "confidence", "sources", "evidence"],
+            "type": "object", "required": ["angle", "claim", "confidence", "sources", "evidence"],
             "properties": {
+                "angle": {"type": "string"},
                 "claim": {"type": "string"},
                 "confidence": {"enum": ["high", "medium", "low"]},
                 "sources": {"type": "array", "items": {"type": "string"}},
@@ -129,11 +136,20 @@ def _lit_server():
             # carry abstract + tldr so the agent can extract claims from the search result
             # directly (no extra get_paper round-trip), like the paper-fetch skill's search.
             slim = [{"doi": r.get("doi"), "title": r.get("title"), "year": r.get("year"),
-                     "venue": r.get("venue"), "citation_count": r.get("citation_count"),
+                     "venue": r.get("venue"), "authors": r.get("authors") or [],
+                     "citation_count": r.get("citation_count"),
                      "tldr": r.get("tldr") or "", "abstract": r.get("abstract") or ""}
                     for r in rows if r.get("title")]
             return {"content": [{"type": "text", "text": _json.dumps(slim, ensure_ascii=False)}]}
-        except Exception:  # noqa: BLE001 — never raise: a failing tool makes the agent loop
+        except Exception as e:  # noqa: BLE001 — never raise: a failing tool makes the agent loop
+            try:
+                from .events import emit
+                emit("deep-research", current_dr_label.get(), "tool_error",
+                     tool="search_literature", error=str(e)[:500],
+                     args_summary=str(args.get("query", ""))[:200])
+            except Exception as emit_err:  # noqa: BLE001 — diagnostics must never crash the tool
+                import logging
+                logging.getLogger(__name__).debug("emit tool_error failed: %s", emit_err)
             return {"content": [{"type": "text", "text": "[]"}]}
 
     @tool("get_paper", "Fetch a paper's abstract + metadata by DOI (for claim extraction).",
@@ -141,7 +157,15 @@ def _lit_server():
     async def _get_paper(args):
         try:
             rec = await _aio.to_thread(abstract_by_doi, args.get("doi", ""))
-        except Exception:  # noqa: BLE001 — never raise (a hanging DOI looped a fetch agent)
+        except Exception as e:  # noqa: BLE001 — never raise (a hanging DOI looped a fetch agent)
+            try:
+                from .events import emit
+                emit("deep-research", current_dr_label.get(), "tool_error",
+                     tool="get_paper", error=str(e)[:500],
+                     args_summary=str(args.get("doi", ""))[:200])
+            except Exception as emit_err:  # noqa: BLE001 — diagnostics must never crash the tool
+                import logging
+                logging.getLogger(__name__).debug("emit tool_error failed: %s", emit_err)
             rec = None
         if not rec:
             return {"content": [{"type": "text", "text": "NOT_FOUND"}]}
@@ -155,7 +179,15 @@ def _lit_server():
     async def _ontology(args):
         try:
             rows = await _aio.to_thread(ontology_lookup, args.get("query", ""), "mondo,efo,hp,go", 12)
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
+            try:
+                from .events import emit
+                emit("deep-research", current_dr_label.get(), "tool_error",
+                     tool="ontology_lookup", error=str(e)[:500],
+                     args_summary=str(args.get("query", ""))[:200])
+            except Exception as emit_err:  # noqa: BLE001 — diagnostics must never crash the tool
+                import logging
+                logging.getLogger(__name__).debug("emit tool_error failed: %s", emit_err)
             rows = []
         return {"content": [{"type": "text", "text": _json.dumps(rows, ensure_ascii=False) if rows else "[]"}]}
 
@@ -247,7 +279,7 @@ def VERIFY_PROMPT(question: str, claim: dict, v: int) -> str:
     )
 
 
-def _synth_block(confirmed: list) -> str:
+def _synth_block(confirmed: list, db_context: list | None = None) -> str:
     parts = []
     for i, c in enumerate(confirmed):
         kept = [v for v in c["verdicts"] if not v.get("refuted")]
@@ -259,11 +291,29 @@ def _synth_block(confirmed: list) -> str:
             "Quote: \"" + c.get("quote", "") + "\"\nVerifier evidence (" + str(best.get("confidence", "low")) + "): "
             + str(best.get("evidence", "")) + "\n"
         )
+    # Append raw database records so the synthesize agent can cite concrete field values
+    # (IDs, scores, counts, classifications) instead of paraphrasing into vague summaries.
+    # Per-record cap (12k) bounds one huge record; a single generous TOTAL cap then guards
+    # against many database sources together overflowing the LLM context window.
+    if db_context:
+        parts.append("\n## Raw database records (authoritative — cite values directly)\n")
+        total_db = 0
+        for rec in db_context:
+            raw_text = str(rec.get("raw", ""))[:12000]
+            if total_db + len(raw_text) > MAX_DB_RAW:
+                parts.append("\n(... remaining database records truncated to stay within token limits ...)\n")
+                break
+            total_db += len(raw_text)
+            parts.append(
+                "### " + str(rec.get("sourceUrl")) + " (" + str(rec.get("sourceQuality")) + ")\n"
+                "```\n" + raw_text + "\n```\n"
+            )
     return "\n".join(parts)
 
 
-def SYNTH_PROMPT(question: str, confirmed: list, killed: list) -> str:
-    block = _synth_block(confirmed)
+def SYNTH_PROMPT(question: str, confirmed: list, killed: list,
+                 db_raw_context: list | None = None, angles: list | None = None) -> str:
+    block = _synth_block(confirmed, db_raw_context)
     killed_block = ""
     if killed:
         killed_block = "\n## Refuted claims (for transparency)\n" + "\n".join(
@@ -271,21 +321,59 @@ def SYNTH_PROMPT(question: str, confirmed: list, killed: list) -> str:
             + str(len(c["verdicts"]) - c["refutedVotes"]) + "-" + str(c["refutedVotes"]) + ")"
             for c in killed
         )
-    return (
+    db_instruction = ""
+    if db_raw_context:
+        db_instruction = (
+            "\n8. For findings backed by database sources, you MUST cite the concrete field values "
+            "(ontology IDs, gene symbols, association scores, classification terms, cohort sizes) "
+            "from the raw records above. Do NOT paraphrase into vague summaries — the raw records "
+            "are authoritative primary data."
+        )
+
+    # Build angle-based structure instructions
+    angle_section = ""
+    if angles:
+        angle_items = []
+        for idx, a in enumerate(angles):
+            angle_items.append(
+                str(idx + 1) + ". angle=\"" + a["label"] + "\" — " + (a.get("rationale") or a.get("query", ""))
+            )
+        angle_list = "\n".join(angle_items)
+        angle_section = (
+            "\n## Research angles (from Scope phase)\n"
+            "The disease was decomposed into these research angles:\n"
+            + angle_list + "\n\n"
+            "You MUST produce EXACTLY " + str(len(angles)) + " findings — one per angle above, in the same order.\n"
+            "Each finding MUST include an `angle` field set to the EXACT angle label string shown above.\n"
+            "The `findings` array length MUST equal " + str(len(angles)) + ".\n"
+            "If an angle yielded no confirmed claims, still include it with confidence: \"low\" "
+            "and evidence explaining insufficient data.\n"
+            "Do NOT write a generic literature review. Address each angle individually.\n"
+        )
+
+    prompt = (
         "## Synthesis: research report\n\n"
         "**Question:** " + question + "\n\n"
         + str(len(confirmed)) + " claims survived " + str(VOTES_PER_CLAIM) + "-vote adversarial verification. "
         "Merge semantic duplicates and synthesize.\n\n"
-        "## Confirmed claims\n" + block + "\n" + killed_block + "\n\n"
+        + angle_section
+        + "## Confirmed claims\n" + block + "\n" + killed_block + "\n\n"
         "## Instructions\n"
         "1. Identify claims that say the same thing — merge them, combine their sources.\n"
-        "2. Group related claims into coherent findings. Each finding should directly address the research question.\n"
+        "2. For each research angle, produce ONE finding. The `angle` field is REQUIRED — set it to the exact angle label.\n"
         "3. Assign confidence per finding: high (multiple primary sources, unanimous votes), medium (secondary sources or split votes), low (single source or blog-quality).\n"
         "4. Write a 3-5 sentence executive summary answering the research question.\n"
         "5. Note caveats: what's uncertain, what sources were weak, what time-sensitivity applies.\n"
         "6. List 2-4 open questions that emerged but weren't answered."
+        + db_instruction
         + _END.format(tool="submit_report")
     )
+    # Observability for the context-window risk: the per-record + MAX_DB_RAW caps bound raw DB
+    # data, but confirmed/killed claims are uncapped, so log the final size (warn past ~120k chars,
+    # a rough proxy for nearing typical context limits) instead of letting it truncate silently.
+    # Only the length is logged — never the prompt body (it contains claim text).
+    (_log.warning if len(prompt) > 120_000 else _log.info)("SYNTH_PROMPT length: %d chars", len(prompt))
+    return prompt
 
 
 # ─── Pure logic (unit-tested offline; no SDK) ───
@@ -454,9 +542,10 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
 
     # ── pipeline: search → dedup → fetch+extract (link-level concurrency, one barrier at the end) ──
     async def angle_chain(angle: dict) -> list:
-        sr = await run_agent("search", SEARCH_PROMPT(question, angle), "submit_results",
+        sr, _sr_tools = await run_agent("search", SEARCH_PROMPT(question, angle), "submit_results",
                              SEARCH_SCHEMA, lit, budget, sem,
-                             on_message=amsg("search · " + angle["label"][:28]), should_stop=should_stop)
+                             on_message=amsg("search · " + angle["label"][:28]), should_stop=should_stop,
+                             dr_label="search · " + angle["label"][:28])
         if not sr or not sr.get("results"):
             ev("search", angle["label"] + ": 0 结果")
             await bump("search", ddone=1)
@@ -477,9 +566,9 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
             except Exception:  # noqa: BLE001
                 host = ""
             flabel = "fetch · " + ((source.get("title") or host or source.get("doi") or "source")[:28])
-            ext = await run_agent("fetch", FETCH_PROMPT(question, source, angle["label"]),
+            ext, fetch_tool_results = await run_agent("fetch", FETCH_PROMPT(question, source, angle["label"]),
                                   "submit_claims", EXTRACT_SCHEMA, lit, budget, sem,
-                                  on_message=amsg(flabel), should_stop=should_stop)
+                                  on_message=amsg(flabel), should_stop=should_stop, dr_label=flabel)
             await bump("fetch", ddone=1)
             if not ext:
                 return None
@@ -487,14 +576,37 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
             st = source.get("source_type") or "web"
             doi = source.get("doi") or None
             url = source.get("url") or (f"https://doi.org/{doi}" if doi else "")
-            # for DATABASE sources, deterministically capture the RAW record (JSON/page text) so the
-            # report shows the actual data, not just the agent's summary claim. Best-effort.
+            # for DATABASE sources, capture the agent's ACTUAL MCP tool results (ontology_lookup /
+            # get_paper / search_literature) so the report preserves the structured data the agent
+            # saw — not a re-fetched URL that may differ in format or fail entirely.
             raw = ""
-            if st == "database" and url:
+            if st == "database" and fetch_tool_results:
+                parts = []
+                for tr in fetch_tool_results:
+                    tool_name = tr.get("tool", "")
+                    content = tr.get("content")
+                    if content is None:
+                        continue
+                    # serialize content: may be str, list of {type,text}, or dict
+                    if isinstance(content, str):
+                        text = content
+                    elif isinstance(content, list):
+                        text = "\n".join(
+                            b.get("text", "") if isinstance(b, dict) else str(b)
+                            for b in content
+                        )
+                    else:
+                        import json as _json
+                        text = _json.dumps(content, ensure_ascii=False)
+                    if text.strip():
+                        parts.append(f"[{tool_name}]\n{text}")
+                raw = "\n---\n".join(parts)
+            # fallback: if MCP tools returned nothing, try direct URL fetch
+            if not raw and st == "database" and url:
                 from ..tools.paperfetch import _fetch_text
                 try:
-                    raw = await asyncio.to_thread(_fetch_text, url)
-                except Exception:  # noqa: BLE001
+                    raw = await _aio.to_thread(_fetch_text, url)
+                except Exception:
                     raw = ""
             return {
                 "url": url, "title": source.get("title"), "angle": angle["label"],
@@ -534,13 +646,19 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
     await bump("verify", dtotal=len(ranked) * VOTES_PER_CLAIM)
 
     async def verify_claim(claim: dict) -> dict:
-        verdicts = await asyncio.gather(*[
+        raw_verdicts = await asyncio.gather(*[
             run_agent("verify", VERIFY_PROMPT(question, claim, v), "submit_verdict",
                       VERDICT_SCHEMA, lit, budget, sem,
                       on_message=amsg("verify · " + claim["claim"][:18] + " v" + str(v + 1)),
-                      should_stop=should_stop)
+                      should_stop=should_stop,
+                      dr_label="verify · " + claim["claim"][:18] + " v" + str(v + 1))
             for v in range(VOTES_PER_CLAIM)
         ])
+        # run_agent always returns a (result, tools) tuple; keep the result of each vote that
+        # actually submitted one. `is not None` (not truthiness) so the unpack is explicit about
+        # the skipped/errored case (run_agent returns (None, []) — a missing verdict, dropped here
+        # as an abstention via `valid` below), distinct from a submitted verdict.
+        verdicts = [vr[0] for vr in raw_verdicts if vr is not None and vr[0] is not None]
         await bump("verify", ddone=VOTES_PER_CLAIM)
         valid = [v for v in verdicts if v]
         refuted = sum(1 for v in valid if v.get("refuted"))
@@ -583,9 +701,17 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
         }
 
     # ── synthesize ──
-    report = await run_agent("synthesize", SYNTH_PROMPT(question, confirmed, killed),
+    # Build raw database context: the actual MCP tool results the fetch agents saw.
+    # These are authoritative structured records (ontology terms, gene data, GWAS hits)
+    # that the synthesize agent MUST cite directly — not paraphrase into vague claims.
+    db_raw_context = [
+        {"sourceUrl": c.get("sourceUrl"), "sourceQuality": c.get("sourceQuality"), "raw": c.get("raw")}
+        for c in all_claims if c.get("source_type") == "database" and c.get("raw")
+    ]
+    synth_report, _synth_tools = await run_agent("synthesize",
+                             SYNTH_PROMPT(question, confirmed, killed, db_raw_context, angles),
                              "submit_report", REPORT_SCHEMA, {}, budget, sem,
-                             on_message=amsg("synthesize"), should_stop=should_stop)
+                             on_message=amsg("synthesize"), should_stop=should_stop, dr_label="synthesize")
     await bump("synthesize", ddone=1)
     sources_out = [{"url": s["url"], "quality": s["sourceQuality"], "angle": s["angle"],
                     "claimCount": len(s["claims"])} for s in all_sources]
@@ -598,7 +724,7 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
     references = _bibliography(confirmed, all_sources)
     biblio = {"references": references, "databaseFacts": db_out}
 
-    if not report:
+    if not synth_report:
         return {
             "question": question,
             "summary": "Synthesis step was skipped or failed — returning " + str(len(confirmed)) + " verified claims unmerged.",
@@ -610,13 +736,13 @@ async def research(question: str, angles: list, *, budget: Budget | None = None,
             "stats": {**stats, "afterSynthesis": 0}, "budget": budget.report(),
         }
 
-    ev("synthesize", "报告生成:" + str(len(report.get("findings", []))) + " 条发现")
+    ev("synthesize", "报告生成:" + str(len(synth_report.get("findings", []))) + " 条发现")
     return {
         "question": question,
-        **report,
+        **synth_report,
         "refuted": refuted_out,
         "sources": sources_out,
         **biblio,
-        "stats": {**stats, "afterSynthesis": len(report.get("findings", []))},
+        "stats": {**stats, "afterSynthesis": len(synth_report.get("findings", []))},
         "budget": budget.report(),
     }

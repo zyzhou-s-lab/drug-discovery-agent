@@ -66,6 +66,36 @@ def _disease_search_server():
     return create_sdk_mcp_server("otdisease", "1.0.0", [_search])
 
 
+async def _translate_codepoints(codepoints: str) -> str | None:
+    """Translate Unicode codepoints to English disease name via a lightweight LLM call.
+
+    Works around a mimo SDK encoding bug that garbles CJK characters before they reach
+    the model. Sending ASCII-safe U+XXXX codepoints bypasses the broken encoding path.
+    """
+    from claude_agent_sdk import ClaudeAgentOptions, query
+
+    result_text = ""
+    opts = ClaudeAgentOptions(
+        system_prompt=(
+            "Decode the Unicode codepoints and reply with the standard English disease/indication name. "
+            "Reply ONLY with the English name, nothing else."),
+        model=os.environ.get("DD_INTAKE_MODEL", "mimo-v2.5-pro"),
+        mcp_servers={}, allowed_tools=[],
+        permission_mode="bypassPermissions", max_turns=1, setting_sources=[],
+    )
+    try:
+        async for msg in query(prompt=f"Unicode codepoints: {codepoints}", options=opts):
+            if hasattr(msg, "text") and msg.text:
+                result_text = msg.text.strip()
+            elif hasattr(msg, "content"):
+                for block in msg.content:
+                    if hasattr(block, "text") and block.text:
+                        result_text = block.text.strip()
+    except Exception:
+        return None
+    return result_text if result_text and result_text.isascii() else None
+
+
 async def validate_disease(raw: str) -> DiseaseIntake:
     """gate → claude -p (translate to English + OT EFO lookup) → typed DiseaseIntake.
 
@@ -111,5 +141,30 @@ async def validate_disease(raw: str) -> DiseaseIntake:
             pass
     except Exception as e:
         return DiseaseIntake(accepted=False, reason=f"intake session error: {e}")
-    return captured.get("intake") or DiseaseIntake(
-        accepted=False, reason="intake judge did not call submit_intake")
+    result = captured.get("intake")
+    if not result:
+        return DiseaseIntake(accepted=False, reason="intake judge did not call submit_intake")
+
+    # Fallback: if the LLM produced garbled non-ASCII output (e.g. mimo SDK encoding bug
+    # turning Chinese into Cyrillic), re-ask the LLM using Unicode codepoints instead of
+    # raw characters, then search OpenTargets with the translated English name.
+    has_cjk = any('一' <= ch <= '鿿' for ch in raw)
+    needs_fallback = (result.accepted and result.normalized_en and not result.normalized_en.isascii()) or (not result.accepted and has_cjk)
+    if needs_fallback:
+        from .tools.opentargets import search_disease
+        codepoints = ' '.join(f'U+{ord(c):04X}' for c in raw if '一' <= c <= '鿿')
+        if codepoints:
+            translated = await _translate_codepoints(codepoints)
+            if translated:
+                hits = search_disease(translated, size=3)
+                if hits:
+                    return DiseaseIntake(
+                        accepted=True, normalized_en=hits[0]["name"],
+                        efo_id=hits[0]["id"],
+                        reason=f"SDK encoding bug — translated via codepoints: '{raw}' → '{translated}' → '{hits[0]['name']}'")
+        if result.efo_id:
+            return result
+        return DiseaseIntake(
+            accepted=False,
+            reason=f"SDK encoding bug garbled '{raw}' and fallback translation failed")
+    return result

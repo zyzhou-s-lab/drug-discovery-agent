@@ -479,3 +479,94 @@ export function StepCards(props: { events: StepEvent[]; terminal?: boolean }) {
         </div>
     )
 }
+
+
+// ToolMetrics: compact aggregate of the deep-research engine's tool/agent diagnostics, mirroring
+// the server's /stages/{stage}/metrics aggregation (api.stage_metrics) but computed client-side
+// from the same event stream. Rendered inside the "工具调用详情" panel (App.tsx) when any
+// tool_error / agent_retry / agent_error event exists.
+export function ToolMetrics(props: { events: StepEvent[] }) {
+    const { calls, toolErrors, retries, agentErrors } = useMemo(() => {
+        const idToName = new Map<string, string>()
+        for (const e of props.events) {
+            if (e.type === 'tool_use' && e.tool_id) idToName.set(e.tool_id, e.name || '')
+        }
+        const calls = new Map<string, { success: number; error: number }>()
+        const toolErrors: StepEvent[] = []
+        const retries: StepEvent[] = []
+        const agentErrors: StepEvent[] = []
+        for (const e of props.events) {
+            if (e.type === 'tool_result') {
+                const name = idToName.get(e.tool_id || '') || '?'
+                const c = calls.get(name) || { success: 0, error: 0 }
+                if (e.is_error) c.error += 1; else c.success += 1
+                calls.set(name, c)
+            } else if (e.type === 'tool_error') toolErrors.push(e)
+            else if (e.type === 'agent_retry') retries.push(e)
+            else if (e.type === 'agent_error') agentErrors.push(e)
+        }
+        return { calls: [...calls.entries()], toolErrors, retries, agentErrors }
+    }, [props.events])
+
+    return (
+        <Card className="mt-1 flex flex-col gap-3 p-3 text-xs">
+            {calls.length > 0 && (
+                <div>
+                    <div className="mb-1 font-medium text-[var(--app-hint)]">工具调用</div>
+                    <div className="flex flex-col gap-0.5">
+                        {calls.map(([name, c]) => (
+                            <div key={name} className="flex items-baseline justify-between gap-2">
+                                <span className="min-w-0 break-words font-mono">{name}</span>
+                                <span className="shrink-0 tabular-nums text-[var(--app-hint)]">
+                                    ✓ {c.success}{c.error > 0 ? ` · ✗ ${c.error}` : ''}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+            {toolErrors.length > 0 && (
+                <div>
+                    <div className="mb-1 font-medium text-[var(--app-badge-error-text,#dc2626)]">工具错误 ({toolErrors.length})</div>
+                    <ul className="flex flex-col gap-0.5">
+                        {toolErrors.map((e, i) => (
+                            <li key={i} className="break-words">
+                                <span className="font-mono">{e.tool || '?'}</span>
+                                <span className="text-[var(--app-hint)]">{e.label ? ` · ${e.label}` : ''}</span>
+                                {e.error ? <span className="text-[var(--app-hint)]">: {e.error}</span> : null}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
+            {retries.length > 0 && (
+                <div>
+                    <div className="mb-1 font-medium text-[var(--app-hint)]">重试 ({retries.length})</div>
+                    <ul className="flex flex-col gap-0.5">
+                        {retries.map((e, i) => (
+                            <li key={i} className="break-words text-[var(--app-hint)]">
+                                {e.label || '?'} · 第 {e.attempt ?? '?'}/{e.max_retries ?? '?'} 次
+                                {e.reason ? ` · ${e.reason}` : ''}
+                                {e.backoff_sec != null ? ` · 退避 ${e.backoff_sec}s` : ''}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
+            {agentErrors.length > 0 && (
+                <div>
+                    <div className="mb-1 font-medium text-[var(--app-badge-error-text,#dc2626)]">放弃 ({agentErrors.length})</div>
+                    <ul className="flex flex-col gap-0.5">
+                        {agentErrors.map((e, i) => (
+                            <li key={i} className="break-words">
+                                <span>{e.label || '?'}</span>
+                                <span className="text-[var(--app-hint)]">{e.attempts != null ? ` · ${e.attempts} 次尝试后` : ''}</span>
+                                {e.last_error ? <span className="text-[var(--app-hint)]">: {e.last_error}</span> : null}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
+        </Card>
+    )
+}
