@@ -41,6 +41,9 @@ comment_author=$(jq -r '.comment.user.login' "$GITHUB_EVENT_PATH")
 if [ "$is_pr" = "true" ]; then
   gh pr view "$target_number" -R "$repo" --json number,title,body,labels,author,baseRefName,headRefName
   gh pr diff "$target_number" -R "$repo"
+  # Read the PR discussion so the author's explanations/justifications are considered.
+  gh api "repos/$repo/issues/$target_number/comments"   # conversation (top-level) comments
+  gh api "repos/$repo/pulls/$target_number/comments"    # inline review comments
 else
   gh issue view "$target_number" -R "$repo" --json number,title,body,labels,author,comments
 fi
