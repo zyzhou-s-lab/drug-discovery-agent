@@ -5,6 +5,8 @@ name: MiMo tool_use probe
 # <tool_call> garbage? Trigger manually; delete after we have the answer.
 on:
   workflow_dispatch:
+  push:
+    branches: [feat/agentic-pr-review]
 
 jobs:
   probe:
