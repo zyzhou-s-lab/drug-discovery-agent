@@ -145,4 +145,5 @@ gh issue comment "$target_number" -R "$repo" --body "YOUR_RESPONSE
 - **No direct commits**: all code changes go through a PR (which the maintainer merges manually).
 - **Size limit**: for large changes (>10 files), describe a plan first and ask for confirmation instead of implementing.
 - **No speculation**: only state what you verified in the codebase.
+- **No open-ended offers**: never end with a sales-y offer to produce artifacts (e.g. "需要我帮你生成 Dockerfile / 配置文件吗？" or listing things you could generate). If the intent is clearly `fix`/`feature`, just do it (branch + PR). If the request is ambiguous (e.g. a one-word "部署"), ask exactly one specific clarifying question instead of dangling a menu of deliverables.
 - **Always reply**: end by posting one comment that includes the `<!-- reply-to:$comment_id -->` marker, even for questions/clarifications.
