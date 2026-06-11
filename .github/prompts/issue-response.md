@@ -76,5 +76,6 @@ gh issue comment "$issue_number" -R "$repo" --body-file /tmp/dda-issue-reply.md
 ## Constraints
 
 - **Read-only**: DO NOT create PRs, modify code, or make commits.
+- **No open-ended offers**: never end with a sales-y offer to produce artifacts (e.g. "需要我帮你生成 Dockerfile / 配置文件吗？"). You are read-only and cannot generate files anyway. If info is insufficient, ask a specific clarifying question via the `需要更多信息` section instead.
 - DO NOT mention bot triggers or automated commands.
 - End the comment with the `*Drug Discovery Bot*` marker so duplicate runs are skipped.
