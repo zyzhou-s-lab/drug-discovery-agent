@@ -8,6 +8,7 @@
       "bump-minor-pre-major": true,
       "include-v-in-tag": true,
       "include-component-in-tag": false,
+      "pull-request-header": "Release PR — please review",
       "changelog-sections": [
         { "type": "feat", "section": "Features" },
         { "type": "fix", "section": "Bug Fixes" },
