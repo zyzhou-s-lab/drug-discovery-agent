@@ -951,6 +951,16 @@ export function App() {
     useEffect(() => {
         if (!campaign && campaigns && campaigns.length > 0) setCampaign(campaigns[0].campaign)
     }, [campaigns, campaign])
+    // Prune a dangling selection: after a refetch (e.g. a delete) drops the
+    // selected campaign from the list, clear it so its stale UI can't linger.
+    // Without this, the auto-select effect above re-picks the just-deleted run
+    // from the not-yet-refreshed list, leaving it stuck in the center panel.
+    useEffect(() => {
+        if (campaign && campaigns && !campaigns.some((c) => c.campaign === campaign)) {
+            setSelected(null)
+            setCampaign(null)
+        }
+    }, [campaigns, campaign])
 
     const { view, error: vErr } = useCampaignView(campaign)
     const { report, refresh: refreshReport } = useReport(campaign)
