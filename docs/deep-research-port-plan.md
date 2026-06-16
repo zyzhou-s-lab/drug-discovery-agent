@@ -195,7 +195,7 @@ SCOPE_SCHEMA(原样):`{question, summary, angles[{label, query, rationale?}]}`,a
   - **M3.3 书目在最终输出生成**(纯 Python,复用 `cite_by_doi`):synth 后从 confirmed findings 收唯一来源,拆三段——`references`(DOI→APA7)、`webSources`(title+URL)、`dbSources`(DB 名 + 记录 URL/ID)。
   - **M3.4 前端**:`DeepReportView` 加「参考文献(APA7)/网络来源/数据库来源」三节(APA7 复用 `Bibliography`)。
   - **M3.5(延后)Verify 按源路由**:首版统一 3 票(AD 实测 OLS4 事实 3-0 通过,统一票不出错只多花 token);后续 DB 事实改"跳过/1 票 provenance",文献"1 票 quote-check",web/跨源综合"3 票对抗"。
-  - **M3 必配**:`DD_DR_BUDGET` 熔断 + `DD_DR_CONC` 并发上限(成本锚点见 §2.5,真实 3.7M/病)。
+  - **M3 必配**:✅ `DD_DR_BUDGET` 熔断(`api._budget_from_env` → `Budget(total_tokens)` 传入 `research()`,跳闸走 `exhausted()`→salvage;未设=无上限)+ `DD_DR_CONC` 并发上限(`research()` 默认 6)(成本锚点见 §2.5,真实 3.7M/病)。
 - **M4**:dry AMD 端到端 + token 报告,校准推荐 `DD_DR_BUDGET`;评估简报质量/成本。
 - **(后续)nomination / validation = 不同工作性质的独立阶段(见 §10)**:nomination = OpenTargets 结构化查询 + 排序(确定性,非对抗 verify)+ 在候选上补文献证据;validation = 数据集下载 + 计算(compute job,非文本 agent)。
 
