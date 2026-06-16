@@ -3,6 +3,7 @@
 import type {
     CampaignSummary,
     CampaignView,
+    ConfigUpdate,
     DdaConfig,
     IntakeResult,
     PipelineStage,
@@ -25,6 +26,15 @@ async function getJson<T>(path: string): Promise<T> {
 export const ddaApi = {
     pipeline: () => getJson<{ stages: PipelineStage[] }>('/pipeline'),
     config: () => getJson<DdaConfig>('/config'),
+    saveConfig: (body: ConfigUpdate): Promise<DdaConfig> =>
+        fetch(`${BASE}/config`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(body),
+        }).then(async (r) => {
+            if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || `${r.status}`)
+            return r.json() as Promise<DdaConfig>
+        }),
     campaigns: () => getJson<{ campaigns: CampaignSummary[] }>('/campaigns'),
     campaign: (c: string) => getJson<CampaignView>(`/campaigns/${encodeURIComponent(c)}`),
     stage: (c: string, s: string) =>

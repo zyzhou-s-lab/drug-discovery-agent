@@ -10,7 +10,7 @@ dependencies = [
 [project.optional-dependencies]
 real = ["claude-agent-sdk", "anthropic"]   # M1+: Agent SDK worker + Messages API judge
 api = ["fastapi>=0.110", "uvicorn[standard]>=0.27"]   # M5: read API + SSE observer
-dev = ["pytest", "pytest-asyncio"]
+dev = ["pytest", "pytest-asyncio", "httpx"]  # httpx: fastapi TestClient (endpoint tests)
 
 [project.scripts]
 dd-agent = "dd_agent.cli:main"
