@@ -110,10 +110,10 @@ jobs:
         if: steps.check_skip.outputs.should_skip != 'true'
         uses: anthropics/claude-code-base-action@v0.0.63
         env:
-          ANTHROPIC_BASE_URL: ${{ vars.MIMO_BASE_URL || 'https://token-plan-cn.xiaomimimo.com/anthropic' }}
-          ANTHROPIC_DEFAULT_OPUS_MODEL: mimo-v2.5-pro
-          ANTHROPIC_DEFAULT_SONNET_MODEL: mimo-v2.5-pro
-          ANTHROPIC_DEFAULT_HAIKU_MODEL: mimo-v2.5-pro
+          ANTHROPIC_BASE_URL: ${{ vars.LLM_BASE_URL }}
+          ANTHROPIC_DEFAULT_OPUS_MODEL: ${{ vars.LLM_MODEL }}
+          ANTHROPIC_DEFAULT_SONNET_MODEL: ${{ vars.LLM_MODEL }}
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: ${{ vars.LLM_MODEL }}
           GH_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ github.token }}
           TRIGGERING_COMMENT_ID: ${{ steps.check_skip.outputs.triggering_comment_id }}
@@ -122,9 +122,9 @@ jobs:
           IS_PR: ${{ steps.check_skip.outputs.is_pr }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         with:
-          anthropic_api_key: ${{ secrets.MIMO_API_KEY }}
+          anthropic_api_key: ${{ secrets.LLM_API_KEY }}
           prompt_file: .github/prompts/mention-response.md
-          model: mimo-v2.5-pro
+          model: ${{ vars.LLM_MODEL }}
           max_turns: "40"
           timeout_minutes: "15"
           allowed_tools: "Bash,Read,Grep,Glob,Write"
