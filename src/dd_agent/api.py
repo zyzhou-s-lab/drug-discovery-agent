@@ -24,12 +24,14 @@ from dotenv import load_dotenv
 load_dotenv(override=False)
 
 import asyncio
+import ipaddress
 import json
 import logging
 import os
 import shutil
 import threading
 import time
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -122,6 +124,28 @@ def _merge_ui_update(store: dict, update: dict) -> dict:
     return out
 
 
+def _trusted_origin(origin: str | None) -> bool:
+    """Guard state-changing writes against cross-site (CSRF) requests. The UI is served
+    same-origin through the Vite proxy, so a legit write only ever carries a loopback /
+    private-LAN Origin (or none, for curl / server-side). A page on a public site (evil.com)
+    carries a public Origin and is rejected — so it can't silently rewrite the model/api key.
+    DD_ALLOWED_ORIGINS (comma-separated) overrides the heuristic (e.g. a Tailscale magic-DNS
+    hostname, which is not a private-IP literal)."""
+    if not origin:
+        return True  # no Origin: curl / same-origin GET / server-side — not a browser CSRF vector
+    allow = [o.strip() for o in os.environ.get("DD_ALLOWED_ORIGINS", "").split(",") if o.strip()]
+    if allow:
+        return origin in allow
+    host = urlparse(origin).hostname or ""
+    if host == "localhost":
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False  # public hostname → untrusted (set DD_ALLOWED_ORIGINS to allow it)
+    return ip.is_loopback or ip.is_private or ip.is_link_local
+
+
 # apply persisted settings at import time (layered over the launch env)
 _apply_ui_config(_load_ui_config())
 
@@ -207,10 +231,12 @@ class ConfigUpdate(BaseModel):
 
 
 @app.post("/api/config")
-async def update_config(update: ConfigUpdate) -> dict:
+async def update_config(update: ConfigUpdate, request: Request) -> dict:
     """Persist UI overrides for the model endpoint + deep-research knobs and apply them to the
     running process. Returns the same shape as GET /config (effective values; key never echoed).
     Only provided fields change; a blank api_key keeps the existing one."""
+    if not _trusted_origin(request.headers.get("origin")):
+        raise HTTPException(status_code=403, detail="cross-origin write blocked")
     incoming = update.model_dump(exclude_none=True)
     for field, (lo, hi) in _UI_NUM_BOUNDS.items():
         if field in incoming and not (lo <= int(incoming[field]) <= hi):

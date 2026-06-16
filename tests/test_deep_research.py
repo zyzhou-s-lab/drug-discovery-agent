@@ -295,3 +295,41 @@ def test_ui_config_merge_and_apply(monkeypatch):
     api._apply_ui_config({})  # cleared → revert to launch default
     assert os.environ["ANTHROPIC_MODEL"] == "launch-model"  # launch default restored
     assert "DD_DR_CONC" not in os.environ                   # launch default was None → unset
+
+
+def test_config_endpoint(monkeypatch, tmp_path):
+    """POST/GET /api/config end-to-end via TestClient: persists + applies, never echoes the key,
+    rejects out-of-bounds (422) and cross-origin writes (403), allows private-LAN origins."""
+    import os
+
+    pytest.importorskip("httpx")  # fastapi TestClient transport
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from dd_agent import api
+
+    monkeypatch.setattr(api, "UI_CONFIG_PATH", str(tmp_path / "ui-config.json"))
+    for env in ("ANTHROPIC_MODEL", "ANTHROPIC_AUTH_TOKEN", "DD_DR_CONC", "DD_DR_MAX_CLAIMS"):
+        monkeypatch.delenv(env, raising=False)          # restored at teardown despite _apply writes
+        monkeypatch.setitem(api._LAUNCH_ENV, env, None)
+    client = TestClient(api.app)
+
+    # valid save (no Origin header = trusted server-side/same-origin)
+    r = client.post("/api/config", json={"model": "mimo-v2.5-pro", "api_key": "sk-zzz",
+                                         "concurrency": 8, "max_claims": 30})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["model"] == "mimo-v2.5-pro" and body["api_key_set"] is True
+    assert "api_key" not in body                         # key NEVER echoed
+    assert body["concurrency"] == 8 and body["max_claims"] == 30
+    assert (tmp_path / "ui-config.json").exists()
+    assert os.environ["ANTHROPIC_AUTH_TOKEN"] == "sk-zzz"  # applied to env
+
+    # out-of-bounds → 422
+    assert client.post("/api/config", json={"concurrency": 99}).status_code == 422
+
+    # cross-site write → 403; private-LAN origin → allowed
+    assert client.post("/api/config", json={"model": "x"},
+                       headers={"origin": "https://evil.com"}).status_code == 403
+    assert client.post("/api/config", json={"model": "y"},
+                       headers={"origin": "http://10.202.2.224:5173"}).status_code == 200

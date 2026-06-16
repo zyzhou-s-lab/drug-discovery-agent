@@ -92,6 +92,12 @@ export function Settings(props: { open: boolean; onOpenChange: (v: boolean) => v
     }, [props.open])
 
     const save = () => {
+        const c = Number(concurrency)
+        const m = Number(maxClaims)
+        if (!Number.isInteger(c) || c < 1 || c > 32 || !Number.isInteger(m) || m < 1 || m > 80) {
+            setMsg({ kind: 'err', text: '并发上限 1–32,Verify 数 1–80(整数)' })
+            return
+        }
         setSaving(true)
         setMsg(null)
         ddaApi
@@ -99,8 +105,8 @@ export function Settings(props: { open: boolean; onOpenChange: (v: boolean) => v
                 model,
                 base_url: baseUrl,
                 api_key: apiKey, // blank = keep existing
-                concurrency: Number(concurrency),
-                max_claims: Number(maxClaims),
+                concurrency: c,
+                max_claims: m,
             })
             .then((c) => {
                 hydrate(c)
