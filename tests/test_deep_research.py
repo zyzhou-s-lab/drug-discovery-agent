@@ -240,3 +240,26 @@ def test_present_report_warns_on_angle_findings_mismatch(monkeypatch, caplog):
         out = api._present_report(report, "disease", angles)
     assert out == ""
     assert any("positional fallback" in r.getMessage() for r in caplog.records)
+
+
+def test_budget_from_env_parses_cap_and_rejects_bad(monkeypatch):
+    """DD_DR_BUDGET wires the cost fuse: a valid positive int → capped Budget that trips
+    exhausted(); unset / non-positive / non-integer → None (no cap, no raise)."""
+    pytest.importorskip("fastapi")
+    from dd_agent.api import _budget_from_env
+
+    monkeypatch.delenv("DD_DR_BUDGET", raising=False)
+    assert _budget_from_env() is None  # unset → no cap
+
+    monkeypatch.setenv("DD_DR_BUDGET", "1500000")
+    b = _budget_from_env()
+    assert b is not None and b.total_tokens == 1_500_000
+    assert not b.exhausted()
+    b.add("search", {"input_tokens": 1_000_000, "output_tokens": 600_000}, 0)
+    assert b.exhausted()  # cap actually trips once spent reaches it
+
+    monkeypatch.setenv("DD_DR_BUDGET", "not-an-int")
+    assert _budget_from_env() is None  # invalid → no cap (must not raise)
+
+    monkeypatch.setenv("DD_DR_BUDGET", "0")
+    assert _budget_from_env() is None  # non-positive → no cap

@@ -39,6 +39,7 @@ from pydantic import BaseModel
 from .events import emit, events_dir_var, read_stage_events
 from .index import Index
 from .pipeline import PIPELINE
+from .research.orchestrate import Budget
 
 DB_PATH = os.environ.get("DD_DB", "/tmp/dd/state.sqlite")
 ARTIFACTS = os.environ.get("DD_ARTIFACTS", "/tmp/dd/artifacts")
@@ -718,6 +719,30 @@ def _present_report(report: dict, disease: str, angles: list[dict] | None = None
         return ""
 
 
+def _budget_from_env() -> Budget | None:
+    """Build the deep-research cost fuse from DD_DR_BUDGET (a token cap).
+
+    Returns a Budget carrying that cap, or None when DD_DR_BUDGET is unset / non-positive /
+    non-integer (= no cap, the original deep-research default). The cap is the headline safety
+    control (deep-research-port-plan §2.5/§7): a full run averages ~3.7M tokens/disease, so an
+    unsupervised run can otherwise burn a whole session limit. Once spent tokens reach the cap,
+    Budget.exhausted() makes run_agent start no new agents (in-flight ones drain), so the run
+    salvages a partial report instead of running away.
+    """
+    raw = os.environ.get("DD_DR_BUDGET")
+    if not raw:
+        return None
+    try:
+        cap = int(raw)
+    except ValueError:
+        _log.warning("DD_DR_BUDGET=%r is not a valid integer, ignoring", raw)
+        return None
+    if cap <= 0:
+        _log.warning("DD_DR_BUDGET=%r must be a positive integer, ignoring", raw)
+        return None
+    return Budget(total_tokens=cap)
+
+
 def _run_search(campaign: str, disease: str, angles: list[dict]) -> None:
     """Background Search→Fetch→Verify→Synthesize over the approved angles (own loop/thread,
     like _run_pipeline). Emits step events under SEARCH_STAGE; writes status + report files."""
@@ -751,6 +776,11 @@ def _run_search(campaign: str, disease: str, angles: list[dict]) -> None:
         # DD_DR_MAX_FETCH (opt-in) caps the fetch phase for cheap/minimal smoke runs; default unchanged.
         if os.environ.get("DD_DR_MAX_FETCH"):
             rkw["fetch_budget"] = int(os.environ["DD_DR_MAX_FETCH"])
+        # DD_DR_BUDGET (opt-in) = token-cost fuse; trips exhausted()→salvage. Unset = no cap.
+        budget = _budget_from_env()
+        if budget is not None:
+            rkw["budget"] = budget
+            emit(SEARCH_STAGE, "search", "budget", cap=budget.total_tokens)
         task = loop.create_task(research(
             disease, angles,
             on_progress=lambda phase, done, total: emit(SEARCH_STAGE, phase, "progress",
