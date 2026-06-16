@@ -53,16 +53,16 @@ jobs:
         if: steps.check_bot.outputs.has_bot != 'true'
         uses: anthropics/claude-code-base-action@v0.0.63
         env:
-          ANTHROPIC_BASE_URL: ${{ vars.MIMO_BASE_URL || 'https://token-plan-cn.xiaomimimo.com/anthropic' }}
-          ANTHROPIC_DEFAULT_OPUS_MODEL: mimo-v2.5-pro
-          ANTHROPIC_DEFAULT_SONNET_MODEL: mimo-v2.5-pro
-          ANTHROPIC_DEFAULT_HAIKU_MODEL: mimo-v2.5-pro
+          ANTHROPIC_BASE_URL: ${{ vars.LLM_BASE_URL }}
+          ANTHROPIC_DEFAULT_OPUS_MODEL: ${{ vars.LLM_MODEL }}
+          ANTHROPIC_DEFAULT_SONNET_MODEL: ${{ vars.LLM_MODEL }}
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: ${{ vars.LLM_MODEL }}
           GH_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ github.token }}
         with:
-          anthropic_api_key: ${{ secrets.MIMO_API_KEY }}
+          anthropic_api_key: ${{ secrets.LLM_API_KEY }}
           prompt_file: .github/prompts/issue-response.md
-          model: mimo-v2.5-pro
+          model: ${{ vars.LLM_MODEL }}
           max_turns: "40"
           timeout_minutes: "10"
           # Write lets the agent stage a long reply body in /tmp for `gh issue
