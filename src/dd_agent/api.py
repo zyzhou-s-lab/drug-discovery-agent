@@ -46,6 +46,85 @@ ARTIFACTS = os.environ.get("DD_ARTIFACTS", "/tmp/dd/artifacts")
 
 _log = logging.getLogger(__name__)
 
+# ─── User-configurable runtime settings (settings page) ───────────────────────
+# A small JSON store lets the UI override the model endpoint + a couple of deep-research
+# knobs WITHOUT editing env / restarting. It is applied by writing into os.environ, so every
+# existing reader (scope/research/judge ANTHROPIC_*, DD_DR_CONC, DD_DR_MAX_CLAIMS) picks it up
+# unchanged. Single-deployment scope: the override is process-wide and takes effect on the next
+# run. The api key is stored server-side (chmod 600) and is NEVER returned by the API.
+UI_CONFIG_PATH = os.environ.get(
+    "DD_UI_CONFIG", os.path.join(os.path.dirname(DB_PATH) or ".", "ui-config.json")
+)
+
+# UI field -> the env var it drives.
+_UI_ENV_MAP = {
+    "model": "ANTHROPIC_MODEL",
+    "base_url": "ANTHROPIC_BASE_URL",
+    "api_key": "ANTHROPIC_AUTH_TOKEN",
+    "concurrency": "DD_DR_CONC",
+    "max_claims": "DD_DR_MAX_CLAIMS",
+}
+# Launch-time env, captured ONCE before any override is applied, so clearing a field in the UI
+# restores what the process was started with (run-demo.sh / systemd) rather than deleting it.
+_LAUNCH_ENV = {env: os.environ.get(env) for env in _UI_ENV_MAP.values()}
+
+# bounds for the numeric knobs (max_claims ceiling mirrors deep_research's verify safety cap).
+_UI_NUM_BOUNDS = {"concurrency": (1, 32), "max_claims": (1, 80)}
+
+
+def _load_ui_config() -> dict:
+    try:
+        with open(UI_CONFIG_PATH, encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_ui_config(cfg: dict) -> None:
+    os.makedirs(os.path.dirname(UI_CONFIG_PATH) or ".", exist_ok=True)
+    tmp = UI_CONFIG_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(cfg, fh, ensure_ascii=False, indent=2)
+    os.replace(tmp, UI_CONFIG_PATH)
+    try:
+        os.chmod(UI_CONFIG_PATH, 0o600)  # holds the api key
+    except OSError:
+        pass
+
+
+def _apply_ui_config(cfg: dict) -> None:
+    """Project the stored overrides onto os.environ. An unset/empty field falls back to the
+    launch-time value, so the UI can revert to the deployment default (not just to nothing)."""
+    for field, env in _UI_ENV_MAP.items():
+        val = cfg.get(field)
+        eff = str(val) if val not in (None, "") else _LAUNCH_ENV.get(env)
+        if eff is None:
+            os.environ.pop(env, None)
+        else:
+            os.environ[env] = eff
+
+
+def _merge_ui_update(store: dict, update: dict) -> dict:
+    """Merge a partial update into the stored config. Blank api_key = keep existing (the form
+    never echoes the key, so a blank field must not wipe it); blank model/base_url = clear the
+    override (revert to launch default)."""
+    out = dict(store)
+    for k, v in update.items():
+        if v is None:
+            continue
+        if k == "api_key" and v == "":
+            continue
+        if k in ("model", "base_url") and v == "":
+            out.pop(k, None)
+            continue
+        out[k] = v
+    return out
+
+
+# apply persisted settings at import time (layered over the launch env)
+_apply_ui_config(_load_ui_config())
+
 app = FastAPI(title="dd-agent observer", version="0.1.0")
 # Read-only cross-origin access for the Vite dev frontend. No credentials.
 app.add_middleware(
@@ -110,9 +189,36 @@ async def config() -> dict:
     has_key = bool(os.environ.get("ANTHROPIC_AUTH_TOKEN") or os.environ.get("ANTHROPIC_API_KEY"))
     return {
         "model": os.environ.get("ANTHROPIC_MODEL"),
+        "base_url": os.environ.get("ANTHROPIC_BASE_URL"),
         "base_url_set": bool(os.environ.get("ANTHROPIC_BASE_URL")),
+        "api_key_set": has_key,
+        "concurrency": int(os.environ.get("DD_DR_CONC", "6")),
+        "max_claims": int(os.environ.get("DD_DR_MAX_CLAIMS", "25")),
         "real_available": has_sdk and has_key,
     }
+
+
+class ConfigUpdate(BaseModel):
+    model: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+    concurrency: int | None = None
+    max_claims: int | None = None
+
+
+@app.post("/api/config")
+async def update_config(update: ConfigUpdate) -> dict:
+    """Persist UI overrides for the model endpoint + deep-research knobs and apply them to the
+    running process. Returns the same shape as GET /config (effective values; key never echoed).
+    Only provided fields change; a blank api_key keeps the existing one."""
+    incoming = update.model_dump(exclude_none=True)
+    for field, (lo, hi) in _UI_NUM_BOUNDS.items():
+        if field in incoming and not (lo <= int(incoming[field]) <= hi):
+            raise HTTPException(status_code=422, detail=f"{field} must be between {lo} and {hi}")
+    store = _merge_ui_update(_load_ui_config(), incoming)
+    _save_ui_config(store)
+    _apply_ui_config(store)
+    return await config()
 
 
 @app.get("/api/campaigns")

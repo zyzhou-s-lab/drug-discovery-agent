@@ -263,3 +263,35 @@ def test_budget_from_env_parses_cap_and_rejects_bad(monkeypatch):
 
     monkeypatch.setenv("DD_DR_BUDGET", "0")
     assert _budget_from_env() is None  # non-positive → no cap
+
+
+def test_ui_config_merge_and_apply(monkeypatch):
+    """Settings overrides: blank api_key keeps the existing key, blank model/base_url clears the
+    override, and apply() projects onto os.environ — reverting to the launch default when cleared."""
+    import os
+
+    pytest.importorskip("fastapi")
+    from dd_agent import api
+
+    merged = api._merge_ui_update(
+        {"model": "old", "api_key": "secret", "concurrency": 6},
+        {"model": "", "api_key": "", "base_url": "https://x/anthropic", "concurrency": 10},
+    )
+    assert "model" not in merged            # blank model → override cleared
+    assert merged["api_key"] == "secret"    # blank api_key → existing kept
+    assert merged["base_url"] == "https://x/anthropic"
+    assert merged["concurrency"] == 10
+
+    # delenv first so monkeypatch restores these at teardown even though _apply writes os.environ
+    monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
+    monkeypatch.delenv("DD_DR_CONC", raising=False)
+    monkeypatch.setitem(api._LAUNCH_ENV, "ANTHROPIC_MODEL", "launch-model")
+    monkeypatch.setitem(api._LAUNCH_ENV, "DD_DR_CONC", None)
+
+    api._apply_ui_config({"model": "user-model", "concurrency": 12})
+    assert os.environ["ANTHROPIC_MODEL"] == "user-model"
+    assert os.environ["DD_DR_CONC"] == "12"
+
+    api._apply_ui_config({})  # cleared → revert to launch default
+    assert os.environ["ANTHROPIC_MODEL"] == "launch-model"  # launch default restored
+    assert "DD_DR_CONC" not in os.environ                   # launch default was None → unset
