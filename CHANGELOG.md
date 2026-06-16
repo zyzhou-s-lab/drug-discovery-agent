@@ -5,6 +5,18 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.0.2](https://github.com/zyzhou-saffron/drug-discovery-agent/compare/v0.0.1...v0.0.2) (2026-06-16)
+
+
+### Bug Fixes
+
+* **ci:** bots must not end with open-ended "需要我帮你生成…吗" offers ([#15](https://github.com/zyzhou-saffron/drug-discovery-agent/issues/15)) ([b3cb7ff](https://github.com/zyzhou-saffron/drug-discovery-agent/commit/b3cb7ff53cb4f9c2469899b0b912d8d5eedfdca3))
+
+
+### Documentation
+
+* add CHANGELOG.md documenting Phase A (v0.0.1) ([#13](https://github.com/zyzhou-saffron/drug-discovery-agent/issues/13)) ([048f2b5](https://github.com/zyzhou-saffron/drug-discovery-agent/commit/048f2b533cfdaf41e9373f3cd16e230c863a654a))
+
 ## [Unreleased]
 
 目前尚未发布带标签的正式版本。下方 `0.0.1` 汇总了 Phase A 开发期（2026-05-31 起）的全部工作。
