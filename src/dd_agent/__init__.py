@@ -5,4 +5,4 @@ Layers (see docs/ARCHITECTURE.md):
 - node     = boxed agent session (worker / planner / judge)
 - index    = SQLite state-DB + content-addressed artifact store -- index.py
 """
-__version__ = "0.0.1"
+__version__ = "0.0.2"

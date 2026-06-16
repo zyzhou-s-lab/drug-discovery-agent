@@ -1,6 +1,6 @@
 [project]
 name = "dd-agent"
-version = "0.0.1"
+version = "0.0.2"
 description = "Drug target-discovery agent harness (Phase A)"
 requires-python = ">=3.10"
 dependencies = [
