@@ -1,0 +1,21 @@
+[project]
+name = "perturb-scgen"
+version = "0.1.0"
+description = "Streamable-HTTP MCP server for scGen cross-cell perturbation transfer"
+requires-python = ">=3.10"
+# scgen / scvi-tools / anndata / scipy / numpy come from the `scgen` conda env on gpu-zhouy1;
+# only the MCP + server stack is declared here.
+dependencies = [
+    "mcp>=1.2",
+    "uvicorn>=0.27",
+]
+
+[project.scripts]
+perturb-scgen = "perturb_scgen.server:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["perturb_scgen*"]
