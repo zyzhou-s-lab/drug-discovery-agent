@@ -85,13 +85,13 @@ export interface DdaConfig {
 }
 
 // Full settings sent to POST /config (wholesale overwrite — the body IS the new settings.json).
-// A blank field clears that override (reverts to the launch default).
+// Every field is required (an incomplete body is a 422); a blank string clears that override.
 export interface ConfigUpdate {
-    model?: string
-    base_url?: string
-    api_key?: string
-    concurrency?: number
-    max_claims?: number
+    model: string
+    base_url: string
+    api_key: string
+    concurrency: number
+    max_claims: number
 }
 
 export interface StageDetail {

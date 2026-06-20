@@ -212,23 +212,27 @@ async def config(request: Request) -> dict:
 
 
 class ConfigUpdate(BaseModel):
-    model: str | None = None
-    base_url: str | None = None
-    api_key: str | None = None
-    concurrency: int | None = None
-    max_claims: int | None = None
+    # All fields REQUIRED: this is a wholesale PUT, so the body must be the complete settings. A
+    # partial body is rejected (422) rather than silently clearing the omitted fields. To clear a
+    # field, send it empty ("") — that reverts the override to the launch default.
+    model: str
+    base_url: str
+    api_key: str
+    concurrency: int
+    max_claims: int
 
 
 @app.post("/api/config")
 async def update_config(update: ConfigUpdate, request: Request) -> dict:
     """Persist the model endpoint + deep-research knobs and apply them to the running process.
     Wholesale overwrite: the body IS the new complete settings.json (the form carries every field,
-    including the round-tripped key). A blank field clears that override (reverts to launch env)."""
+    including the round-tripped key). An incomplete body is a 422; a blank field clears that
+    override (reverts to launch env)."""
     if not _trusted_origin(request.headers.get("origin")):
         raise HTTPException(status_code=403, detail="cross-origin write blocked")
-    incoming = update.model_dump(exclude_none=True)
+    incoming = update.model_dump()   # complete body (every field required by the schema)
     for field, (lo, hi) in _UI_NUM_BOUNDS.items():
-        if field in incoming and not (lo <= int(incoming[field]) <= hi):
+        if not (lo <= int(incoming[field]) <= hi):
             raise HTTPException(status_code=422, detail=f"{field} must be between {lo} and {hi}")
     _save_ui_config(incoming)   # wholesale — replace the file with what the form sent
     _apply_ui_config(incoming)

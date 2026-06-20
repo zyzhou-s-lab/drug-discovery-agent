@@ -304,10 +304,11 @@ def test_config_endpoint(monkeypatch, tmp_path):
         monkeypatch.delenv(env, raising=False)          # restored at teardown despite _apply writes
         monkeypatch.setitem(api._LAUNCH_ENV, env, None)
     client = TestClient(api.app)
+    full = {"model": "mimo-v2.5-pro", "base_url": "https://api.mimo/anthropic",
+            "api_key": "sk-zzz", "concurrency": 8, "max_claims": 30}
 
     # valid save (no Origin header = trusted server-side/same-origin)
-    r = client.post("/api/config", json={"model": "mimo-v2.5-pro", "api_key": "sk-zzz",
-                                         "concurrency": 8, "max_claims": 30})
+    r = client.post("/api/config", json=full)
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["model"] == "mimo-v2.5-pro" and body["api_key_set"] is True
@@ -320,16 +321,19 @@ def test_config_endpoint(monkeypatch, tmp_path):
     assert client.get("/api/config").json()["api_key"] == "sk-zzz"
     assert client.get("/api/config", headers={"origin": "https://evil.com"}).status_code == 403
 
-    # wholesale overwrite: a save omitting api_key replaces the file → key cleared
-    r2 = client.post("/api/config", json={"model": "deepseek-chat", "concurrency": 6, "max_claims": 25})
+    # wholesale: a complete body with a blank api_key clears the key (reverts to launch env)
+    r2 = client.post("/api/config", json={**full, "api_key": ""})
     assert r2.json()["api_key_set"] is False
     assert "ANTHROPIC_AUTH_TOKEN" not in os.environ
 
-    # out-of-bounds → 422
-    assert client.post("/api/config", json={"concurrency": 99}).status_code == 422
+    # incomplete body rejected (wholesale requires every field → 422, no silent clear)
+    assert client.post("/api/config", json={"model": "x"}).status_code == 422
 
-    # cross-site write → 403; private-LAN origin → allowed
-    assert client.post("/api/config", json={"model": "x"},
+    # out-of-bounds → 422
+    assert client.post("/api/config", json={**full, "concurrency": 99}).status_code == 422
+
+    # cross-site write → 403; private-LAN origin → allowed (complete body, so it reaches the guard)
+    assert client.post("/api/config", json=full,
                        headers={"origin": "https://evil.com"}).status_code == 403
-    assert client.post("/api/config", json={"model": "y"},
+    assert client.post("/api/config", json=full,
                        headers={"origin": "http://10.202.2.224:5173"}).status_code == 200
