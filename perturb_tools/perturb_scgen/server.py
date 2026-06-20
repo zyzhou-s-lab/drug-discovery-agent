@@ -71,21 +71,32 @@ async def lifespan(_server):
 mcp = FastMCP("perturb-scgen", host=HOST, port=PORT, lifespan=lifespan)
 
 
+async def _train_and_cache(key, adata_train, adata_t_ctrl, var_names, valid_perts,
+                           max_epochs, batch_size, ctx):
+    """Train the VAE and store it under `key`, returning the cache value (model, adata_t_ctrl,
+    gene_names, valid_perts, train_sec). The model is stim_key-INDEPENDENT — one VAE per
+    (source,target,setup) — so scgen_transfer and scgen_evaluate key it identically and share the
+    same warm model; it is only ever trained once per setup."""
+    if ctx:
+        await ctx.info(f"training scGen ({max_epochs} epochs)…")
+    model, secs = await asyncio.to_thread(core.train_model, adata_train, max_epochs, batch_size)
+    value = (model, adata_t_ctrl, var_names, valid_perts, secs)
+    cache.put(key, value)
+    return value
+
+
 async def _get_or_train(source_h5ad, target_h5ad, source_name, target_name,
                         max_epochs, batch_size, ctx):
-    """Return (cached_value, trained_bool). cached_value = (model, adata_t_ctrl, gene_names,
-    valid_perts, train_sec). Trains (off the event loop) on a miss, populating the LRU."""
+    """For scgen_transfer: a cache hit skips BOTH load+prep and training. Returns (value, trained),
+    value = (model, adata_t_ctrl, gene_names, valid_perts, train_sec)."""
     key = model_key(source_h5ad, target_h5ad, source_name, target_name, max_epochs, batch_size)
     hit = cache.get(key)
     if hit is not None:
         return hit, False
-    if ctx:
-        await ctx.info(f"training scGen ({max_epochs} epochs) on {source_name}->{target_name}…")
     adata_s, adata_t, adata_t_ctrl, adata_train, valid_perts = await asyncio.to_thread(
         core.load_and_prep, source_h5ad, target_h5ad, source_name, target_name)
-    model, secs = await asyncio.to_thread(core.train_model, adata_train, max_epochs, batch_size)
-    value = (model, adata_t_ctrl, np.asarray(adata_t.var_names), valid_perts, secs)
-    cache.put(key, value)
+    value = await _train_and_cache(key, adata_train, adata_t_ctrl, np.asarray(adata_t.var_names),
+                                   valid_perts, max_epochs, batch_size, ctx)
     return value, True
 
 
@@ -168,7 +179,18 @@ async def scgen_evaluate(
     if stim_key not in set(adata_t.obs["perturbation"].unique()):
         return [json.dumps({"error": f"target has no observed '{stim_key}' cells — no ground "
                                      "truth to evaluate against; use scgen_transfer for prediction"})]
-    model, train_sec = await asyncio.to_thread(core.train_model, adata_train, max_epochs, batch_size)
+    # Reuse the warm VAE if scgen_transfer (or a prior eval) already trained this setup — the model
+    # is stim-independent, so retraining here just to evaluate wastes a full GPU training run.
+    key = model_key(source_h5ad, target_h5ad, source_name, target_name, max_epochs, batch_size)
+    hit = cache.get(key)
+    if hit is not None:
+        model, _ctrl, _genes, _perts, train_sec = hit
+        cache_hit = True
+    else:
+        model, _ctrl, _genes, _perts, train_sec = await _train_and_cache(
+            key, adata_train, adata_t_ctrl, np.asarray(adata_t.var_names),
+            valid_perts, max_epochs, batch_size, ctx)
+        cache_hit = False
     pred_adata = await asyncio.to_thread(
         core.predict_full, model, adata_t_ctrl, stim_key, source_name, ctrl_key)
     delta = await asyncio.to_thread(core.delta_from_pred, pred_adata, adata_t_ctrl)
@@ -186,7 +208,8 @@ async def scgen_evaluate(
 
     metrics = {"method": "scgen_evaluate", "stim_key": stim_key,
                "pcc_cross": round(pcc, 4), "r2_cross": round(r2, 4),
-               "n_genes": int(len(true_delta)), "train_sec": train_sec, "plots": figs}
+               "n_genes": int(len(true_delta)), "train_sec": train_sec,
+               "cache_hit": cache_hit, "plots": figs}
     return [json.dumps(metrics, ensure_ascii=False), *[Image(path=p) for p in figs]]
 
 
