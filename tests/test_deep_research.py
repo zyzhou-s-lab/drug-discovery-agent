@@ -265,22 +265,13 @@ def test_budget_from_env_parses_cap_and_rejects_bad(monkeypatch):
     assert _budget_from_env() is None  # non-positive → no cap
 
 
-def test_ui_config_merge_and_apply(monkeypatch):
-    """Settings overrides: blank api_key keeps the existing key, blank model/base_url clears the
-    override, and apply() projects onto os.environ — reverting to the launch default when cleared."""
+def test_ui_config_apply(monkeypatch):
+    """_apply_ui_config projects the stored settings onto os.environ, reverting to the launch
+    default when a field is cleared (wholesale overwrite means the body is the whole truth)."""
     import os
 
     pytest.importorskip("fastapi")
     from dd_agent import api
-
-    merged = api._merge_ui_update(
-        {"model": "old", "api_key": "secret", "concurrency": 6},
-        {"model": "", "api_key": "", "base_url": "https://x/anthropic", "concurrency": 10},
-    )
-    assert "model" not in merged            # blank model → override cleared
-    assert merged["api_key"] == "secret"    # blank api_key → existing kept
-    assert merged["base_url"] == "https://x/anthropic"
-    assert merged["concurrency"] == 10
 
     # delenv first so monkeypatch restores these at teardown even though _apply writes os.environ
     monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
@@ -298,8 +289,8 @@ def test_ui_config_merge_and_apply(monkeypatch):
 
 
 def test_config_endpoint(monkeypatch, tmp_path):
-    """POST/GET /api/config end-to-end via TestClient: persists + applies, never echoes the key,
-    rejects out-of-bounds (422) and cross-origin writes (403), allows private-LAN origins."""
+    """POST/GET /api/config end-to-end via TestClient: wholesale overwrite + key round-trip (gated
+    by the CSRF guard), 422 out-of-bounds, 403 cross-origin read/write, private-LAN allowed."""
     import os
 
     pytest.importorskip("httpx")  # fastapi TestClient transport
@@ -308,7 +299,7 @@ def test_config_endpoint(monkeypatch, tmp_path):
 
     from dd_agent import api
 
-    monkeypatch.setattr(api, "UI_CONFIG_PATH", str(tmp_path / "ui-config.json"))
+    monkeypatch.setattr(api, "SETTINGS_PATH", str(tmp_path / "settings.json"))
     for env in ("ANTHROPIC_MODEL", "ANTHROPIC_AUTH_TOKEN", "DD_DR_CONC", "DD_DR_MAX_CLAIMS"):
         monkeypatch.delenv(env, raising=False)          # restored at teardown despite _apply writes
         monkeypatch.setitem(api._LAUNCH_ENV, env, None)
@@ -320,10 +311,19 @@ def test_config_endpoint(monkeypatch, tmp_path):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["model"] == "mimo-v2.5-pro" and body["api_key_set"] is True
-    assert "api_key" not in body                         # key NEVER echoed
+    assert body["api_key"] == "sk-zzz"                   # round-tripped so the form prefills
     assert body["concurrency"] == 8 and body["max_claims"] == 30
-    assert (tmp_path / "ui-config.json").exists()
+    assert (tmp_path / "settings.json").exists()
     assert os.environ["ANTHROPIC_AUTH_TOKEN"] == "sk-zzz"  # applied to env
+
+    # GET prefill returns the key to a trusted origin, but rejects a cross-origin read
+    assert client.get("/api/config").json()["api_key"] == "sk-zzz"
+    assert client.get("/api/config", headers={"origin": "https://evil.com"}).status_code == 403
+
+    # wholesale overwrite: a save omitting api_key replaces the file → key cleared
+    r2 = client.post("/api/config", json={"model": "deepseek-chat", "concurrency": 6, "max_claims": 25})
+    assert r2.json()["api_key_set"] is False
+    assert "ANTHROPIC_AUTH_TOKEN" not in os.environ
 
     # out-of-bounds → 422
     assert client.post("/api/config", json={"concurrency": 99}).status_code == 422

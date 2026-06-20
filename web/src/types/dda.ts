@@ -77,14 +77,15 @@ export interface DdaConfig {
     model: string | null
     base_url: string | null
     base_url_set: boolean
+    api_key: string // round-tripped so the form prefills; gated by the same CSRF guard as writes
     api_key_set: boolean
     concurrency: number
     max_claims: number
     real_available: boolean
 }
 
-// Partial update sent to POST /config. Omit a field to leave it unchanged; blank api_key
-// keeps the existing key; blank model/base_url reverts to the launch default.
+// Full settings sent to POST /config (wholesale overwrite — the body IS the new settings.json).
+// A blank field clears that override (reverts to the launch default).
 export interface ConfigUpdate {
     model?: string
     base_url?: string

@@ -79,7 +79,7 @@ export function Settings(props: { open: boolean; onOpenChange: (v: boolean) => v
         setConfig(c)
         setModel(c.model ?? '')
         setBaseUrl(c.base_url ?? '')
-        setApiKey('') // never echo the key
+        setApiKey(c.api_key ?? '') // round-tripped: prefill so wholesale save keeps it
         setConcurrency(String(c.concurrency))
         setMaxClaims(String(c.max_claims))
     }
@@ -104,7 +104,7 @@ export function Settings(props: { open: boolean; onOpenChange: (v: boolean) => v
             .saveConfig({
                 model,
                 base_url: baseUrl,
-                api_key: apiKey, // blank = keep existing
+                api_key: apiKey, // full value (prefilled then maybe edited); wholesale overwrite
                 concurrency: c,
                 max_claims: m,
             })
@@ -170,14 +170,14 @@ export function Settings(props: { open: boolean; onOpenChange: (v: boolean) => v
                         </Field>
                         <Field
                             label="API Key"
-                            hint={config?.api_key_set ? '已设置 · 留空保持不变' : '未设置'}
+                            hint={config?.api_key_set ? '已设置 · 清空并保存即移除' : '未设置'}
                         >
                             <input
                                 className={inputCls}
                                 type="password"
                                 value={apiKey}
                                 onChange={(e) => setApiKey(e.target.value)}
-                                placeholder={config?.api_key_set ? '••••••••(留空保持不变)' : 'sk-…'}
+                                placeholder="sk-…"
                                 autoComplete="off"
                                 spellCheck={false}
                             />
