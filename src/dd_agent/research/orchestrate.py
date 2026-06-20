@@ -121,14 +121,38 @@ async def run_agent(phase, prompt, submit_name, schema, extra_mcp, budget, sem,
     # are needed.
     import os
     extra_opts: dict = {}
+    env_over: dict = {}
+
     dr_model = os.environ.get("DD_DR_MODEL")
     if dr_model:
-        env_over = {"ANTHROPIC_MODEL": dr_model}
+        env_over["ANTHROPIC_MODEL"] = dr_model
         if os.environ.get("DD_DR_BASE_URL"):
             env_over["ANTHROPIC_BASE_URL"] = os.environ["DD_DR_BASE_URL"]
         if os.environ.get("DD_DR_AUTH_TOKEN"):
             env_over["ANTHROPIC_AUTH_TOKEN"] = os.environ["DD_DR_AUTH_TOKEN"]
         extra_opts["model"] = dr_model
+
+    # Route the agent's web traffic (WebFetch/WebSearch + the claude.ai safety check) through the
+    # in-process HTTP→SOCKS5 bridge (api startup) when DD_AGENT_PROXY_SOCKS is set. The model
+    # endpoint (ANTHROPIC_BASE_URL host) is auto-added to no_proxy so model calls stay direct.
+    if os.environ.get("DD_AGENT_PROXY_SOCKS"):
+        purl = "http://127.0.0.1:" + os.environ.get("DD_AGENT_PROXY_PORT", "7899")
+        no_parts = ["localhost", "127.0.0.1", "::1"]
+        base = env_over.get("ANTHROPIC_BASE_URL") or os.environ.get("ANTHROPIC_BASE_URL", "")
+        if base:
+            from urllib.parse import urlsplit
+            h = urlsplit(base).hostname
+            if h:
+                no_parts.append(h)
+        extra = os.environ.get("DD_AGENT_NO_PROXY", "")
+        if extra:
+            no_parts.extend(p.strip() for p in extra.split(",") if p.strip())
+        noproxy = ",".join(no_parts)
+        env_over.update({"http_proxy": purl, "https_proxy": purl,
+                         "HTTP_PROXY": purl, "HTTPS_PROXY": purl,
+                         "no_proxy": noproxy, "NO_PROXY": noproxy})
+
+    if env_over:
         extra_opts["env"] = env_over
 
     opts = ClaudeAgentOptions(
