@@ -33,7 +33,7 @@ def test_nominate_ranks_and_enriches(monkeypatch):
     assert cfh.scores["association"] == 0.80 and cfh.scores["genetic"] == 0.90
     assert cfh.scores["genetic_association"] == 0.90
     assert cfh.modality == "small_molecule" and cfh.scores["tractability"] == 1.0  # approved -> 1.0
-    assert cfh.scores["constraint"] == 2.0                       # LOEUF bin
+    assert cfh.scores["lof_upper_bin"] == 2.0                     # LOEUF bin (raw decile, distinct key)
     assert any(e.kind == "safety" for e in cfh.evidence)         # liabilities -> safety evidence
     assert any(e.kind == "genetic" and e.source == "OpenTargets" for e in cfh.evidence)
     assert cands[1].modality is None and "tractability" not in cands[1].scores  # FOO unenriched
@@ -62,3 +62,18 @@ def test_nominate_profile_failure_keeps_candidate(monkeypatch):
 
     cands = nom.nominate("EFO_X", top_n=2, enrich=True)          # must not raise
     assert [c.symbol for c in cands] == ["CFH", "FOO"]           # candidates survive enrich failure
+
+
+def test_tractability_score_tiers():
+    """_tractability_score maps SM tractability labels to (modality, 0-1 score, note), highest tier
+    wins, and degrades cleanly on empty / non-string labels."""
+    assert nom._tractability_score({"sm_tractability": ["Approved Drug", "Advanced Clinical"]}) == (
+        "small_molecule", 1.0, "approved SM")           # approved beats clinical
+    assert nom._tractability_score({"sm_tractability": ["Advanced Clinical"]}) == (
+        "small_molecule", 0.7, "clinical SM")
+    assert nom._tractability_score({"sm_tractability": ["Discovery Precedence"]}) == (
+        "small_molecule", 0.4, "SM-tractable")          # tractable but not clinical/approved
+    assert nom._tractability_score({}) == (None, 0.0, "")           # no labels
+    assert nom._tractability_score({"sm_tractability": []}) == (None, 0.0, "")
+    assert nom._tractability_score({"sm_tractability": [None, 1]}) == (  # non-string labels coerced
+        "small_molecule", 0.4, "SM-tractable")

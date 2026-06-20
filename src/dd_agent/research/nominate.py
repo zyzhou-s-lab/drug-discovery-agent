@@ -12,8 +12,12 @@ modality, gnomAD LoF constraint, and safety liabilities. Pure stdlib + OpenTarge
 """
 from __future__ import annotations
 
+import logging
+
 from ..schemas import Evidence, TargetCandidate
 from ..tools import opentargets as ot
+
+_log = logging.getLogger(__name__)
 
 
 def _tractability_score(profile: dict) -> tuple[str | None, float, str]:
@@ -56,7 +60,8 @@ def nominate(efo_id: str, top_n: int = 20, sort_by: str = "genetic_association",
         if enrich and r.get("symbol"):
             try:
                 p = ot.target_profile(r["symbol"])
-            except Exception:  # noqa: BLE001 — enrichment is best-effort, never drop a candidate
+            except Exception as exc:  # noqa: BLE001 — enrichment is best-effort, never drop a candidate
+                _log.debug("target_profile(%s) failed: %s", r.get("symbol"), exc)
                 p = {}
             if p:
                 modality, tract, note = _tractability_score(p)
@@ -65,11 +70,12 @@ def nominate(efo_id: str, top_n: int = 20, sort_by: str = "genetic_association",
                     rationale.append(note)
                 lof = (p.get("genetic_constraint") or {}).get("lof") or {}
                 if lof.get("upperBin") is not None:
-                    # gnomAD LOEUF bin: low = LoF-intolerant = dosage-sensitive (caution).
-                    scores["constraint"] = float(lof["upperBin"])
+                    # gnomAD LOEUF bin (raw decile, NOT a 0-1 score): low = LoF-intolerant =
+                    # dosage-sensitive (caution). Distinct key so downstream won't read it as 0-1.
+                    scores["lof_upper_bin"] = float(lof["upperBin"])
                 liabilities = p.get("safety_liabilities") or []
                 if liabilities:
-                    scores["safety_flag"] = float(len(liabilities))
+                    scores["safety_count"] = float(len(liabilities))
                     evidence.append(Evidence(
                         kind="safety", source="OpenTargets",
                         detail="liabilities: " + ", ".join(str(x) for x in liabilities[:3]),

@@ -34,7 +34,7 @@ class TargetCandidate(BaseModel):
     name: str | None = None
     modality: str | None = None   # small_molecule | peptide | antibody | ...
     evidence: list[Evidence] = Field(default_factory=list)
-    scores: dict[str, float] = Field(default_factory=dict)  # association/tractability/novelty/safety_flag
+    scores: dict[str, float] = Field(default_factory=dict)  # association/tractability/lof_upper_bin/safety_count
     rationale: str = ""
 
 
