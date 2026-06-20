@@ -155,6 +155,26 @@ app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
 
+
+@app.on_event("startup")
+async def _start_agent_proxy_bridge():
+    """Opt-in: start the in-process HTTP→SOCKS5 bridge so deep-research agents' web traffic
+    (WebFetch/WebSearch + the claude.ai safety check) routes through a stable upstream SOCKS5
+    (e.g. the tailscale userspace socks at 127.0.0.1:1055). Enable with DD_AGENT_PROXY_SOCKS=
+    host:port; run_agent then injects http(s)_proxy into the spawned agents. Unset = unchanged."""
+    socks = os.environ.get("DD_AGENT_PROXY_SOCKS")
+    if not socks:
+        return
+    from .proxy_bridge import start_bridge
+    host, _, port = socks.partition(":")
+    bport = int(os.environ.get("DD_AGENT_PROXY_PORT", "7899"))
+    try:
+        app.state.proxy_bridge = await start_bridge(
+            "127.0.0.1", bport, host or "127.0.0.1", int(port or 1055))
+        _log.info("agent proxy bridge up: 127.0.0.1:%d -> socks5://%s", bport, socks)
+    except Exception as e:  # noqa: BLE001 — a bridge failure must not stop the server
+        _log.warning("agent proxy bridge failed to start: %r", e)
+
 _index: Index | None = None
 
 
