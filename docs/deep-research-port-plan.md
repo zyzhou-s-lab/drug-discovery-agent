@@ -198,6 +198,8 @@ SCOPE_SCHEMA(原样):`{question, summary, angles[{label, query, rationale?}]}`,a
   - **M3 必配**:✅ `DD_DR_BUDGET` 熔断(`api._budget_from_env` → `Budget(total_tokens)` 传入 `research()`,跳闸走 `exhausted()`→salvage;未设=无上限)+ `DD_DR_CONC` 并发上限(`research()` 默认 6)(成本锚点见 §2.5,真实 3.7M/病)。
 - **M4**:dry AMD 端到端 + token 报告,校准推荐 `DD_DR_BUDGET`;评估简报质量/成本。
 - **(后续)nomination / validation = 不同工作性质的独立阶段(见 §10)**:nomination = OpenTargets 结构化查询 + 排序(确定性,非对抗 verify)+ 在候选上补文献证据;validation = 数据集下载 + 计算(compute job,非文本 agent)。
+  - **nomination M1**:✅ 确定性核心 `research/nominate.py`(`nominate(efo_id) → ranked TargetCandidate[]`):OT `disease_associated_targets` 排序 + 逐候选 `target_profile` 富集(SM 可成药→modality/tractability、gnomAD LoF→constraint、安全 liabilities→safety evidence)。selfcheck:dry-AMD 按 genetic_association 排序,补体 CFH/C3 进 top-15;3 个离线单测(monkeypatch OT)。**未做**:M2 候选上的文献证据挖掘(复用 research 引擎)+ 接成 stage/API。
+  - **validation**:工具基建已就位(`perturb_tools/` scGen,见该目录 README),阶段本身待建。
 
 ---
 
