@@ -21,6 +21,10 @@ import numpy as np
 from mcp.server.fastmcp import Context, FastMCP, Image
 from pydantic import Field
 
+from . import scgen_core as core
+from .model_cache import ModelCache, model_key
+from .profile import SCGEN_PROFILE
+
 # Per-parameter descriptions — surfaced in the MCP inputSchema so the agent passes args correctly.
 SourceH5ad = Annotated[str, Field(description=
     "Path to the SOURCE .h5ad on gpu-zhouy1 — the accessible cell type where the perturbation was "
@@ -36,13 +40,12 @@ CtrlKey = Annotated[str, Field(description="The control-condition value in obs['
 MaxEpochs = Annotated[int, Field(description="scGen VAE training epochs (model is cached warm after the first train).")]
 BatchSize = Annotated[int, Field(description="Training batch size.")]
 
-from . import scgen_core as core
-from .model_cache import ModelCache, model_key
-from .profile import SCGEN_PROFILE
-
 IDLE_TIMEOUT = int(os.environ.get("PERTURB_IDLE_TIMEOUT", "900"))   # 15 min
 LRU_CAPACITY = int(os.environ.get("PERTURB_LRU", "3"))
 PORT = int(os.environ.get("PERTURB_PORT", "9101"))
+# Safe default: loopback only. For the documented Tailscale laptop access, set PERTURB_HOST=0.0.0.0
+# (or the tailscale IP) on the gpu — opt-in rather than binding every interface by default.
+HOST = os.environ.get("PERTURB_HOST", "127.0.0.1")
 
 cache = ModelCache(capacity=LRU_CAPACITY, idle_timeout=IDLE_TIMEOUT)
 
@@ -65,7 +68,7 @@ async def lifespan(_server):
         task.cancel()
 
 
-mcp = FastMCP("perturb-scgen", host="0.0.0.0", port=PORT, lifespan=lifespan)
+mcp = FastMCP("perturb-scgen", host=HOST, port=PORT, lifespan=lifespan)
 
 
 async def _get_or_train(source_h5ad, target_h5ad, source_name, target_name,

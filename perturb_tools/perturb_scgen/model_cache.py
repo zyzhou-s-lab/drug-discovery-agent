@@ -16,7 +16,7 @@ import time
 
 def model_key(source, target, source_name, target_name, epochs, batch_size) -> str:
     raw = f"{source}|{target}|{source_name}|{target_name}|{epochs}|{batch_size}"
-    return hashlib.sha1(raw.encode()).hexdigest()[:16]
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
 class ModelCache:
