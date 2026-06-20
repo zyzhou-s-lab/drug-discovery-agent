@@ -53,9 +53,10 @@ _log = logging.getLogger(__name__)
 # knobs WITHOUT editing env / restarting. It is applied by writing into os.environ, so every
 # existing reader (scope/research/judge ANTHROPIC_*, DD_DR_CONC, DD_DR_MAX_CLAIMS) picks it up
 # unchanged. Single-deployment scope: the override is process-wide and takes effect on the next
-# run. The api key is stored server-side (chmod 600) and is NEVER returned by the API.
-UI_CONFIG_PATH = os.environ.get(
-    "DD_UI_CONFIG", os.path.join(os.path.dirname(DB_PATH) or ".", "ui-config.json")
+# run. settings.json (chmod 600) holds the api key; the form prefills from it, so GET /config
+# returns the key — but only to a trusted origin (same CSRF guard as writes), not to any site.
+SETTINGS_PATH = os.environ.get(
+    "DD_SETTINGS_FILE", os.path.join(os.path.dirname(DB_PATH) or ".", "settings.json")
 )
 
 # UI field -> the env var it drives.
@@ -76,7 +77,7 @@ _UI_NUM_BOUNDS = {"concurrency": (1, 32), "max_claims": (1, 80)}
 
 def _load_ui_config() -> dict:
     try:
-        with open(UI_CONFIG_PATH, encoding="utf-8") as fh:
+        with open(SETTINGS_PATH, encoding="utf-8") as fh:
             data = json.load(fh)
         return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
@@ -84,13 +85,13 @@ def _load_ui_config() -> dict:
 
 
 def _save_ui_config(cfg: dict) -> None:
-    os.makedirs(os.path.dirname(UI_CONFIG_PATH) or ".", exist_ok=True)
-    tmp = UI_CONFIG_PATH + ".tmp"
+    os.makedirs(os.path.dirname(SETTINGS_PATH) or ".", exist_ok=True)
+    tmp = SETTINGS_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(cfg, fh, ensure_ascii=False, indent=2)
-    os.replace(tmp, UI_CONFIG_PATH)
+    os.replace(tmp, SETTINGS_PATH)
     try:
-        os.chmod(UI_CONFIG_PATH, 0o600)  # holds the api key
+        os.chmod(SETTINGS_PATH, 0o600)  # holds the api key
     except OSError:
         pass
 
@@ -105,23 +106,6 @@ def _apply_ui_config(cfg: dict) -> None:
             os.environ.pop(env, None)
         else:
             os.environ[env] = eff
-
-
-def _merge_ui_update(store: dict, update: dict) -> dict:
-    """Merge a partial update into the stored config. Blank api_key = keep existing (the form
-    never echoes the key, so a blank field must not wipe it); blank model/base_url = clear the
-    override (revert to launch default)."""
-    out = dict(store)
-    for k, v in update.items():
-        if v is None:
-            continue
-        if k == "api_key" and v == "":
-            continue
-        if k in ("model", "base_url") and v == "":
-            out.pop(k, None)
-            continue
-        out[k] = v
-    return out
 
 
 def _trusted_origin(origin: str | None) -> bool:
@@ -225,46 +209,54 @@ async def pipeline() -> dict:
 
 
 @app.get("/api/config")
-async def config() -> dict:
-    """Backing data for the settings page (model, whether real runs are available)."""
+async def config(request: Request) -> dict:
+    """Backing data for the settings page (effective model endpoint + knobs). Returns the api_key
+    so the form prefills (wholesale-overwrite save needs it round-tripped) — but the same CSRF
+    guard as writes gates this read, so a third-party page can't fetch the key cross-origin."""
+    if not _trusted_origin(request.headers.get("origin")):
+        raise HTTPException(status_code=403, detail="cross-origin read blocked")
     import importlib.util as _u
 
     has_sdk = _u.find_spec("claude_agent_sdk") is not None
-    has_key = bool(os.environ.get("ANTHROPIC_AUTH_TOKEN") or os.environ.get("ANTHROPIC_API_KEY"))
+    key = os.environ.get("ANTHROPIC_AUTH_TOKEN") or os.environ.get("ANTHROPIC_API_KEY") or ""
     return {
         "model": os.environ.get("ANTHROPIC_MODEL"),
         "base_url": os.environ.get("ANTHROPIC_BASE_URL"),
         "base_url_set": bool(os.environ.get("ANTHROPIC_BASE_URL")),
-        "api_key_set": has_key,
+        "api_key": key,
+        "api_key_set": bool(key),
         "concurrency": int(os.environ.get("DD_DR_CONC", "6")),
         "max_claims": int(os.environ.get("DD_DR_MAX_CLAIMS", "25")),
-        "real_available": has_sdk and has_key,
+        "real_available": has_sdk and bool(key),
     }
 
 
 class ConfigUpdate(BaseModel):
-    model: str | None = None
-    base_url: str | None = None
-    api_key: str | None = None
-    concurrency: int | None = None
-    max_claims: int | None = None
+    # All fields REQUIRED: this is a wholesale PUT, so the body must be the complete settings. A
+    # partial body is rejected (422) rather than silently clearing the omitted fields. To clear a
+    # field, send it empty ("") — that reverts the override to the launch default.
+    model: str
+    base_url: str
+    api_key: str
+    concurrency: int
+    max_claims: int
 
 
 @app.post("/api/config")
 async def update_config(update: ConfigUpdate, request: Request) -> dict:
-    """Persist UI overrides for the model endpoint + deep-research knobs and apply them to the
-    running process. Returns the same shape as GET /config (effective values; key never echoed).
-    Only provided fields change; a blank api_key keeps the existing one."""
+    """Persist the model endpoint + deep-research knobs and apply them to the running process.
+    Wholesale overwrite: the body IS the new complete settings.json (the form carries every field,
+    including the round-tripped key). An incomplete body is a 422; a blank field clears that
+    override (reverts to launch env)."""
     if not _trusted_origin(request.headers.get("origin")):
         raise HTTPException(status_code=403, detail="cross-origin write blocked")
-    incoming = update.model_dump(exclude_none=True)
+    incoming = update.model_dump()   # complete body (every field required by the schema)
     for field, (lo, hi) in _UI_NUM_BOUNDS.items():
-        if field in incoming and not (lo <= int(incoming[field]) <= hi):
+        if not (lo <= int(incoming[field]) <= hi):
             raise HTTPException(status_code=422, detail=f"{field} must be between {lo} and {hi}")
-    store = _merge_ui_update(_load_ui_config(), incoming)
-    _save_ui_config(store)
-    _apply_ui_config(store)
-    return await config()
+    _save_ui_config(incoming)   # wholesale — replace the file with what the form sent
+    _apply_ui_config(incoming)
+    return await config(request)
 
 
 @app.get("/api/campaigns")
