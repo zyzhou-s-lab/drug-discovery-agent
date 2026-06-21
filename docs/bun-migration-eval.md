@@ -22,6 +22,17 @@
 - **越早迁越便宜**(后端只会变大),但**必须分阶段 + 对拍**,不能 big-bang。
 - **建议**:先跑 **Phase 0 spike**(1–2 天,验证 TS Agent SDK 的强制结构化输出 + 自定义 base_url(mimo)+ in-process MCP),它要么给整件事去风险、要么早早杀掉。**独立地**先上 `pydantic→TS codegen` 拿到类型同步收益(零重写)。spike 后再定全量迁不迁。
 
+## 2b. Phase 0 实测结果 — **GO**(2026-06-21)
+
+跑了 §7 Phase 0 spike(`bun` + `@anthropic-ai/claude-agent-sdk@0.3.185`),把 §6.1 的最高风险坐实:
+
+- **离线 parity ✅**:TS SDK Options 全有我们依赖的原语 —— `createSdkMcpServer`/`tool`/`query` + `model` / `mcpServers`(in-proc MCP)/ `settingSources:[]` / **`env` 逐 query 注入(base_url/token/proxy)** / `permissionMode:bypassPermissions`(+ `allowDangerouslySkipPermissions`)。
+- **在线实测 ✅**:对**非 Anthropic 后端**(Kimi,`kimi-for-coding @ api.kimi.com/coding`,自定义 base_url)跑一次 query,模型**正确调用了 forced `submit_result`**,结构化参数有效(`{answer:"Paris",confidence:"high"}`),`is_error:false`,7.9s。
+
+**含义**:整个迁移最大的未知(当年 DeepSeek 上 `output_format` 翻车、被迫用 `submit_*` 的那个行为面)在 TS 上**复刻成功**。**GO/NO-GO 闸 = GO**,迁移技术上有底。剩下的是工程量/时机,不是可行性。
+
+> spike 是一次性脚本(`/tmp/dda-bun-spike/spike.ts`),GO 后可作为 Phase 1+ 的种子。
+
 ## 3. 现状盘点(逐模块分类)
 
 后端 ≈ **3923 行 / 18 模块**。每个模块的去向:
