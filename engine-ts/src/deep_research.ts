@@ -19,6 +19,22 @@ export interface Angle {
   rationale?: string;
 }
 
+/** The shape FETCH_PROMPT reads from a search result. */
+export interface FetchSource {
+  url?: string;
+  doi?: string | null;
+  title?: string | null;
+  source_type?: string;
+}
+
+/** The shape VERIFY_PROMPT / synthBlock read from an extracted claim. */
+export interface VerifyClaim {
+  claim: string;
+  quote?: string;
+  sourceUrl?: string;
+  sourceQuality?: string;
+}
+
 export function SEARCH_PROMPT(question: string, angle: Angle): string {
   return (
     "## Source Scout: " + angle.label + "\n\n" +
@@ -48,7 +64,7 @@ export function SEARCH_PROMPT(question: string, angle: Angle): string {
   );
 }
 
-export function FETCH_PROMPT(question: string, source: any, angle: string): string {
+export function FETCH_PROMPT(question: string, source: FetchSource, angle: string): string {
   const st = source.source_type ?? "web";
   let retrieve: string;
   if (st === "paper") {
@@ -84,7 +100,7 @@ export function FETCH_PROMPT(question: string, source: any, angle: string): stri
   );
 }
 
-export function VERIFY_PROMPT(question: string, claim: any, v: number): string {
+export function VERIFY_PROMPT(question: string, claim: VerifyClaim, v: number): string {
   return (
     "## Adversarial Claim Verifier (voter " + (v + 1) + "/" + VOTES_PER_CLAIM + ")\n\n" +
     "Be SKEPTICAL. Try to REFUTE this claim. ≥" + REFUTATIONS_REQUIRED + "/" + VOTES_PER_CLAIM + " refutations kill it.\n\n" +
@@ -185,6 +201,9 @@ export function SYNTH_PROMPT(question: string, confirmed: any[], killed: any[], 
 /** From the sources backing CONFIRMED claims, build one unified, sequentially-numbered reference
  * list (papers get an APA7 string via citeByDoi). */
 export async function bibliography(confirmed: any[], allSources: any[]): Promise<any[]> {
+  // One key per confirmed claim (doi, else normalized URL) — faithful 1:1 of the Python. Safe
+  // because fetchOne propagates the SAME doi+url from the source onto its claims, so a confirmed
+  // claim's key always equals its source's key (no silent drop in practice).
   const cited = new Set<string>();
   for (const c of confirmed) {
     const doi = (c.doi ?? "").trim().toLowerCase();
