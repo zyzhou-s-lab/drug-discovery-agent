@@ -17,11 +17,20 @@ function setup() {
   return { idx, art, app: createApp(idx, art) };
 }
 
-test("GET /api/health", async () => {
+test("GET /api/health → {ok} only (no internal paths leaked)", async () => {
   const { app } = setup();
   const r = await app.request("/api/health");
   expect(r.status).toBe(200);
-  expect((await J(r)).ok).toBe(true);
+  const j = await J(r);
+  expect(j.ok).toBe(true);
+  expect(j.db).toBeUndefined();
+  expect(j.artifacts).toBeUndefined();
+});
+
+test("path-traversal in campaign/stage is rejected (400)", async () => {
+  const { app } = setup();
+  expect((await app.request("/api/campaigns/" + encodeURIComponent("../etc") + "/report")).status).toBe(400);
+  expect((await app.request("/api/campaigns/c1/stages/" + encodeURIComponent("../../passwd") + "/events")).status).toBe(400);
 });
 
 test("GET /api/pipeline lists the disease-overview stage", async () => {

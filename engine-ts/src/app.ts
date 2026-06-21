@@ -31,6 +31,12 @@ function readJson(path: string): any | null {
   }
 }
 
+/** Reject path-traversal in a URL segment used to build a filesystem path (campaign / stage):
+ * a decoded `..`, `/` or `\` must never reach join(). A real campaign/stage id has none. */
+function safeSegment(s: string): boolean {
+  return s.length > 0 && !s.includes("..") && !s.includes("/") && !s.includes("\\");
+}
+
 /** Join recorded stage_state onto the canonical PIPELINE order (not-yet-started stages → queued). */
 export function campaignView(idx: Index, campaign: string) {
   const recorded = new Map<string, { status: string; attempts: number }>();
@@ -49,7 +55,7 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS): Hono 
   const index = idx ?? new Index(DB_PATH, ARTIFACTS);
   const app = new Hono();
 
-  app.get("/api/health", (c) => c.json({ ok: true, db: DB_PATH, artifacts: artifactsRoot }));
+  app.get("/api/health", (c) => c.json({ ok: true })); // don't leak internal db/artifacts paths
 
   app.get("/api/pipeline", (c) => c.json({ stages: PIPELINE }));
 
@@ -61,14 +67,19 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS): Hono 
   // the run registry — added in the run-trigger slice.)
   app.get("/api/campaigns/:campaign/report", (c) => {
     const campaign = c.req.param("campaign");
+    if (!safeSegment(campaign)) return c.json({ error: "invalid campaign" }, 400);
     const base = join(artifactsRoot, campaign);
     const status = readJson(join(base, "search_status.json")) ?? { state: "none" };
     const report = readJson(join(base, "report.json"));
     return c.json({ campaign, status, report });
   });
 
-  app.get("/api/campaigns/:campaign/stages/:stage/events", (c) =>
-    c.json({ events: readStageEvents(artifactsRoot, c.req.param("campaign"), c.req.param("stage")) }));
+  app.get("/api/campaigns/:campaign/stages/:stage/events", (c) => {
+    const campaign = c.req.param("campaign");
+    const stage = c.req.param("stage");
+    if (!safeSegment(campaign) || !safeSegment(stage)) return c.json({ error: "invalid path" }, 400);
+    return c.json({ events: readStageEvents(artifactsRoot, campaign, stage) });
+  });
 
   return app;
 }
