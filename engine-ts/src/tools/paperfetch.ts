@@ -134,6 +134,7 @@ async function httpJson(url: string, headers?: Record<string, string>): Promise<
   } catch (e) {
     throw new Error(`request failed (${url.split("?")[0]}): ${(e as Error).message}`);
   }
+  if (!resp.ok) throw new Error(`HTTP ${resp.status} (${url.split("?")[0]})`); // parity: urlopen raises on non-2xx
   return resp.json();
 }
 
@@ -156,9 +157,12 @@ async function s2Search(query: string, size: number): Promise<Paper[]> {
 export async function searchLiteratureMulti(query: string, size = 10): Promise<Paper[]> {
   size = Math.max(1, Math.min(size, 50));
   let oa: Paper[] = [], s2: Paper[] = [];
-  try { oa = await openalexSearch(query, size); } catch { /* one source may fail */ }
-  try { s2 = await s2Search(query, size); } catch { /* one source may fail */ }
-  if (!oa.length && !s2.length) throw new Error("both OpenAlex and Semantic Scholar requests failed");
+  let oaErr: unknown, s2Err: unknown;
+  try { oa = await openalexSearch(query, size); } catch (e) { oaErr = e; } // tolerate one source failing
+  try { s2 = await s2Search(query, size); } catch (e) { s2Err = e; }
+  if (!oa.length && !s2.length) {
+    throw new Error(`both OpenAlex and Semantic Scholar requests failed: OA=${oaErr}; S2=${s2Err}`);
+  }
   return merge(oa, s2).slice(0, size);
 }
 

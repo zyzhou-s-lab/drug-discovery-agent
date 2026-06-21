@@ -66,6 +66,7 @@ export async function gql(query: string, variables: Record<string, unknown>, tim
   } catch (e) {
     throw new Error(`OpenTargets request failed: ${(e as Error).message}`);
   }
+  if (!resp.ok) throw new Error(`OpenTargets HTTP ${resp.status}`); // parity: urlopen raises on non-2xx
   const payload: any = await resp.json();
   if (payload.errors) throw new Error(`OpenTargets GraphQL errors: ${JSON.stringify(payload.errors)}`);
   return payload.data ?? {};

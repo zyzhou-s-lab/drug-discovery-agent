@@ -36,6 +36,9 @@ export class Index {
     this.artifactsRoot = artifactsRoot;
     mkdirSync(dirname(dbPath) || ".", { recursive: true });
     mkdirSync(artifactsRoot, { recursive: true });
+    // No explicit commit() per write (unlike Python's self.db.commit()): bun:sqlite runs in
+    // autocommit mode, so each .run() is its own committed transaction — equivalent semantics under
+    // WAL + concurrent reads.
     this.db = new Database(dbPath);
     this.db.exec("PRAGMA journal_mode=WAL");
     this.db.exec("PRAGMA busy_timeout=5000");
