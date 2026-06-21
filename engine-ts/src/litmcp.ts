@@ -18,6 +18,13 @@ export interface LitDeps {
 }
 const DEFAULT_DEPS: LitDeps = { searchLiteratureMulti, abstractByDoi, ontologyLookup };
 
+// Tuned constants (verbatim from deep_research.py _lit_server). LIT_SEARCH_SIZE is intentionally
+// below searchLiteratureMulti's default 10: these results carry abstracts + tldr, so a smaller set
+// bounds the context the fetch agent ingests.
+const LIT_SEARCH_SIZE = 8;
+const ONTOLOGY_LIST = "mondo,efo,hp,go";
+const ONTOLOGY_SIZE = 12;
+
 function toolError(name: string, err: unknown, argSummary: string): void {
   try {
     emit("deep-research", "lit", "tool_error", {
@@ -33,7 +40,7 @@ function toolError(name: string, err: unknown, argSummary: string): void {
 /** search_literature body → the tool's text payload. Slims rows + drops untitled; "[]" on error. */
 export async function searchLiteratureText(query: string, deps: LitDeps = DEFAULT_DEPS): Promise<string> {
   try {
-    const rows = await deps.searchLiteratureMulti(query, 8);
+    const rows = await deps.searchLiteratureMulti(query, LIT_SEARCH_SIZE);
     // carry abstract + tldr so the agent can extract claims directly (no extra get_paper hop)
     const slim = rows
       .filter((r) => r.title)
@@ -64,7 +71,7 @@ export async function getPaperText(doi: string, deps: LitDeps = DEFAULT_DEPS): P
 export async function ontologyText(query: string, deps: LitDeps = DEFAULT_DEPS): Promise<string> {
   let rows: unknown[] = [];
   try {
-    rows = await deps.ontologyLookup(query, "mondo,efo,hp,go", 12);
+    rows = await deps.ontologyLookup(query, ONTOLOGY_LIST, ONTOLOGY_SIZE);
   } catch (e) {
     toolError("ontology_lookup", e, query);
     rows = [];
@@ -81,13 +88,13 @@ export function makeLitMcp(deps: LitDeps = DEFAULT_DEPS): Record<string, unknown
     "Search peer-reviewed literature (OpenAlex + Semantic Scholar). Returns papers with " +
       "doi/title/year/venue. Use this for the scholarly-literature part of the angle.",
     { query: z.string() },
-    async (args: any) => text(await searchLiteratureText(args.query ?? "", deps)),
+    async (args: { query: string }) => text(await searchLiteratureText(args.query ?? "", deps)),
   );
   const getPaper = tool(
     "get_paper",
     "Fetch a paper's abstract + metadata by DOI (for claim extraction).",
     { doi: z.string() },
-    async (args: any) => text(await getPaperText(args.doi ?? "", deps)),
+    async (args: { doi: string }) => text(await getPaperText(args.doi ?? "", deps)),
   );
   const ontology = tool(
     "ontology_lookup",
@@ -95,7 +102,7 @@ export function makeLitMcp(deps: LitDeps = DEFAULT_DEPS): Record<string, unknown
       "Returns STRUCTURED records [{id,label,ontology,definition}]. Use this for ontology IDs / " +
       "subtypes / classifications instead of WebFetch-ing ontology web pages (which need JS).",
     { query: z.string() },
-    async (args: any) => text(await ontologyText(args.query ?? "", deps)),
+    async (args: { query: string }) => text(await ontologyText(args.query ?? "", deps)),
   );
   return { lit: createSdkMcpServer({ name: "lit", version: "1.0.0", tools: [searchLit, getPaper, ontology] }) };
 }

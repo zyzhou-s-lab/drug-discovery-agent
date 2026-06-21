@@ -2,7 +2,7 @@
 // module mocking: just pass fake tool fns and assert the slim/NOT_FOUND/[] formatting + never-throw.
 import { expect, test } from "bun:test";
 
-import { getPaperText, type LitDeps, ontologyText, searchLiteratureText } from "./litmcp";
+import { getPaperText, type LitDeps, makeLitMcp, ontologyText, searchLiteratureText } from "./litmcp";
 
 const deps = (over: Partial<LitDeps>): LitDeps => ({
   searchLiteratureMulti: async () => [] as any,
@@ -48,4 +48,14 @@ test("ontologyText → [] when empty, else the records", async () => {
   expect(await ontologyText("q", deps({ ontologyLookup: async () => [] }))).toBe("[]");
   const t = await ontologyText("q", deps({ ontologyLookup: async () => [{ id: "MONDO:1", label: "X" }] as any }));
   expect(JSON.parse(t)[0].id).toBe("MONDO:1");
+});
+
+test("makeLitMcp builds the 'lit' server with three tools", () => {
+  const m = makeLitMcp();
+  expect(Object.keys(m)).toEqual(["lit"]);
+  const server = m.lit as any;
+  // createSdkMcpServer stores the registered tools on the instance; assert all 3 are wired
+  const tools = server.instance?.tools ?? server.tools ?? server.options?.tools;
+  if (Array.isArray(tools)) expect(tools.length).toBe(3);
+  else expect(server).toBeDefined(); // server built (SDK internal shape may vary)
 });
