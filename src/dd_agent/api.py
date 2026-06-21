@@ -958,6 +958,14 @@ def _run_search(campaign: str, disease: str, angles: list[dict]) -> None:
             pass
         report.setdefault("stats", {})["elapsedSec"] = elapsed
         _write_json(report_path, report)
+        # Sediment the compute-facing assets (sources / database_facts) next to the report so the
+        # downstream analysis steps read a stable contract, not the big report.json. Best-effort —
+        # never fail the run on an asset write.
+        try:
+            from .research.assets import write_overview_assets
+            write_overview_assets(report, ARTIFACTS, campaign)
+        except Exception as e:  # noqa: BLE001
+            _log.warning("overview asset write failed for %s: %r", campaign, e)
         final = "stopped" if stop.is_set() else "done"
         _write_json(status_path, {"state": final, "stats": report.get("stats", {}), "run": run_id})
         emit(SEARCH_STAGE, "synthesize", "result",
