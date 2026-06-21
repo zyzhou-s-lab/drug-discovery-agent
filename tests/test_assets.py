@@ -1,4 +1,6 @@
 """Unit tests for the per-campaign asset layer (research/assets.py) — pure file I/O, no network."""
+import os
+
 from dd_agent.research import assets
 from dd_agent.schemas import Evidence, TargetCandidate
 
@@ -13,8 +15,8 @@ def test_write_overview_assets_projects_report(tmp_path):
                           {"claim": "MONDO:0004975 …", "status": "unverified"}],
     }
     paths = assets.write_overview_assets(report, str(tmp_path), "camp1")
-    assert [p.split("/")[-1] for p in paths] == ["sources.json", "database_facts.json"]
-    assert all("/camp1/assets/" in p for p in paths)          # under the per-campaign assets/ dir
+    assert [os.path.basename(p) for p in paths] == ["sources.json", "database_facts.json"]
+    assert all(os.path.join("camp1", "assets") in p for p in paths)  # under the campaign assets/ dir
 
     src = assets.load_asset(str(tmp_path), "camp1", "sources.json")
     assert src["stage"] == "disease-overview" and src["question"] == "What is X?"
@@ -41,7 +43,7 @@ def test_write_candidates_from_models_and_dicts(tmp_path):
     ]
     path = assets.write_candidates(cands, str(tmp_path), "camp1", efo_id="EFO_0000249",
                                    sort_by="genetic_association")
-    assert path.endswith("/camp1/assets/candidates.json")
+    assert path.endswith(os.path.join("camp1", "assets", "candidates.json"))
 
     out = assets.load_asset(str(tmp_path), "camp1", "candidates.json")
     assert out["stage"] == "nomination" and out["efo_id"] == "EFO_0000249"

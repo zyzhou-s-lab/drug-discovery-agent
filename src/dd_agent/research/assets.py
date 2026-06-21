@@ -18,6 +18,10 @@ from __future__ import annotations
 
 import json
 import os
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..schemas import TargetCandidate
 
 ASSETS_SUBDIR = "assets"
 
@@ -29,9 +33,16 @@ def assets_dir(artifacts_root: str, campaign: str) -> str:
 def _write(path: str, obj: dict) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(obj, fh, ensure_ascii=False, indent=2)
-    os.replace(tmp, path)
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(obj, fh, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    except BaseException:  # on any failure, don't leave an orphan .tmp behind
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def write_overview_assets(report: dict, artifacts_root: str, campaign: str) -> list[str]:
@@ -53,7 +64,7 @@ def write_overview_assets(report: dict, artifacts_root: str, campaign: str) -> l
     return [src_path, db_path]
 
 
-def write_candidates(candidates, artifacts_root: str, campaign: str, *,
+def write_candidates(candidates: list[TargetCandidate | dict], artifacts_root: str, campaign: str, *,
                      efo_id: str = "", sort_by: str = "") -> str:
     """Write nomination's ranked TargetCandidate[] as candidates.json — the gene list (+ scores,
     modality, evidence) the validation / perturbation step consumes. `candidates` may be
