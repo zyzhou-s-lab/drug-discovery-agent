@@ -3,12 +3,15 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "TS/Bun port of the dd-agent deep-research engine (see docs/bun-migration-eval.md). Phase 1: pure-logic core + zod schemas.",
+  "description": "TS/Bun port of the dd-agent deep-research engine (see docs/bun-migration-eval.md).",
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.185",
+    "@anthropic-ai/sdk": "^0.105.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
