@@ -236,6 +236,7 @@ export async function fetchText(url: string, maxChars = 2500): Promise<string> {
       headers: { "User-Agent": "Mozilla/5.0 (compatible; dd-agent/1.0)", Accept: "application/json,text/html,*/*" },
       signal: AbortSignal.timeout(15_000),
     });
+    if (!resp.ok) return ""; // parity: urlopen raises on non-2xx → except → ""; don't return error-page text
     const ctype = (resp.headers.get("Content-Type") || "").toLowerCase();
     let body = (await resp.text()).slice(0, 800_000);
     if (!ctype.includes("json")) {
