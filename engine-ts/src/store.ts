@@ -184,9 +184,13 @@ export class Index {
   }
 
   deleteCampaign(campaign: string): void {
-    this.db.query("DELETE FROM stage_state WHERE campaign=?").run(campaign);
-    this.db.query("DELETE FROM campaigns WHERE campaign=?").run(campaign);
-    this.db.query("DELETE FROM jobs WHERE campaign=?").run(campaign);
+    // one transaction (parity with Python's 3 DELETEs + single commit): a mid-way failure must
+    // not leave the campaign half-deleted across the three tables.
+    this.db.transaction(() => {
+      this.db.query("DELETE FROM stage_state WHERE campaign=?").run(campaign);
+      this.db.query("DELETE FROM campaigns WHERE campaign=?").run(campaign);
+      this.db.query("DELETE FROM jobs WHERE campaign=?").run(campaign);
+    })();
   }
 
   listCampaigns(): CampaignSummary[] {
