@@ -1,12 +1,24 @@
 // Offline unit tests for runAgent's core logic (submit capture, budget accounting, transient
 // retry, prose-end salvage) by mocking the Agent SDK — so CI regresses these without a backend.
 // The live end-to-end path is covered by scripts/phase3-runagent-smoke.ts.
-import { expect, mock, test } from "bun:test";
+import { afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { z } from "zod";
 
 // scenario drives the mocked `query`; the mock invokes the real submit handler (from the in-process
 // MCP server runAgent builds) to simulate the agent calling submit_*.
-const scenario: { mode: "submit" | "transient" | "nontransient" | "nosubmit"; calls: number } = { mode: "submit", calls: 0 };
+const scenario: { mode: "submit" | "transient" | "nontransient" | "nosubmit" | "nudge"; calls: number } = { mode: "submit", calls: 0 };
+
+// restore the knobs the tests poke so they don't leak across tests/files
+const ORIG: Record<string, string | undefined> = {};
+beforeAll(() => {
+  for (const k of ["DD_DR_RETRY", "DD_DR_NUDGE"]) ORIG[k] = process.env[k];
+});
+afterEach(() => {
+  for (const k of ["DD_DR_RETRY", "DD_DR_NUDGE"]) {
+    if (ORIG[k] === undefined) delete process.env[k];
+    else process.env[k] = ORIG[k];
+  }
+});
 
 mock.module("@anthropic-ai/claude-agent-sdk", () => ({
   tool: (name: string, _d: string, _s: unknown, handler: any) => ({ name, handler }),
@@ -24,6 +36,17 @@ mock.module("@anthropic-ai/claude-agent-sdk", () => ({
         throw new Error("HTTP 429 too many requests");
       } else if (scenario.mode === "nontransient") {
         throw new TypeError("bad input"); // no transient marker → must not retry
+      } else if (scenario.mode === "nudge") {
+        // turn 1 ends WITHOUT a submit → runAgent pushes a nudge into the input stream; the mock
+        // reads it and submits on turn 2 (exercises the multi-turn nudge path).
+        const it = params.prompt[Symbol.asyncIterator]();
+        await it.next(); // the initial prompt
+        yield { type: "result", is_error: false, usage: { input_tokens: 2, output_tokens: 1 }, total_cost_usd: 0 };
+        const nudged = await it.next(); // the nudge runAgent pushed after the empty turn
+        if (!nudged.done) {
+          await submitHandler({ answer: "Paris", confidence: "high" });
+          yield { type: "result", is_error: false, usage: { input_tokens: 2, output_tokens: 1 }, total_cost_usd: 0 };
+        }
       } else {
         yield { type: "result", is_error: false, usage: { input_tokens: 3, output_tokens: 1 }, total_cost_usd: 0 };
       }
@@ -63,6 +86,16 @@ test("runAgent does NOT retry a non-transient error (logs + salvages once)", asy
   const [res] = await runAgent("test", "p", "submit_result", schema, {}, new Budget(), new Semaphore(1), {});
   expect(res).toBe(null);
   expect(scenario.calls).toBe(1); // initial attempt only — no retry
+});
+
+test("runAgent nudges a prose-ended turn, then captures the submit on retry-in-session", async () => {
+  scenario.mode = "nudge";
+  scenario.calls = 0;
+  process.env.DD_DR_NUDGE = "2";
+  const b = new Budget();
+  const [res] = await runAgent("test", "p", "submit_result", schema, {}, b, new Semaphore(1), {});
+  expect(res).toEqual({ answer: "Paris", confidence: "high" }); // submitted after the nudge
+  expect(b.spent()).toBe(6); // two turns accounted (3 tokens each)
 });
 
 test("runAgent that never submits (prose-ended) salvages to [null, []]", async () => {

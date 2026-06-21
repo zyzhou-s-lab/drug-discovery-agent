@@ -13,6 +13,9 @@ export { Budget };
 export type OnMessage = (msg: unknown) => void;
 export type ShouldStop = () => boolean;
 
+// Verbatim from orchestrate.py: a substring of one of these in a result/error → retryable. The
+// short markers (socket/connection/reset) can in theory false-match an unrelated message; kept as
+// a faithful 1:1 of the Python list (same trade-off there) — tighten later if it bites.
 const TRANSIENT = [
   "429", "too many requests", "overloaded", "rate limit", "rate_limit",
   "503", "502", "500", "socket", "connection", "timed out", "timeout", "reset",
@@ -117,6 +120,7 @@ export async function runAgent(
     cap.v = args;
     return { content: [{ type: "text", text: "recorded" }] };
   });
+  // NB: callers must not use "submit" as an extraMcp key — it would shadow the forced-output server.
   const servers: Record<string, unknown> = { submit: createSdkMcpServer({ name: "submit", version: "1.0.0", tools: [submit] }), ...extraMcp };
 
   const envOver = buildEnvOverride();
