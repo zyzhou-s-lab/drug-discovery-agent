@@ -1,5 +1,6 @@
-// Unit tests for the orchestrate primitives that don't need a model/network. runAgent itself is
-// exercised by the live smoke (scripts/phase3-runagent-smoke.ts) against a real backend.
+// Unit tests for the orchestrate primitives that don't need a model/network. runAgent's core logic
+// (submit / retry / salvage) is covered offline by orchestrate.mock.test.ts; the live end-to-end
+// path is covered by scripts/phase3-runagent-smoke.ts.
 import { expect, test } from "bun:test";
 
 import { Budget, Semaphore } from "./orchestrate";

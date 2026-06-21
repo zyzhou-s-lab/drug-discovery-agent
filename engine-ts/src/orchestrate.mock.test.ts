@@ -6,7 +6,7 @@ import { z } from "zod";
 
 // scenario drives the mocked `query`; the mock invokes the real submit handler (from the in-process
 // MCP server runAgent builds) to simulate the agent calling submit_*.
-const scenario: { mode: "submit" | "transient" | "nosubmit"; calls: number } = { mode: "submit", calls: 0 };
+const scenario: { mode: "submit" | "transient" | "nontransient" | "nosubmit"; calls: number } = { mode: "submit", calls: 0 };
 
 mock.module("@anthropic-ai/claude-agent-sdk", () => ({
   tool: (name: string, _d: string, _s: unknown, handler: any) => ({ name, handler }),
@@ -22,6 +22,8 @@ mock.module("@anthropic-ai/claude-agent-sdk", () => ({
         yield { type: "result", is_error: false, usage: { input_tokens: 10, output_tokens: 5 }, total_cost_usd: 0 };
       } else if (scenario.mode === "transient") {
         throw new Error("HTTP 429 too many requests");
+      } else if (scenario.mode === "nontransient") {
+        throw new TypeError("bad input"); // no transient marker → must not retry
       } else {
         yield { type: "result", is_error: false, usage: { input_tokens: 3, output_tokens: 1 }, total_cost_usd: 0 };
       }
@@ -52,6 +54,15 @@ test("runAgent retries transient errors then salvages to [null, []]", async () =
   expect(res).toBe(null);
   expect(tools).toEqual([]);
   expect(scenario.calls).toBe(3); // initial + 2 retries
+});
+
+test("runAgent does NOT retry a non-transient error (logs + salvages once)", async () => {
+  scenario.mode = "nontransient";
+  scenario.calls = 0;
+  process.env.DD_DR_RETRY = "2"; // retries allowed, but a non-transient error must not use them
+  const [res] = await runAgent("test", "p", "submit_result", schema, {}, new Budget(), new Semaphore(1), {});
+  expect(res).toBe(null);
+  expect(scenario.calls).toBe(1); // initial attempt only — no retry
 });
 
 test("runAgent that never submits (prose-ended) salvages to [null, []]", async () => {
