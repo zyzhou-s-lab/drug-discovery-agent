@@ -111,11 +111,11 @@ export interface Verdict {
 
 /**
  * Survive only if adjudicated: a quorum of valid votes AND fewer than REFUTATIONS_REQUIRED
- * refuting. Too many abstentions (null votes) = unverified, must NOT pass. (Python also treats an
- * empty {} as falsy/abstained, but those never occur in practice — only verdicts or null.)
+ * refuting. Too many abstentions = unverified, must NOT pass. Mirrors Python's `if v` truthiness:
+ * a null/undefined vote OR an empty {} (a malformed/empty submit) counts as an abstention.
  */
 export function survives(verdicts: Array<Verdict | null | undefined>): boolean {
-  const valid = verdicts.filter((v): v is Verdict => v != null);
+  const valid = verdicts.filter((v): v is Verdict => v != null && Object.keys(v).length > 0);
   const refuted = valid.filter((v) => v.refuted).length;
   return valid.length >= REFUTATIONS_REQUIRED && refuted < REFUTATIONS_REQUIRED;
 }

@@ -95,6 +95,10 @@ test("survives all abstain fails", () => {
   expect(survives([null, null, null])).toBe(false);
 });
 
+test("survives treats empty {} as an abstention (Python `if v` parity)", () => {
+  expect(survives([{ refuted: false }, {}, {}])).toBe(false); // only 1 valid → no quorum
+});
+
 test("Budget accounts tokens + trips exhausted at cap", () => {
   const b = new Budget(100);
   b.add("search", { input_tokens: 30, output_tokens: 20 });
@@ -102,4 +106,11 @@ test("Budget accounts tokens + trips exhausted at cap", () => {
   expect(b.spent()).toBe(100);
   expect(b.exhausted()).toBe(true);
   expect(new Budget().exhausted()).toBe(false); // no cap → never exhausted
+});
+
+test("Budget on empty byPhase does not throw (sum-of-empty = 0)", () => {
+  // reduce() has an initial value, so spent()/exhausted() are safe before any add()
+  const b = new Budget(100);
+  expect(b.spent()).toBe(0);
+  expect(b.exhausted()).toBe(false);
 });
