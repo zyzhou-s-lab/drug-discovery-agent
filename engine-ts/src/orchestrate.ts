@@ -60,6 +60,9 @@ function buildEnvOverride(): Record<string, string> | undefined {
     if (process.env.DD_DR_AUTH_TOKEN) env.ANTHROPIC_AUTH_TOKEN = process.env.DD_DR_AUTH_TOKEN;
   }
   if (process.env.DD_AGENT_PROXY_SOCKS) {
+    // The agent gets an HTTP proxy (http_proxy) pointing at the in-process HTTP→SOCKS5 bridge
+    // (proxy_bridge.py); DD_AGENT_PROXY_SOCKS names the bridge's UPSTREAM socks (host:port). So the
+    // agent speaks HTTP to the bridge, which tunnels to that SOCKS — not a SOCKS client misconfig.
     const purl = "http://127.0.0.1:" + (process.env.DD_AGENT_PROXY_PORT || "7899");
     const noParts = ["localhost", "127.0.0.1", "::1"];
     const base = env.ANTHROPIC_BASE_URL || process.env.ANTHROPIC_BASE_URL || "";
@@ -119,6 +122,8 @@ export async function runAgent(
   const envOver = buildEnvOverride();
   const options: any = {
     mcpServers: servers,
+    // Headless automation agents only — these run our own fixed prompts on a sandboxed deep-research
+    // run, never user-controlled tool calls, so bypassing the permission prompt is intentional.
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
     maxTurns,
@@ -165,8 +170,14 @@ export async function runAgent(
             else { input.close(); }
           }
         }
-      } catch {
-        transient = true; // SDK/transport error → retryable
+      } catch (err) {
+        // Classify rather than blanket-retry (Python's bare `except` masked bugs): a transient
+        // marker (429/5xx/socket) is retried; anything else is logged and NOT retried — it falls
+        // through to return [null, []] (the salvage path), so a programming bug fails fast & visibly
+        // instead of looping maxRetries times in silence. Not rethrown (would crash the run vs salvage).
+        const m = String(err instanceof Error ? err.message : err).toLowerCase();
+        transient = TRANSIENT.some((x) => m.includes(x));
+        if (!transient) console.warn(`[runAgent ${phase}] non-transient error: ${m.slice(0, 200)}`);
       }
       if (cap.v != null) return [cap.v, toolResults];
       if (attempt < maxRetries && transient && !(shouldStop && shouldStop()) && !budget.exhausted()) {
