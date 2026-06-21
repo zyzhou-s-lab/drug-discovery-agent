@@ -201,13 +201,14 @@ export function SYNTH_PROMPT(question: string, confirmed: any[], killed: any[], 
 /** From the sources backing CONFIRMED claims, build one unified, sequentially-numbered reference
  * list (papers get an APA7 string via citeByDoi). */
 export async function bibliography(confirmed: any[], allSources: any[]): Promise<any[]> {
-  // One key per confirmed claim (doi, else normalized URL) — faithful 1:1 of the Python. Safe
-  // because fetchOne propagates the SAME doi+url from the source onto its claims, so a confirmed
-  // claim's key always equals its source's key (no silent drop in practice).
+  // Index each confirmed claim by BOTH its doi key AND its normalized-URL key (defensive over the
+  // Python's single key): a source then matches on either, so a claim/source whose doi and url keys
+  // diverge (e.g. an anomalous claim missing a doi the source has) is never silently dropped.
   const cited = new Set<string>();
   for (const c of confirmed) {
     const doi = (c.doi ?? "").trim().toLowerCase();
-    cited.add(doi ? "doi:" + doi : normUrl(c.sourceUrl ?? ""));
+    if (doi) cited.add("doi:" + doi);
+    if (c.sourceUrl) cited.add(normUrl(c.sourceUrl));
   }
   const refs: any[] = [];
   const seen = new Set<string>();

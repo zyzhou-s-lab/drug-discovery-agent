@@ -3,7 +3,7 @@
 // a fake dispatches a canned result per submit_* name, exactly like the Python fake.
 import { expect, test } from "bun:test";
 
-import { research, type RunAgentFn } from "./deep_research";
+import { bibliography, research, type RunAgentFn } from "./deep_research";
 
 // full 8-arg signature so a real RunAgentFn drift (param order/count) breaks the test, not just types
 function fakeRunAgent(responses: Record<string, unknown>): RunAgentFn {
@@ -64,4 +64,14 @@ test("research all-refuted salvage (claims killed → inconclusive)", async () =
   expect(r.stats.confirmed).toBe(0);
   expect(r.refuted.length).toBe(1);
   expect(r.summary).toContain("refuted");
+});
+
+test("bibliography double-key includes a confirmed source when doi/url keys diverge", async () => {
+  // claim carries a doi but the source row only has a url (no doi) — the single-key (Python) match
+  // would drop it; the doi+url double-key keeps it.
+  const confirmed = [{ claim: "c", doi: "10.1/x", sourceUrl: "https://a.com/p" }];
+  const allSources = [{ source_type: "web", url: "https://a.com/p", title: "P" }];
+  const refs = await bibliography(confirmed, allSources);
+  expect(refs.length).toBe(1);
+  expect(refs[0]!.url).toBe("https://a.com/p");
 });
