@@ -8,7 +8,9 @@ function keysOf(o: unknown): string[] {
   return o && typeof o === "object" && !Array.isArray(o) ? Object.keys(o).sort() : [];
 }
 
-/** Element keys of an array field — the UNION across elements (a single sample can miss optional keys). */
+/** Element keys of an array field — the UNION across elements (a single sample can miss optional
+ * keys). NB: a field PRESENT on one report but MISSING on the other is caught by the top-level-keys
+ * diff, not here (here we only compare element shape when BOTH sides have the array). */
 function arrayElemKeys(arr: unknown): string[] {
   if (!Array.isArray(arr) || !arr.length) return [];
   const all = new Set<string>();
@@ -41,5 +43,6 @@ export function reportParity(a: any, b: any): ParityResult {
     }
   }
   diffs.push(...diffSets("stats keys", keysOf(a?.stats), keysOf(b?.stats)));
+  diffs.push(...diffSets("budget keys", keysOf(a?.budget), keysOf(b?.budget)));
   return { ok: diffs.length === 0, diffs };
 }

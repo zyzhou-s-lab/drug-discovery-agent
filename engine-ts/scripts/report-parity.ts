@@ -11,8 +11,17 @@ if (!aPath || !bPath) {
   process.exit(2);
 }
 
-const a = JSON.parse(readFileSync(aPath, "utf-8"));
-const b = JSON.parse(readFileSync(bPath, "utf-8"));
+function load(label: string, path: string): unknown {
+  try {
+    return JSON.parse(readFileSync(path, "utf-8"));
+  } catch (e) {
+    console.error(`failed to read/parse ${label} (${path}): ${e instanceof Error ? e.message : e}`);
+    process.exit(2);
+  }
+}
+
+const a = load("A", aPath);
+const b = load("B", bPath);
 const { ok, diffs } = reportParity(a, b);
 
 if (ok) {
