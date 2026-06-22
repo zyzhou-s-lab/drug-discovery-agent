@@ -60,7 +60,9 @@ export function writeOverviewAssets(report: any, artifactsRoot: string, campaign
 export function writeAsset(artifactsRoot: string, campaign: string, name: string, payload: Record<string, unknown>): string {
   const file = name.endsWith(".json") ? name : name + ".json";
   const path = join(assetsDir(artifactsRoot, campaign), file);
-  writeAtomic(path, { campaign, ...payload });
+  // JSON deep clone before write — consistent with writeCandidates; also rejects a non-serializable
+  // payload (circular) by throwing here, which research's doPersist catches + surfaces via ev.
+  writeAtomic(path, { campaign, ...JSON.parse(JSON.stringify(payload)) });
   return path;
 }
 
