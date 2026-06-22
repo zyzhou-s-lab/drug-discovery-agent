@@ -14,8 +14,10 @@ if (!aPath || !bPath) {
 function load(label: string, path: string): unknown {
   try {
     return JSON.parse(readFileSync(path, "utf-8"));
-  } catch (e) {
-    console.error(`failed to read/parse ${label} (${path}): ${e instanceof Error ? e.message : e}`);
+  } catch {
+    // deliberately do NOT echo the error message — a JSON SyntaxError can quote the file's bytes,
+    // which may include secrets if the wrong file is passed.
+    console.error(`failed to read or parse ${label} (${path}) — unreadable or not valid JSON`);
     process.exit(2);
   }
 }

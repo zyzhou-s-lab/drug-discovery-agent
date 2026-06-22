@@ -67,3 +67,10 @@ test("reportParity: a differing budget key is flagged", () => {
   expect(r.ok).toBe(false);
   expect(r.diffs.join(" ")).toContain("budget");
 });
+
+test("reportParity: non-object inputs → not ok (no silent pass)", () => {
+  expect(reportParity(null, FULL).ok).toBe(false);
+  expect(reportParity(42 as unknown, FULL).ok).toBe(false);
+  expect(reportParity(FULL, "x" as unknown).ok).toBe(false);
+  expect(reportParity([1, 2] as unknown, FULL).ok).toBe(false); // array is not a report object
+});
