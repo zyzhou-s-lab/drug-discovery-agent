@@ -37,6 +37,8 @@ export const ConfigUpdateSchema = z.object({
   max_claims: z.number().int(),
 });
 
+/** Read the persisted settings. Used by the server entry (Phase 4c) to applySettings(loadSettings())
+ * on startup, mirroring api.py's import-time apply. */
 export function loadSettings(): Record<string, unknown> {
   try {
     const data = JSON.parse(readFileSync(settingsPath(), "utf-8"));
@@ -51,12 +53,12 @@ export function saveSettings(cfg: Record<string, unknown>): void {
   const p = settingsPath();
   const tmp = p + ".tmp";
   writeFileSync(tmp, JSON.stringify(cfg, null, 2), "utf-8");
-  renameSync(tmp, p);
   try {
-    chmodSync(p, 0o600); // holds the api key
+    chmodSync(tmp, 0o600); // chmod BEFORE rename so the key file is never briefly 0644
   } catch {
     /* best-effort */
   }
+  renameSync(tmp, p);
 }
 
 /** Project the stored overrides onto process.env (empty field → launch-time fallback). */
@@ -100,7 +102,9 @@ export function trustedOrigin(origin: string | null | undefined): boolean {
 
 /** The GET /config response: effective endpoint + knobs, with the key round-tripped for prefill. */
 export function getConfig() {
-  const key = process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_API_KEY || "";
+  // only ANTHROPIC_AUTH_TOKEN (the env the UI manages via UI_ENV_MAP); no ANTHROPIC_API_KEY
+  // fallback, so clearing the key in the UI can't leave a stale externally-set key showing/effective.
+  const key = process.env.ANTHROPIC_AUTH_TOKEN || "";
   return {
     model: process.env.ANTHROPIC_MODEL ?? null,
     base_url: process.env.ANTHROPIC_BASE_URL ?? null,

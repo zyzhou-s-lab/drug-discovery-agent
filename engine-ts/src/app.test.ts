@@ -31,6 +31,7 @@ test("path-traversal in campaign/stage is rejected (400)", async () => {
   const { app } = setup();
   expect((await app.request("/api/campaigns/" + encodeURIComponent("../etc") + "/report")).status).toBe(400);
   expect((await app.request("/api/campaigns/c1/stages/" + encodeURIComponent("../../passwd") + "/events")).status).toBe(400);
+  expect((await app.request("/api/campaigns/" + encodeURIComponent("../etc") + "/events")).status).toBe(400); // SSE too
 });
 
 test("GET /api/pipeline lists the disease-overview stage", async () => {
@@ -98,4 +99,15 @@ test("SSE event stream pushes a view then closes 'done' when terminal", async ()
   const text = await (await app.request("/api/campaigns/c1/events")).text();
   expect(text).toContain("data:");
   expect(text).toContain("event: done");
+}, 5000);
+
+test("SSE keeps polling a non-terminal campaign, then closes at the lifetime cap", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ddsse2-"));
+  const art = join(dir, "art");
+  const idx = new Index(join(dir, "s.sqlite"), art);
+  idx.recordAttempt("c1", "disease-overview"); // in_progress → never terminal
+  const app = createApp(idx, art, { sseIntervalMs: 5, sseMaxLifetimeMs: 60 });
+  const text = await (await app.request("/api/campaigns/c1/events")).text();
+  expect(text).toContain("data:"); // pushed the running view
+  expect(text).not.toContain("event: done"); // never terminal → closed by the lifetime cap, not 'done'
 }, 5000);

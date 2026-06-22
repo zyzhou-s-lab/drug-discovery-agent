@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 
-import { applySettings, ConfigUpdateSchema, getConfig, loadSettings, NUM_BOUNDS, saveSettings, trustedOrigin } from "./config";
+import { applySettings, ConfigUpdateSchema, getConfig, NUM_BOUNDS, saveSettings, trustedOrigin } from "./config";
 import { readStageEvents } from "./events";
 import { Index } from "./store";
 
@@ -53,9 +53,10 @@ export function campaignView(idx: Index, campaign: string) {
   return { campaign, stages };
 }
 
-export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: { sseIntervalMs?: number } = {}): Hono {
+export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: { sseIntervalMs?: number; sseMaxLifetimeMs?: number } = {}): Hono {
   const index = idx ?? new Index(DB_PATH, ARTIFACTS);
   const sseIntervalMs = opts.sseIntervalMs ?? 1000;
+  const sseMaxLifetimeMs = opts.sseMaxLifetimeMs ?? 300_000; // cap a connection (client auto-reconnects)
   const app = new Hono();
 
   app.get("/api/health", (c) => c.json({ ok: true })); // don't leak internal db/artifacts paths
@@ -115,10 +116,12 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
   // terminal (done/exhausted, no queued) and nothing changed for a couple of ticks.
   app.get("/api/campaigns/:campaign/events", (c) => {
     const campaign = c.req.param("campaign");
+    if (!safeSegment(campaign)) return c.json({ error: "invalid campaign" }, 400);
     return streamSSE(c, async (stream) => {
       let last = "";
       let idle = 0;
-      while (!stream.aborted && !stream.closed) {
+      const start = Date.now();
+      while (!stream.aborted && !stream.closed && Date.now() - start < sseMaxLifetimeMs) {
         const view = campaignView(index, campaign);
         const snapshot = JSON.stringify(view); // campaignView builds a deterministic key order
         if (snapshot !== last) {
