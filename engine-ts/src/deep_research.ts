@@ -174,8 +174,8 @@ export function ANGLE_SYNTH_PROMPT(question: string, angle: Angle, confirmed: an
     "3. `evidence`: 2-4 sentences synthesizing what this angle's claims establish.\n" +
     "4. `sources`: the URLs backing the finding.\n" +
     (empty
-      ? 'This angle yielded NO confirmed claims — still return a finding with confidence "low" and evidence explaining the insufficient data.'
-      : "Address THIS angle specifically; do not generalize beyond its claims.") +
+      ? '\nThis angle yielded NO confirmed claims — still return a finding with confidence "low" and evidence explaining the insufficient data.'
+      : "\nAddress THIS angle specifically; do not generalize beyond its claims.") +
     dbInstruction +
     END("submit_finding")
   );
