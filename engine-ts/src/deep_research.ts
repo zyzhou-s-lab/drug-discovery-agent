@@ -276,11 +276,15 @@ export async function research(question: string, angles: Angle[], opts: Research
     } catch { /* best-effort */ }
   };
   // incremental per-stage asset checkpoint (#30): sediment a stage's structured output as soon as
-  // it exists so a crash/kill mid-run still leaves the predecessor stages' data. Best-effort.
+  // it exists so a crash/kill mid-run still leaves the predecessor stages' data. Best-effort — a
+  // persist failure (disk full / permission) NEVER fails the run, but is surfaced via ev (the
+  // event stream) rather than silently swallowed, so ops/UI can see it.
   const doPersist = (name: string, payload: Record<string, unknown>) => {
     try {
       opts.persist?.(name, payload);
-    } catch { /* never fail the run on an asset write */ }
+    } catch (e) {
+      ev("persist", `资产 '${name}' 增量落盘失败: ${e instanceof Error ? e.message : String(e)}`);
+    }
   };
   const amsg = (label: string): OnMessage | undefined => (opts.onAgent ? (m) => opts.onAgent!(label, m) : undefined);
 

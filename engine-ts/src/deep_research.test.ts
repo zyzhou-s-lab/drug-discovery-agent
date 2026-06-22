@@ -103,11 +103,17 @@ test("research persists sources even on the no-claims salvage path (verify check
   expect(calls).toEqual(["sources"]);
 });
 
-test("research never fails the run when persist throws", async () => {
+test("research never fails the run when persist throws — and surfaces it via onEvent", async () => {
   const fake = fakeRunAgent({
     submit_results: { results: [{ url: "https://x.com/a", title: "A", relevance: "high" }] },
     submit_claims: { sourceQuality: "unreliable", claims: [] },
   });
-  const r = await research("Q", ANGLE, { runAgent: fake, lit: {}, persist: () => { throw new Error("disk full"); } });
+  const events: Array<[string, string]> = [];
+  const r = await research("Q", ANGLE, {
+    runAgent: fake, lit: {},
+    persist: () => { throw new Error("disk full"); },
+    onEvent: (p, m) => events.push([p, m]),
+  });
   expect(r.summary).toContain("No claims"); // run completed despite the persist error
+  expect(events.some(([p, m]) => p === "persist" && m.includes("disk full"))).toBe(true); // not swallowed
 });

@@ -127,14 +127,10 @@ export async function runSearch(
         shouldStop: () => entry.stopped,
         onProgress: (phase, done, total) => emit(SEARCH_STAGE, phase, "progress", { done, total }),
         onEvent: (phase, msg) => emit(SEARCH_STAGE, phase, "log", { msg }),
-        // incremental per-stage asset checkpoints (#30) — best-effort, never fail the run
-        persist: (name, payload) => {
-          try {
-            writeAsset(artifactsRoot, campaign, name, payload);
-          } catch (e) {
-            console.warn(`asset persist '${name}' failed for ${campaign}:`, e);
-          }
-        },
+        // incremental per-stage asset checkpoints (#30). A throw here propagates to research's
+        // doPersist, which surfaces it via ev (→ the event stream) and continues — never failing
+        // the run, but no longer silently swallowed.
+        persist: (name, payload) => writeAsset(artifactsRoot, campaign, name, payload),
       }),
     );
     writeJson(reportPath, report);
