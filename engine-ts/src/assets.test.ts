@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFil
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { assetsDir, loadAsset, writeCandidates, writeOverviewAssets } from "./assets";
+import { assetsDir, loadAsset, writeAsset, writeCandidates, writeOverviewAssets } from "./assets";
 
 function setup() {
   return mkdtempSync(join(tmpdir(), "ddasset-"));
@@ -78,4 +78,12 @@ test("writeCandidates throws cleanly on a non-serializable candidate — no part
   expect(() => writeCandidates([circular], root, "camp")).toThrow();
   // the throw happens during the pre-write clone, before any file is touched → no corrupt/partial asset
   expect(existsSync(join(assetsDir(root, "camp"), "candidates.json"))).toBe(false);
+});
+
+test("writeAsset writes a campaign-stamped envelope to {name}.json", () => {
+  const root = setup();
+  const p = writeAsset(root, "camp", "verified", { stage: "deep-research", count: 2, confirmed: [{ claim: "c" }] });
+  expect(p.endsWith("verified.json")).toBe(true);
+  expect(read(p)).toEqual({ campaign: "camp", stage: "deep-research", count: 2, confirmed: [{ claim: "c" }] });
+  expect(loadAsset(root, "camp", "verified.json").count).toBe(2);
 });

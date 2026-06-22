@@ -6,7 +6,7 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { writeOverviewAssets } from "./assets";
+import { writeAsset, writeOverviewAssets } from "./assets";
 import { research as realResearch } from "./deep_research";
 import { emit, eventsDir } from "./events";
 
@@ -127,6 +127,14 @@ export async function runSearch(
         shouldStop: () => entry.stopped,
         onProgress: (phase, done, total) => emit(SEARCH_STAGE, phase, "progress", { done, total }),
         onEvent: (phase, msg) => emit(SEARCH_STAGE, phase, "log", { msg }),
+        // incremental per-stage asset checkpoints (#30) — best-effort, never fail the run
+        persist: (name, payload) => {
+          try {
+            writeAsset(artifactsRoot, campaign, name, payload);
+          } catch (e) {
+            console.warn(`asset persist '${name}' failed for ${campaign}:`, e);
+          }
+        },
       }),
     );
     writeJson(reportPath, report);

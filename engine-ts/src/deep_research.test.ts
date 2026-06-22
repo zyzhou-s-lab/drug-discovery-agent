@@ -75,3 +75,39 @@ test("bibliography double-key includes a confirmed source when doi/url keys dive
   expect(refs.length).toBe(1);
   expect(refs[0]!.url).toBe("https://a.com/p");
 });
+
+test("research persists incremental assets in order (sources → database_facts + verified)", async () => {
+  const fake = fakeRunAgent({
+    submit_results: { results: [{ url: "https://x.com/a", title: "A", relevance: "high" }] },
+    submit_claims: { sourceQuality: "primary", claims: [{ claim: "C1", quote: "q", importance: "central" }] },
+    submit_verdict: { refuted: false, evidence: "e", confidence: "high" },
+    submit_report: { summary: "S", caveats: "none", findings: [{ angle: "g", claim: "C1", confidence: "high", sources: ["https://x.com/a"], evidence: "e" }] },
+  });
+  const calls: Array<{ name: string; payload: any }> = [];
+  await research("Q", ANGLE, { runAgent: fake, lit: {}, persist: (name, payload) => calls.push({ name, payload }) });
+  expect(calls.map((c) => c.name)).toEqual(["sources", "database_facts", "verified"]);
+  const sources = calls.find((c) => c.name === "sources")!.payload;
+  expect(sources.count).toBe(1);
+  expect(sources.sources[0].url).toBe("https://x.com/a");
+  const verified = calls.find((c) => c.name === "verified")!.payload;
+  expect(verified.confirmed[0].claim).toBe("C1");
+});
+
+test("research persists sources even on the no-claims salvage path (verify checkpoint not reached)", async () => {
+  const fake = fakeRunAgent({
+    submit_results: { results: [{ url: "https://x.com/a", title: "A", relevance: "high" }] },
+    submit_claims: { sourceQuality: "unreliable", claims: [] },
+  });
+  const calls: string[] = [];
+  await research("Q", ANGLE, { runAgent: fake, lit: {}, persist: (name) => calls.push(name) });
+  expect(calls).toEqual(["sources"]);
+});
+
+test("research never fails the run when persist throws", async () => {
+  const fake = fakeRunAgent({
+    submit_results: { results: [{ url: "https://x.com/a", title: "A", relevance: "high" }] },
+    submit_claims: { sourceQuality: "unreliable", claims: [] },
+  });
+  const r = await research("Q", ANGLE, { runAgent: fake, lit: {}, persist: () => { throw new Error("disk full"); } });
+  expect(r.summary).toContain("No claims"); // run completed despite the persist error
+});

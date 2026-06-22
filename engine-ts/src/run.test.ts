@@ -161,3 +161,15 @@ test("POST /search rejects an over-long disease (400)", async () => {
   });
   expect(r.status).toBe(400);
 });
+
+test("runSearch wires persist → incremental assets land via writeAsset", async () => {
+  const { art } = setup();
+  const fakeResearch = async (_d: string, _a: unknown, o: any) => {
+    o.persist?.("sources", { stage: "disease-overview", count: 1, sources: [{ url: "u" }], references: [] });
+    return { question: "Q", findings: [], sources: [{ url: "u", quality: "primary" }], stats: {} } as any;
+  };
+  await runSearch(art, "rs-persist", "X", ANGLES, { research: fakeResearch });
+  const a = readJson(join(art, "rs-persist", "assets", "sources.json"));
+  expect(a.campaign).toBe("rs-persist"); // writeAsset stamped the campaign
+  expect(a.count).toBe(1);
+});
