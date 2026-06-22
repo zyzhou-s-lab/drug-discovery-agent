@@ -154,14 +154,14 @@ function synthBlock(confirmed: any[], dbContext?: any[]): string {
 // database records. The prompt only ever holds one angle's data → no end-of-pipeline context pile-up.
 export function ANGLE_SYNTH_PROMPT(question: string, angle: Angle, confirmed: any[], dbRawContext?: any[]): string {
   const block = synthBlock(confirmed, dbRawContext);
-  let dbInstruction = "";
-  if (dbRawContext && dbRawContext.length) {
-    dbInstruction =
-      "\n- For a finding backed by database sources, you MUST cite the concrete field values " +
-      "(ontology IDs, gene symbols, association scores, classification terms, cohort sizes) from the " +
-      "raw records above — do NOT paraphrase into a vague summary; the raw records are authoritative.";
-  }
   const empty = confirmed.length === 0;
+  // only attach the DB-citation instruction when there ARE claims (and thus a block of raw records);
+  // when empty the block is hidden ("(none)") so the instruction would dangle.
+  const dbInstruction = !empty && dbRawContext && dbRawContext.length
+    ? "\n- For a finding backed by database sources, you MUST cite the concrete field values " +
+      "(ontology IDs, gene symbols, association scores, classification terms, cohort sizes) from the " +
+      "raw records above — do NOT paraphrase into a vague summary; the raw records are authoritative."
+    : "";
   return (
     "## Angle Synthesis: " + angle.label + "\n\n" +
     "**Question:** " + question + "\n" +
@@ -185,7 +185,7 @@ export function ANGLE_SYNTH_PROMPT(question: string, angle: Angle, confirmed: an
 // already-compressed findings (not raw claims), so this stays small regardless of corpus size.
 export function MERGE_PROMPT(question: string, findings: any[]): string {
   const list = findings
-    .map((f, i) => "### [" + (i + 1) + '] angle="' + (f.angle ?? "") + '" (' + (f.confidence ?? "low") + ")\n" + f.claim + "\n" + (f.evidence ?? ""))
+    .map((f, i) => "### [" + (i + 1) + '] angle="' + (f.angle ?? "UNKNOWN") + '" (' + (f.confidence ?? "low") + ")\n" + f.claim + "\n" + (f.evidence ?? ""))
     .join("\n\n");
   return (
     "## Research Synthesis: merge\n\n" +

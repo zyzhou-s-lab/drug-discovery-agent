@@ -86,7 +86,8 @@ export function writeCandidates(
 /** Read one asset by file name (e.g. 'database_facts.json'); null if absent/unreadable. The entry
  * point for a downstream compute step to pick up an upstream stage's hand-off. */
 export function loadAsset(artifactsRoot: string, campaign: string, name: string): any | null {
-  const p = join(assetsDir(artifactsRoot, campaign), name);
+  const file = name.endsWith(".json") ? name : name + ".json"; // accept "sources" or "sources.json" (≡ writeAsset)
+  const p = join(assetsDir(artifactsRoot, campaign), file);
   if (!existsSync(p)) return null; // absent → null (skip constructing/catching an ENOENT)
   try {
     return JSON.parse(readFileSync(p, "utf-8"));
