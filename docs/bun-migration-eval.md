@@ -142,5 +142,20 @@
 3. **若 GO**:按 §7 分阶段迁,**全程对拍**,最后切换。把它当**有计划的迁移项目**,不是顺手重构。
 4. **手头**:先把 per-angle 分治 + 增量落资产做完(实打实能力提升),迁移作为独立 milestone。
 
+## 11. Phase 5 — 切换 runbook(2026-06)
+
+**状态**:Phase 1–4 全部完成并 merged。`engine-ts/` 已**整套镜像 `api.py`**:`core schemas store events orchestrate scope litmcp deep_research app config run server` + `tools/` —— **96 单测 + 6 个 live smoke**(各阶段单独实测 Kimi 通过),`tsc` 干净,`bun src/server.ts` 能起并服务 `/api/*`。
+
+切换不需改前端:`web/vite.config` 代理 `→ :8099`,Bun server 默认也 `:8099`,所以切换 = **换进程**。
+
+1. **对拍(金标)**:同一 campaign 分别跑 Python(`uvicorn dd_agent.api:app --port 8099`)和 TS(`bun src/server.ts`,临时 `PORT=8098`),各拿到 `report.json`,跑
+   `bun engine-ts/scripts/report-parity.ts <py>/report.json <ts>/report.json`
+   —— 它只比**结构**(顶层 key + findings/sources/references/databaseFacts 元素 shape + stats key),因为 LLM 内容本就 run-to-run 变。shape 一致即 parity。
+2. **切换**:停 Python `uvicorn:8099` → 起 `PORT=8099 DD_DB=… DD_ARTIFACTS=… bun engine-ts/src/server.ts`(沿用同一 `DD_DB`/`DD_ARTIFACTS`,sqlite/artifacts 兼容)。前端代理不动。
+3. **回滚**:停 Bun → 起回 `uvicorn:8099`。两者读同一 sqlite/artifacts,可来回切。
+4. **退役**:稳定运行后,Python 栈保留在 **`python-stack` 分支**(已存档);master 的 `src/dd_agent/` 可标 legacy 或移除(单独决策)。
+
+> 未移植/后续:agent 详细 step-stream(`worker._emit_stream`,只影响 UI 的逐步卡片,不影响 report)、intake/chat/files 端点、资产层(`assets.py`)的 TS 版 —— 都是增量,不阻塞切换。
+
 ---
-*附:本评估基于 master `b005cbe` 的代码盘点(20 模块 / 4088 行)。MCP + 资产 JSON 契约是迁移的稳定锚点。*
+*附:本评估基于 master `b005cbe` 的代码盘点(20 模块 / 4088 行)。Phase 1–4 已落地;MCP + 资产 JSON 契约是迁移的稳定锚点。*
