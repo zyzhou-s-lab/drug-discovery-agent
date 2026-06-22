@@ -19,12 +19,15 @@ const readJson = (p: string) => JSON.parse(readFileSync(p, "utf-8"));
 const J = (r: Response): Promise<any> => r.json() as Promise<any>;
 const ANGLES = [{ label: "g", query: "q" }];
 
-test("runSearch writes running → done + report", async () => {
+test("runSearch writes running → done + report + overview assets", async () => {
   const { art } = setup();
-  const fakeResearch = async () => ({ question: "Q", findings: [{ claim: "c" }], stats: { confirmed: 1 } }) as any;
+  const fakeResearch = async () => ({ question: "Q", findings: [{ claim: "c" }], sources: [{ url: "u", quality: "primary" }], databaseFacts: [{ claim: "d" }], stats: { confirmed: 1 } }) as any;
   await runSearch(art, "rs-done", "Alzheimer", ANGLES, { research: fakeResearch });
   expect(readJson(join(art, "rs-done", "search_status.json")).state).toBe("done");
   expect(readJson(join(art, "rs-done", "report.json")).findings[0].claim).toBe("c");
+  // end-of-run sediments the compute-facing assets next to the report
+  expect(readJson(join(art, "rs-done", "assets", "sources.json")).count).toBe(1);
+  expect(readJson(join(art, "rs-done", "assets", "database_facts.json")).count).toBe(1);
   expect(isRunning("rs-done")).toBe(false);
 });
 
