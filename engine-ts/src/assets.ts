@@ -53,6 +53,19 @@ export function writeOverviewAssets(report: any, artifactsRoot: string, campaign
   return [srcPath, dbPath];
 }
 
+/** Generic single-asset writer (issue #30 §C) — write `payload` to {assets}/{name}.json with the
+ * campaign stamped in, atomically. The primitive behind research()'s incremental per-stage
+ * checkpoints (sources / database_facts / verified), so a crashed run still leaves the structured
+ * data its predecessor stages produced. Returns the path written. */
+export function writeAsset(artifactsRoot: string, campaign: string, name: string, payload: Record<string, unknown>): string {
+  const file = name.endsWith(".json") ? name : name + ".json";
+  const path = join(assetsDir(artifactsRoot, campaign), file);
+  // JSON deep clone before write — consistent with writeCandidates; also rejects a non-serializable
+  // payload (circular) by throwing here, which research's doPersist catches + surfaces via ev.
+  writeAtomic(path, { campaign, ...JSON.parse(JSON.stringify(payload)) });
+  return path;
+}
+
 /** Write nomination's ranked TargetCandidate[] as candidates.json — the gene list (+ scores,
  * modality, evidence) the validation / perturbation step consumes. Returns the path written. */
 export function writeCandidates(
