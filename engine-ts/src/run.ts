@@ -47,7 +47,12 @@ export function normalizeAngles(raw: unknown): Angle[] {
     const query = String(a?.query ?? "").trim() || label;
     if (!query) continue;
     // label falls back to the query head (verbatim from api.py); a label-only custom angle is fine.
-    out.push({ label: label || query.slice(0, 60), query, rationale: String(a?.rationale ?? "") });
+    // query/rationale are length-capped defensively (malicious/oversized input → bloated files/prompts).
+    out.push({
+      label: label || query.slice(0, 60),
+      query: query.slice(0, 500),
+      rationale: String(a?.rationale ?? "").slice(0, 1000),
+    });
   }
   return out;
 }

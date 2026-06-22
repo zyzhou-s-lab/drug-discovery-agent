@@ -119,3 +119,37 @@ test("POST /research/scope rejects an over-long disease (400)", async () => {
   const r = await app.request("/api/research/scope", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ disease: long }) });
   expect(r.status).toBe(400);
 });
+
+test("POST /stop returns stopped:true while a run is live", async () => {
+  const slow = async (_d: string, _a: unknown, o: any) => {
+    while (!o.shouldStop()) await new Promise((r) => setTimeout(r, 5));
+    return { question: "Q", findings: [], stats: {} } as any;
+  };
+  const { app } = setup({ researchFn: slow as any });
+  await app.request("/api/campaigns/stp/search", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ angles: ANGLES, disease: "X" }) });
+  await new Promise((r) => setTimeout(r, 10));
+  expect((await J(await app.request("/api/campaigns/stp/stop", { method: "POST" }))).stopped).toBe(true);
+  await new Promise((r) => setTimeout(r, 40)); // let it drain (registry clears)
+});
+
+test("POST /search truncates angles to DD_DR_MAX_ANGLES", async () => {
+  process.env.DD_DR_MAX_ANGLES = "1";
+  const fake = async () => ({ question: "Q", findings: [], stats: {} }) as any;
+  const { app } = setup({ researchFn: fake as any });
+  const j = await J(await app.request("/api/campaigns/maxa/search", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ angles: [{ label: "a", query: "qa" }, { label: "b", query: "qb" }, { label: "c", query: "qc" }], disease: "X" }),
+  }));
+  expect(j.angles).toBe(1);
+  delete process.env.DD_DR_MAX_ANGLES;
+  await new Promise((r) => setTimeout(r, 20));
+});
+
+test("POST /search rejects an over-long disease (400)", async () => {
+  const { app } = setup();
+  const r = await app.request("/api/campaigns/dl/search", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ angles: ANGLES, disease: "x".repeat(2001) }),
+  });
+  expect(r.status).toBe(400);
+});

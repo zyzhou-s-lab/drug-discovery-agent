@@ -3,7 +3,7 @@
 // 4b: config (settings page, GET/POST /api/config) + the SSE campaign-view stream.
 // The run trigger (scope/search → research()) + chat/files/intake are the later 4c slice.
 // createApp takes an injectable Index so it tests against a temp DB. See bun-migration-eval Phase 4.
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { Hono } from "hono";
@@ -41,6 +41,12 @@ function readJson(path: string): any | null {
  * a decoded `..`, `/` or `\` must never reach join(). A real campaign/stage id has none. */
 function safeSegment(s: string): boolean {
   return s.length > 0 && !s.includes("..") && !s.includes("/") && !s.includes("\\");
+}
+
+function writeJsonAtomic(path: string, obj: unknown): void {
+  const tmp = path + ".tmp";
+  writeFileSync(tmp, JSON.stringify(obj), "utf-8");
+  renameSync(tmp, path); // atomic: a crash mid-write can't truncate the live file
 }
 
 /** Join recorded stage_state onto the canonical PIPELINE order (not-yet-started stages → queued). */
@@ -119,7 +125,7 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
     if ((status.state === "running" || status.state === "stopping") && !isRunning(campaign)) {
       status = { state: "stopped", note: "worker ended (server restart)" };
       try {
-        writeFileSync(statusPath, JSON.stringify(status), "utf-8");
+        writeJsonAtomic(statusPath, status);
       } catch {
         /* best-effort persist */
       }
@@ -158,8 +164,10 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
     const maxA = process.env.DD_DR_MAX_ANGLES; // truncate for lightweight testing
     if (maxA && Number.isInteger(Number(maxA))) angles = angles.slice(0, Number(maxA));
     if (!angles.length) return c.json({ error: "no angles provided" }, 400);
+    const diseaseIn = String(body.disease ?? "");
+    if (diseaseIn.length > 2000) return c.json({ error: "disease too long" }, 400); // bound the LLM input
     if (isRunning(campaign)) return c.json({ error: "search already running" }, 409);
-    const disease = String(body.disease ?? "") || campaign;
+    const disease = diseaseIn || campaign;
     void runSearch(artifactsRoot, campaign, disease, angles, { research: opts.researchFn });
     return c.json({ campaign, started: true, angles: angles.length });
   });
