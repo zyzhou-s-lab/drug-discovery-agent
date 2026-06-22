@@ -6,6 +6,7 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { writeOverviewAssets } from "./assets";
 import { research as realResearch } from "./deep_research";
 import { emit, eventsDir } from "./events";
 
@@ -120,6 +121,14 @@ export async function runSearch(
       }),
     );
     writeJson(reportPath, report);
+    // Sediment the compute-facing assets (sources / database_facts) next to the report so the
+    // downstream analysis steps read a stable contract, not the big report.json. Best-effort —
+    // never fail the run on an asset write (mirrors api.py _run_search).
+    try {
+      writeOverviewAssets(report, artifactsRoot, campaign);
+    } catch (e) {
+      console.warn(`overview asset write failed for ${campaign}:`, e);
+    }
     const final = entry.stopped ? "stopped" : "done";
     writeJson(statusPath, { state: final, stats: report.stats, run: runId });
     emit(SEARCH_STAGE, "synthesize", "result", { num_turns: report.stats?.agentCalls });
