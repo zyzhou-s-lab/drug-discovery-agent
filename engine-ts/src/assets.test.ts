@@ -101,3 +101,10 @@ test("writeAsset deep-clones + throws cleanly on a non-serializable payload", ()
   expect(() => writeAsset(root, "camp", "verified", circular)).toThrow();
   expect(existsSync(join(assetsDir(root, "camp"), "verified.json"))).toBe(false);
 });
+
+test("loadAsset accepts a name with or without .json (consistent with writeAsset)", () => {
+  const root = setup();
+  writeAsset(root, "camp", "findings", { stage: "deep-research", count: 1, findings: [{ angle: "g" }] });
+  expect(loadAsset(root, "camp", "findings").count).toBe(1);        // no extension
+  expect(loadAsset(root, "camp", "findings.json").count).toBe(1);   // full name — both resolve
+});

@@ -6,7 +6,7 @@
 import { Budget, MAX_FETCH, MAX_VERIFY_CLAIMS, CONF_RANK, dedupResults, normUrl, rankClaims, type SearchResult, survives, VOTES_PER_CLAIM, REFUTATIONS_REQUIRED, MAX_DB_RAW } from "./core";
 import { makeLitMcp } from "./litmcp";
 import { type OnMessage, runAgent as realRunAgent, type RunAgentOpts, Semaphore, type ToolResult } from "./orchestrate";
-import { ExtractSchema, ReportSchema, SearchSchema, VerdictSubmitSchema } from "./schemas";
+import { AngleFindingSchema, ExtractSchema, MergeSchema, SearchSchema, VerdictSubmitSchema } from "./schemas";
 import { citeByDoi } from "./tools/paperfetch";
 
 const END = (toolName: string) =>
@@ -150,51 +150,53 @@ function synthBlock(confirmed: any[], dbContext?: any[]): string {
   return parts.join("\n");
 }
 
-export function SYNTH_PROMPT(question: string, confirmed: any[], killed: any[], dbRawContext?: any[], angles?: Angle[]): string {
+// MAP step (#30 phase 3): synthesize ONE finding from a single angle's confirmed claims + its own
+// database records. The prompt only ever holds one angle's data → no end-of-pipeline context pile-up.
+export function ANGLE_SYNTH_PROMPT(question: string, angle: Angle, confirmed: any[], dbRawContext?: any[]): string {
   const block = synthBlock(confirmed, dbRawContext);
-  let killedBlock = "";
-  if (killed.length) {
-    killedBlock = "\n## Refuted claims (for transparency)\n" + killed
-      .map((c) => '- "' + c.claim + '" (' + c.sourceUrl + ", vote " + (c.verdicts.length - c.refutedVotes) + "-" + c.refutedVotes + ")")
-      .join("\n");
-  }
-  let dbInstruction = "";
-  if (dbRawContext && dbRawContext.length) {
-    dbInstruction =
-      "\n8. For findings backed by database sources, you MUST cite the concrete field values " +
-      "(ontology IDs, gene symbols, association scores, classification terms, cohort sizes) " +
-      "from the raw records above. Do NOT paraphrase into vague summaries — the raw records " +
-      "are authoritative primary data.";
-  }
-  let angleSection = "";
-  if (angles && angles.length) {
-    const angleList = angles.map((a, idx) => idx + 1 + '. angle="' + a.label + '" — ' + (a.rationale ?? a.query ?? "")).join("\n");
-    angleSection =
-      "\n## Research angles (from Scope phase)\n" +
-      "The disease was decomposed into these research angles:\n" + angleList + "\n\n" +
-      "You MUST produce EXACTLY " + angles.length + " findings — one per angle above, in the same order.\n" +
-      "Each finding MUST include an `angle` field set to the EXACT angle label string shown above.\n" +
-      "The `findings` array length MUST equal " + angles.length + ".\n" +
-      'If an angle yielded no confirmed claims, still include it with confidence: "low" ' +
-      "and evidence explaining insufficient data.\n" +
-      "Do NOT write a generic literature review. Address each angle individually.\n";
-  }
+  const empty = confirmed.length === 0;
+  // only attach the DB-citation instruction when there ARE claims (and thus a block of raw records);
+  // when empty the block is hidden ("(none)") so the instruction would dangle.
+  const dbInstruction = !empty && dbRawContext && dbRawContext.length
+    ? "\n- For a finding backed by database sources, you MUST cite the concrete field values " +
+      "(ontology IDs, gene symbols, association scores, classification terms, cohort sizes) from the " +
+      "raw records above — do NOT paraphrase into a vague summary; the raw records are authoritative."
+    : "";
   return (
-    "## Synthesis: research report\n\n" +
-    "**Question:** " + question + "\n\n" +
-    confirmed.length + " claims survived " + VOTES_PER_CLAIM + "-vote adversarial verification. " +
-    "Merge semantic duplicates and synthesize.\n\n" +
-    angleSection +
-    "## Confirmed claims\n" + block + "\n" + killedBlock + "\n\n" +
-    "## Instructions\n" +
-    "1. Identify claims that say the same thing — merge them, combine their sources.\n" +
-    "2. For each research angle, produce ONE finding. The `angle` field is REQUIRED — set it to the exact angle label.\n" +
-    "3. Assign confidence per finding: high (multiple primary sources, unanimous votes), medium (secondary sources or split votes), low (single source or blog-quality).\n" +
-    "4. Write a 3-5 sentence executive summary answering the research question.\n" +
-    "5. Note caveats: what's uncertain, what sources were weak, what time-sensitivity applies.\n" +
-    "6. List 2-4 open questions that emerged but weren't answered." +
+    "## Angle Synthesis: " + angle.label + "\n\n" +
+    "**Question:** " + question + "\n" +
+    "**This angle:** " + angle.label + " — " + (angle.rationale ?? angle.query ?? "") + "\n\n" +
+    confirmed.length + " confirmed claims for THIS angle survived " + VOTES_PER_CLAIM + "-vote adversarial verification.\n\n" +
+    "## Confirmed claims (this angle only)\n" + (empty ? "(none)\n" : block) + "\n\n" +
+    "## Instructions — produce EXACTLY ONE finding for this angle:\n" +
+    "1. Merge claims that say the same thing; combine their sources.\n" +
+    "2. `confidence`: high (multiple primary sources, unanimous votes), medium (secondary sources or split votes), low (single/weak source).\n" +
+    "3. `evidence`: 2-4 sentences synthesizing what this angle's claims establish.\n" +
+    "4. `sources`: the URLs backing the finding.\n" +
+    (empty
+      ? '\nThis angle yielded NO confirmed claims — still return a finding with confidence "low" and evidence explaining the insufficient data.'
+      : "\nAddress THIS angle specifically; do not generalize beyond its claims.") +
     dbInstruction +
-    END("submit_report")
+    END("submit_finding")
+  );
+}
+
+// REDUCE step (#30 phase 3): merge the per-angle findings into the overview prose. Input is the
+// already-compressed findings (not raw claims), so this stays small regardless of corpus size.
+export function MERGE_PROMPT(question: string, findings: any[]): string {
+  const list = findings
+    .map((f, i) => "### [" + (i + 1) + '] angle="' + (f.angle ?? "UNKNOWN") + '" (' + (f.confidence ?? "low") + ")\n" + f.claim + "\n" + (f.evidence ?? ""))
+    .join("\n\n");
+  return (
+    "## Research Synthesis: merge\n\n" +
+    "**Question:** " + question + "\n\n" +
+    findings.length + " per-angle findings were produced:\n\n" + list + "\n\n" +
+    "## Instructions\n" +
+    "1. Write a 3-5 sentence executive summary answering the research question, drawing across the findings above.\n" +
+    "2. Note caveats: what's uncertain, which sources were weak, what time-sensitivity applies.\n" +
+    "3. List 2-4 open questions that emerged but weren't answered.\n" +
+    "Synthesize ACROSS the findings — do not restate each one." +
+    END("submit_merge")
   );
 }
 
@@ -359,7 +361,8 @@ export async function research(question: string, angles: Angle[], opts: Research
       return {
         url, title: source.title, angle: angle.label, source_type: st, doi, sourceQuality: sq,
         publishDate: (ext as any).publishDate,
-        claims: ((ext as any).claims ?? []).map((c: any) => ({ ...c, sourceUrl: url, doi, source_type: st, sourceQuality: sq, raw })),
+        // claims carry their scope angle (#30 phase 3) — the grouping key for per-angle synthesis
+        claims: ((ext as any).claims ?? []).map((c: any) => ({ ...c, sourceUrl: url, doi, source_type: st, sourceQuality: sq, raw, angle: angle.label })),
       };
     };
 
@@ -451,41 +454,75 @@ export async function research(question: string, angles: Angle[], opts: Research
     };
   }
 
-  // ── synthesize ──
-  const dbRawContext = allClaims.filter((c) => c.source_type === "database" && c.raw).map((c) => ({ sourceUrl: c.sourceUrl, sourceQuality: c.sourceQuality, raw: c.raw }));
-  const [synthReport] = await runAgent("synthesize", SYNTH_PROMPT(question, confirmed, killed, dbRawContext, angles), "submit_report", ReportSchema.shape, {}, budget, sem, {
-    onMessage: amsg("synthesize"),
+  // ── synthesize: per-angle map-reduce (#30 phase 3) ── each angle is synthesized from ONLY its own
+  // confirmed claims + its own database records (no end-of-pipeline context pile-up), then a light
+  // merge writes the overview prose across the per-angle findings.
+  const dbRawByAngle = new Map<string, any[]>();
+  for (const c of allClaims) {
+    if (c.source_type === "database" && c.raw) {
+      const arr = dbRawByAngle.get(c.angle) ?? [];
+      arr.push({ sourceUrl: c.sourceUrl, sourceQuality: c.sourceQuality, raw: c.raw });
+      dbRawByAngle.set(c.angle, arr);
+    }
+  }
+  const confirmedByAngle = new Map<string, any[]>();
+  for (const c of confirmed) {
+    const arr = confirmedByAngle.get(c.angle) ?? [];
+    arr.push(c);
+    confirmedByAngle.set(c.angle, arr);
+  }
+
+  prog.synthesize = [0, angles.length + 1]; // N angle-maps + 1 merge
+  emitProg("synthesize");
+
+  // MAP — one finding per angle, concurrent (sem-bounded). Each result is written to its OWN slot
+  // (indexed by angle position, not push) so the incremental snapshot stays in angle order even when
+  // a later angle finishes first; the last completing map persists all N in order. Crash-safe.
+  const findingsAcc: any[] = new Array(angles.length);
+  const mapAngle = async (a: Angle, idx: number): Promise<any> => {
+    const conf = confirmedByAngle.get(a.label) ?? [];
+    const dbr = dbRawByAngle.get(a.label) ?? [];
+    const [f] = await runAgent("synthesize", ANGLE_SYNTH_PROMPT(question, a, conf, dbr), "submit_finding", AngleFindingSchema.shape, {}, budget, sem, {
+      onMessage: amsg("synth · " + a.label.slice(0, 24)),
+      shouldStop: opts.shouldStop,
+    });
+    bump("synthesize", 1);
+    findingsAcc[idx] = f
+      ? { ...(f as any), angle: a.label } // angle AFTER spread — the caller's scope label always wins, even if the agent hallucinated an `angle`
+      : { angle: a.label, claim: "(synthesis unavailable)", confidence: "low", sources: [], evidence: "Per-angle synthesis did not complete for this angle." };
+    const done = findingsAcc.filter((v) => v !== undefined); // completed slots (each a truthy finding object), in angle order
+    doPersist("findings", { stage: "deep-research", question, count: done.length, findings: done });
+    return findingsAcc[idx];
+  };
+  const findings = await Promise.all(angles.map((a, i) => mapAngle(a, i))); // result array preserves angle order
+
+  // REDUCE — merge the per-angle findings into summary / caveats / openQuestions
+  const [merged] = await runAgent("synthesize", MERGE_PROMPT(question, findings), "submit_merge", MergeSchema.shape, {}, budget, sem, {
+    onMessage: amsg("merge"),
     shouldStop: opts.shouldStop,
   });
   bump("synthesize", 1);
+  ev("synthesize", "报告生成:" + findings.length + " 条 per-angle 发现 + 合并");
 
   const sourcesOut = allSources.map((s) => ({ url: s.url, quality: s.sourceQuality, angle: s.angle, claimCount: s.claims.length }));
+  const references = await bibliography(confirmed, allSources);
   const stats = {
     ...statsBase, verified: voted.length, confirmed: confirmed.length, killed: killed.length,
-    agentCalls: 1 + angles.length + allSources.length + voted.length * VOTES_PER_CLAIM + 1,
+    // 1 scope + N search + M fetch + (verify×3) + N angle-maps + 1 merge
+    agentCalls: 1 + angles.length + allSources.length + voted.length * VOTES_PER_CLAIM + angles.length + 1,
+    afterSynthesis: findings.length,
   };
-  const references = await bibliography(confirmed, allSources);
-  const biblio = { references, databaseFacts: dbOut };
-
-  if (!synthReport) {
-    return {
-      question,
-      summary: "Synthesis step was skipped or failed — returning " + confirmed.length + " verified claims unmerged.",
-      findings: [],
-      confirmed: confirmed.map((c) => ({ claim: c.claim, source: c.sourceUrl, quote: c.quote, vote: c.verdicts.length - c.refutedVotes + "-" + c.refutedVotes })),
-      refuted: refutedOut, sources: sourcesOut, ...biblio,
-      stats: { ...stats, afterSynthesis: 0 }, budget: budget.report(),
-    };
-  }
-
-  ev("synthesize", "报告生成:" + ((synthReport as any).findings?.length ?? 0) + " 条发现");
   return {
     question,
-    ...(synthReport as any),
+    summary: (merged as any)?.summary ?? "Synthesized " + findings.length + " per-angle findings from " + confirmed.length + " verified claims.",
+    findings,
+    caveats: (merged as any)?.caveats ?? "",
+    openQuestions: (merged as any)?.openQuestions ?? [],
     refuted: refutedOut,
     sources: sourcesOut,
-    ...biblio,
-    stats: { ...stats, afterSynthesis: (synthReport as any).findings?.length ?? 0 },
+    references,
+    databaseFacts: dbOut,
+    stats,
     budget: budget.report(),
   };
 }
