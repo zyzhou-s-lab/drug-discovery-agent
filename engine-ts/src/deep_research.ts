@@ -490,7 +490,7 @@ export async function research(question: string, angles: Angle[], opts: Research
     findingsAcc[idx] = f
       ? { angle: a.label, ...(f as any) }
       : { angle: a.label, claim: "(synthesis unavailable)", confidence: "low", sources: [], evidence: "Per-angle synthesis did not complete for this angle." };
-    const done = findingsAcc.filter(Boolean); // completed so far, in angle order
+    const done = findingsAcc.filter((v) => v !== undefined); // completed slots (each a truthy finding object), in angle order
     doPersist("findings", { stage: "deep-research", question, count: done.length, findings: done });
     return findingsAcc[idx];
   };
