@@ -133,16 +133,21 @@ test("POST /stop returns stopped:true while a run is live", async () => {
 });
 
 test("POST /search truncates angles to DD_DR_MAX_ANGLES", async () => {
+  const prev = process.env.DD_DR_MAX_ANGLES;
   process.env.DD_DR_MAX_ANGLES = "1";
-  const fake = async () => ({ question: "Q", findings: [], stats: {} }) as any;
-  const { app } = setup({ researchFn: fake as any });
-  const j = await J(await app.request("/api/campaigns/maxa/search", {
-    method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ angles: [{ label: "a", query: "qa" }, { label: "b", query: "qb" }, { label: "c", query: "qc" }], disease: "X" }),
-  }));
-  expect(j.angles).toBe(1);
-  delete process.env.DD_DR_MAX_ANGLES;
-  await new Promise((r) => setTimeout(r, 20));
+  try {
+    const fake = async () => ({ question: "Q", findings: [], stats: {} }) as any;
+    const { app } = setup({ researchFn: fake as any });
+    const j = await J(await app.request("/api/campaigns/maxa/search", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ angles: [{ label: "a", query: "qa" }, { label: "b", query: "qb" }, { label: "c", query: "qc" }], disease: "X" }),
+    }));
+    expect(j.angles).toBe(1);
+    await new Promise((r) => setTimeout(r, 20));
+  } finally {
+    if (prev === undefined) delete process.env.DD_DR_MAX_ANGLES; // restore even if the assert throws
+    else process.env.DD_DR_MAX_ANGLES = prev;
+  }
 });
 
 test("POST /search rejects an over-long disease (400)", async () => {
