@@ -70,3 +70,12 @@ test("writeCandidates deep-clones — a later mutation can't pollute the written
   cand.evidence.push("b"); // mutate AFTER write
   expect(read(path).candidates[0].evidence).toEqual(["a"]); // asset unaffected
 });
+
+test("writeCandidates throws cleanly on a non-serializable candidate — no partial asset written", () => {
+  const root = setup();
+  const circular: any = {};
+  circular.self = circular; // JSON.stringify will throw on this
+  expect(() => writeCandidates([circular], root, "camp")).toThrow();
+  // the throw happens during the pre-write clone, before any file is touched → no corrupt/partial asset
+  expect(existsSync(join(assetsDir(root, "camp"), "candidates.json"))).toBe(false);
+});
