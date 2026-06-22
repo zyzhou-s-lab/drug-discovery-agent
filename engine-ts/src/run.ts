@@ -6,7 +6,7 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { writeOverviewAssets } from "./assets";
+import { writeAsset, writeOverviewAssets } from "./assets";
 import { research as realResearch } from "./deep_research";
 import { emit, eventsDir } from "./events";
 
@@ -127,6 +127,10 @@ export async function runSearch(
         shouldStop: () => entry.stopped,
         onProgress: (phase, done, total) => emit(SEARCH_STAGE, phase, "progress", { done, total }),
         onEvent: (phase, msg) => emit(SEARCH_STAGE, phase, "log", { msg }),
+        // incremental per-stage asset checkpoints (#30). A throw here propagates to research's
+        // doPersist, which surfaces it via ev (→ the event stream) and continues — never failing
+        // the run, but no longer silently swallowed.
+        persist: (name, payload) => writeAsset(artifactsRoot, campaign, name, payload),
       }),
     );
     writeJson(reportPath, report);

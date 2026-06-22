@@ -250,6 +250,7 @@ export interface ResearchOpts {
   maxVerifyClaims?: number;
   runAgent?: RunAgentFn; // injectable for offline orchestration tests
   lit?: Record<string, unknown>; // injectable; defaults to makeLitMcp()
+  persist?: (name: string, payload: Record<string, unknown>) => void; // incremental per-stage asset sink (#30)
 }
 
 /** Run Search→Fetch→Verify→Synthesize over pre-scoped `angles`. Returns the report dict (or a
@@ -273,6 +274,17 @@ export async function research(question: string, angles: Angle[], opts: Research
     try {
       opts.onEvent?.(phase, message);
     } catch { /* best-effort */ }
+  };
+  // incremental per-stage asset checkpoint (#30): sediment a stage's structured output as soon as
+  // it exists so a crash/kill mid-run still leaves the predecessor stages' data. Best-effort — a
+  // persist failure (disk full / permission) NEVER fails the run, but is surfaced via ev (the
+  // event stream) rather than silently swallowed, so ops/UI can see it.
+  const doPersist = (name: string, payload: Record<string, unknown>) => {
+    try {
+      opts.persist?.(name, payload);
+    } catch (e) {
+      ev("persist", `资产 '${name}' 增量落盘失败: ${e instanceof Error ? e.message : String(e)}`);
+    }
   };
   const amsg = (label: string): OnMessage | undefined => (opts.onAgent ? (m) => opts.onAgent!(label, m) : undefined);
 
@@ -362,6 +374,14 @@ export async function research(question: string, angles: Angle[], opts: Research
   const ranked = rankClaims(allClaims, maxVerifyClaims);
   ev("fetch", "抓取 " + allSources.length + " 源 → " + allClaims.length + " claims(数据库记录 " + dbFacts.length + ",数据保留)→ 验证前 " + ranked.length);
 
+  // checkpoint #1 — the source list (references filled later by the end-of-run snapshot). Runs on
+  // every path, INCLUDING the salvage early-returns below, so the asset always reflects the fetch.
+  doPersist("sources", {
+    stage: "disease-overview", question, count: allSources.length,
+    sources: allSources.map((s) => ({ url: s.url, quality: s.sourceQuality, angle: s.angle, claimCount: s.claims.length })),
+    references: [],
+  });
+
   const statsBase = {
     angles: angles.length, sources: allSources.length, claims: allClaims.length,
     dupes: dupes.length, budgetDropped: budgetDropped.length, databaseFacts: dbFacts.length,
@@ -410,6 +430,15 @@ export async function research(question: string, angles: Angle[], opts: Research
     return ok.has(k) ? "confirmed" : no.has(k) ? "refuted" : "unverified";
   };
   const dbOut = dbFacts.map((c) => ({ claim: c.claim, quote: c.quote, source: c.sourceUrl, doi: c.doi, quality: c.sourceQuality, status: dbStatus(c), raw: c.raw }));
+
+  // checkpoint #2 — the database records (with verify status) + the verified-claim ledger. Runs
+  // before the no-confirmed salvage too, so both survive a crash after verification.
+  doPersist("database_facts", { stage: "disease-overview", question, count: dbOut.length, facts: dbOut });
+  doPersist("verified", {
+    stage: "deep-research", question, count: confirmed.length,
+    confirmed: confirmed.map((c) => ({ claim: c.claim, source: c.sourceUrl, quote: c.quote, vote: c.verdicts.length - c.refutedVotes + "-" + c.refutedVotes })),
+    refuted: refutedOut,
+  });
 
   if (!confirmed.length) {
     return {
