@@ -10,7 +10,7 @@
 //     └── candidates.json       # nomination: ranked TargetCandidate[] (genes validation perturbs)
 // Each file is a self-describing envelope ({campaign, stage, count, <payload>}). Writes are atomic
 // and idempotent (a re-run overwrites its own assets). See issue #30.
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 export const ASSETS_SUBDIR = "assets";
@@ -61,7 +61,9 @@ export function writeCandidates(
   campaign: string,
   opts: { efoId?: string; sortBy?: string } = {},
 ): string {
-  const rows = candidates.map((c) => (c && typeof c === "object" ? { ...c } : c));
+  // deep clone so a later mutation of the caller's candidate objects can't leak into the (already
+  // serialized) asset; Python's model_dump() is likewise a fresh deep copy.
+  const rows = candidates.map((c) => (c && typeof c === "object" ? structuredClone(c) : c));
   const path = join(assetsDir(artifactsRoot, campaign), "candidates.json");
   writeAtomic(path, { campaign, stage: "nomination", efo_id: opts.efoId ?? "", sort_by: opts.sortBy ?? "", count: rows.length, candidates: rows });
   return path;
@@ -70,9 +72,11 @@ export function writeCandidates(
 /** Read one asset by file name (e.g. 'database_facts.json'); null if absent/unreadable. The entry
  * point for a downstream compute step to pick up an upstream stage's hand-off. */
 export function loadAsset(artifactsRoot: string, campaign: string, name: string): any | null {
+  const p = join(assetsDir(artifactsRoot, campaign), name);
+  if (!existsSync(p)) return null; // absent → null (skip constructing/catching an ENOENT)
   try {
-    return JSON.parse(readFileSync(join(assetsDir(artifactsRoot, campaign), name), "utf-8"));
+    return JSON.parse(readFileSync(p, "utf-8"));
   } catch {
-    return null;
+    return null; // present but unreadable/corrupt → null (faithful to assets.py's OSError|ValueError)
   }
 }

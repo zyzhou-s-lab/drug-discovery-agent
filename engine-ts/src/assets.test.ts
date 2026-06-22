@@ -54,3 +54,20 @@ test("writes are atomic — no orphan .tmp left in the assets dir", () => {
   expect(files.some((f) => f.endsWith(".tmp"))).toBe(false);
   expect(existsSync(join(assetsDir(root, "camp"), "sources.json"))).toBe(true);
 });
+
+test("loadAsset returns null for a present-but-corrupt asset", () => {
+  const root = setup();
+  const dir = assetsDir(root, "camp");
+  const { mkdirSync, writeFileSync } = require("node:fs");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "sources.json"), "{ not json", "utf-8");
+  expect(loadAsset(root, "camp", "sources.json")).toBeNull();
+});
+
+test("writeCandidates deep-clones — a later mutation can't pollute the written asset", () => {
+  const root = setup();
+  const cand = { symbol: "ABCA4", evidence: ["a"] };
+  const path = writeCandidates([cand], root, "camp");
+  cand.evidence.push("b"); // mutate AFTER write
+  expect(read(path).candidates[0].evidence).toEqual(["a"]); // asset unaffected
+});
