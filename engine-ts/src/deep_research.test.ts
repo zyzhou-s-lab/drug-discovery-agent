@@ -165,3 +165,15 @@ test("research map-reduce: N angles → N findings (one per angle, in angle orde
   expect(r.findings.map((f: any) => f.angle)).toEqual(["genetics", "biomarkers"]); // angle order preserved
   expect(r.stats.afterSynthesis).toBe(2);
 });
+
+test("research map: caller's scope angle label always wins over an agent-hallucinated angle", async () => {
+  const fake = fakeRunAgent({
+    submit_results: { results: [{ url: "https://x.com/a", title: "A", relevance: "high" }] },
+    submit_claims: { sourceQuality: "primary", claims: [{ claim: "C1", quote: "q", importance: "central" }] },
+    submit_verdict: { refuted: false, evidence: "e", confidence: "high" },
+    submit_finding: { angle: "HALLUCINATED", claim: "C1", confidence: "high", sources: [], evidence: "ev" }, // agent injects a wrong angle
+    submit_merge: { summary: "S", caveats: "", openQuestions: [] },
+  });
+  const r = await research("Q", ANGLE, { runAgent: fake, lit: {} });
+  expect(r.findings[0].angle).toBe("g"); // the scope label "g", NOT "HALLUCINATED"
+});

@@ -488,7 +488,7 @@ export async function research(question: string, angles: Angle[], opts: Research
     });
     bump("synthesize", 1);
     findingsAcc[idx] = f
-      ? { angle: a.label, ...(f as any) }
+      ? { ...(f as any), angle: a.label } // angle AFTER spread — the caller's scope label always wins, even if the agent hallucinated an `angle`
       : { angle: a.label, claim: "(synthesis unavailable)", confidence: "low", sources: [], evidence: "Per-angle synthesis did not complete for this angle." };
     const done = findingsAcc.filter((v) => v !== undefined); // completed slots (each a truthy finding object), in angle order
     doPersist("findings", { stage: "deep-research", question, count: done.length, findings: done });
