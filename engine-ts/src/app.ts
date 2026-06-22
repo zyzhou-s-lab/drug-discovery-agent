@@ -1,7 +1,8 @@
-// Phase-4a TS port of api.py's read model — the CQRS read API on Hono over the Index (store.ts) +
-// the event log (events.ts). Read-only: health / pipeline / campaigns / campaign view / report /
-// stage events. The run trigger + SSE stream + config are later 4b/4c slices. createApp takes an
-// injectable Index so it tests against a temp DB. See docs/bun-migration-eval.md Phase 4.
+// Phase-4 TS port of api.py on Hono over the Index (store.ts) + event log (events.ts).
+// 4a (read model): health / pipeline / campaigns / campaign view / report / stage events.
+// 4b: config (settings page, GET/POST /api/config) + the SSE campaign-view stream.
+// The run trigger (scope/search → research()) + chat/files/intake are the later 4c slice.
+// createApp takes an injectable Index so it tests against a temp DB. See bun-migration-eval Phase 4.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
