@@ -61,8 +61,17 @@ export function normalizeAngles(raw: unknown): Angle[] {
 function writeJson(path: string, obj: unknown): void {
   mkdirSync(join(path, ".."), { recursive: true });
   const tmp = path + ".tmp";
-  writeFileSync(tmp, JSON.stringify(obj), "utf-8");
-  renameSync(tmp, path);
+  try {
+    writeFileSync(tmp, JSON.stringify(obj), "utf-8");
+    renameSync(tmp, path);
+  } catch (e) {
+    try {
+      rmSync(tmp, { force: true });
+    } catch {
+      /* best-effort cleanup — don't leave an orphan .tmp */
+    }
+    throw e;
+  }
 }
 
 function readJson(path: string): any | null {

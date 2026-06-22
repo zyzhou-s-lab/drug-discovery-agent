@@ -21,9 +21,9 @@ export function assetsDir(artifactsRoot: string, campaign: string): string {
 
 /** Atomic write (tmp + rename); never leave an orphan .tmp behind on failure. */
 function writeAtomic(path: string, obj: unknown): void {
-  mkdirSync(dirname(path), { recursive: true });
   const tmp = path + ".tmp";
   try {
+    mkdirSync(dirname(path), { recursive: true });
     writeFileSync(tmp, JSON.stringify(obj, null, 2), "utf-8");
     renameSync(tmp, path);
   } catch (e) {
