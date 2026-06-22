@@ -87,3 +87,15 @@ test("GET stage events returns the JSONL log", async () => {
   expect(j.events[0].label).toBe("scope");
   expect(j.events[0].total).toBe(6);
 });
+
+test("SSE event stream pushes a view then closes 'done' when terminal", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ddsse-"));
+  const art = join(dir, "art");
+  const idx = new Index(join(dir, "s.sqlite"), art);
+  idx.recordAttempt("c1", "disease-overview");
+  idx.markDone("c1", "disease-overview", {}, {}); // all stages terminal → stream closes
+  const app = createApp(idx, art, { sseIntervalMs: 5 });
+  const text = await (await app.request("/api/campaigns/c1/events")).text();
+  expect(text).toContain("data:");
+  expect(text).toContain("event: done");
+}, 5000);

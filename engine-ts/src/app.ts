@@ -6,7 +6,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { Hono } from "hono";
+import { streamSSE } from "hono/streaming";
 
+import { applySettings, ConfigUpdateSchema, getConfig, loadSettings, NUM_BOUNDS, saveSettings, trustedOrigin } from "./config";
 import { readStageEvents } from "./events";
 import { Index } from "./store";
 
@@ -51,13 +53,41 @@ export function campaignView(idx: Index, campaign: string) {
   return { campaign, stages };
 }
 
-export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS): Hono {
+export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: { sseIntervalMs?: number } = {}): Hono {
   const index = idx ?? new Index(DB_PATH, ARTIFACTS);
+  const sseIntervalMs = opts.sseIntervalMs ?? 1000;
   const app = new Hono();
 
   app.get("/api/health", (c) => c.json({ ok: true })); // don't leak internal db/artifacts paths
 
   app.get("/api/pipeline", (c) => c.json({ stages: PIPELINE }));
+
+  // ── settings page (model endpoint + deep-research knobs), persisted in settings.json ──
+  // GET returns the key for the form to prefill — gated by the same CSRF guard as writes.
+  app.get("/api/config", (c) => {
+    if (!trustedOrigin(c.req.header("origin"))) return c.json({ error: "cross-origin read blocked" }, 403);
+    return c.json(getConfig());
+  });
+  // POST = wholesale overwrite: the body IS the complete settings (every field required → 422 on a
+  // partial body); a blank field reverts that override to the launch default.
+  app.post("/api/config", async (c) => {
+    if (!trustedOrigin(c.req.header("origin"))) return c.json({ error: "cross-origin write blocked" }, 403);
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+    const parsed = ConfigUpdateSchema.safeParse(body);
+    if (!parsed.success) return c.json({ error: "incomplete or invalid body" }, 422);
+    for (const [field, [lo, hi]] of Object.entries(NUM_BOUNDS)) {
+      const v = (parsed.data as Record<string, unknown>)[field] as number;
+      if (!(lo <= v && v <= hi)) return c.json({ error: `${field} must be between ${lo} and ${hi}` }, 422);
+    }
+    saveSettings(parsed.data);
+    applySettings(parsed.data);
+    return c.json(getConfig());
+  });
 
   app.get("/api/campaigns", (c) => c.json({ campaigns: index.listCampaigns() }));
 
@@ -79,6 +109,34 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS): Hono 
     const stage = c.req.param("stage");
     if (!safeSegment(campaign) || !safeSegment(stage)) return c.json({ error: "invalid path" }, 400);
     return c.json({ events: readStageEvents(artifactsRoot, campaign, stage) });
+  });
+
+  // SSE: push a fresh campaign view whenever stage_state changes; close once every stage is
+  // terminal (done/exhausted, no queued) and nothing changed for a couple of ticks.
+  app.get("/api/campaigns/:campaign/events", (c) => {
+    const campaign = c.req.param("campaign");
+    return streamSSE(c, async (stream) => {
+      let last = "";
+      let idle = 0;
+      while (!stream.aborted && !stream.closed) {
+        const view = campaignView(index, campaign);
+        const snapshot = JSON.stringify(view); // campaignView builds a deterministic key order
+        if (snapshot !== last) {
+          last = snapshot;
+          idle = 0;
+          await stream.writeSSE({ data: JSON.stringify(view) });
+        } else {
+          idle++;
+        }
+        const statuses = new Set(view.stages.map((s) => s.status));
+        const terminal = [...statuses].every((s) => s === "done" || s === "exhausted") && !statuses.has("queued");
+        if (terminal && idle >= 2) {
+          await stream.writeSSE({ event: "done", data: "{}" });
+          break;
+        }
+        await stream.sleep(sseIntervalMs);
+      }
+    });
   });
 
   return app;
