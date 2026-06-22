@@ -10,7 +10,10 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 
 import { applySettings, ConfigUpdateSchema, getConfig, NUM_BOUNDS, saveSettings, trustedOrigin } from "./config";
+import { research as realResearch } from "./deep_research";
 import { readStageEvents } from "./events";
+import { isRunning, normalizeAngles, runSearch, signalStop } from "./run";
+import { scope as realScope } from "./scope";
 import { Index } from "./store";
 
 const DB_PATH = process.env.DD_DB ?? "/tmp/dd/state.sqlite";
@@ -54,10 +57,18 @@ export function campaignView(idx: Index, campaign: string) {
   return { campaign, stages };
 }
 
-export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: { sseIntervalMs?: number; sseMaxLifetimeMs?: number } = {}): Hono {
+export interface AppOpts {
+  sseIntervalMs?: number;
+  sseMaxLifetimeMs?: number;
+  scopeFn?: typeof realScope; // injectable for offline run-trigger tests
+  researchFn?: typeof realResearch;
+}
+
+export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: AppOpts = {}): Hono {
   const index = idx ?? new Index(DB_PATH, ARTIFACTS);
   const sseIntervalMs = opts.sseIntervalMs ?? 1000;
   const sseMaxLifetimeMs = opts.sseMaxLifetimeMs ?? 300_000; // cap a connection (client auto-reconnects)
+  const scopeFn = opts.scopeFn ?? realScope;
   const app = new Hono();
 
   app.get("/api/health", (c) => c.json({ ok: true })); // don't leak internal db/artifacts paths
@@ -101,9 +112,53 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
     const campaign = c.req.param("campaign");
     if (!safeSegment(campaign)) return c.json({ error: "invalid campaign" }, 400);
     const base = join(artifactsRoot, campaign);
-    const status = readJson(join(base, "search_status.json")) ?? { state: "none" };
+    let status = readJson(join(base, "search_status.json")) ?? { state: "none" };
+    // self-heal orphans: a running/stopping status with no live worker means the task died (e.g.
+    // server restart) and will never finish. Computed on read (keeps the read path non-writing).
+    if ((status.state === "running" || status.state === "stopping") && !isRunning(campaign)) {
+      status = { state: "stopped", note: "worker ended (server restart)" };
+    }
     const report = readJson(join(base, "report.json"));
     return c.json({ campaign, status, report });
+  });
+
+  // ── run trigger (api.py research_scope / start_run / start_search / stop_search) ──
+  // Scope: decompose a disease into research angles for the user to review before the run.
+  app.post("/api/research/scope", async (c) => {
+    const body = await c.req.json().catch(() => ({}) as any);
+    const disease = String(body.disease ?? "").trim();
+    if (!disease) return c.json({ error: "disease required" }, 400);
+    const out = await scopeFn(disease);
+    return c.json(out ?? { question: disease, summary: "", angles: [], budget: null });
+  });
+
+  // Create/record a campaign (groups by disease) — fire-and-forget; the search is triggered separately.
+  app.post("/api/campaigns", async (c) => {
+    const body = await c.req.json().catch(() => ({}) as any);
+    const campaign = String(body.campaign ?? "demo");
+    const disease = String(body.disease ?? "");
+    index.recordCampaign(campaign, disease);
+    return c.json({ campaign, disease, started: true });
+  });
+
+  // Kick off the Search phase over the approved angles — fire-and-forget background run.
+  app.post("/api/campaigns/:campaign/search", async (c) => {
+    const campaign = c.req.param("campaign");
+    if (!safeSegment(campaign)) return c.json({ error: "invalid campaign" }, 400);
+    const body = await c.req.json().catch(() => ({}) as any);
+    let angles = normalizeAngles(body.angles);
+    const maxA = process.env.DD_DR_MAX_ANGLES; // truncate for lightweight testing
+    if (maxA && Number.isInteger(Number(maxA))) angles = angles.slice(0, Number(maxA));
+    if (!angles.length) return c.json({ error: "no angles provided" }, 400);
+    if (isRunning(campaign)) return c.json({ error: "search already running" }, 409);
+    const disease = String(body.disease ?? "") || campaign;
+    void runSearch(artifactsRoot, campaign, disease, angles, { research: opts.researchFn });
+    return c.json({ campaign, started: true, angles: angles.length });
+  });
+
+  app.post("/api/campaigns/:campaign/stop", (c) => {
+    const campaign = c.req.param("campaign");
+    return c.json({ campaign, stopped: signalStop(campaign) });
   });
 
   app.get("/api/campaigns/:campaign/stages/:stage/events", (c) => {
