@@ -92,8 +92,8 @@ test("research persists incremental assets in order (sources → database_facts 
   });
   const calls: Array<{ name: string; payload: any }> = [];
   await research("Q", ANGLE, { runAgent: fake, lit: {}, persist: (name, payload) => calls.push({ name, payload }) });
-  // findings persisted twice for the single angle: once incrementally as it completes, once as the final ordered snapshot
-  expect(calls.map((c) => c.name)).toEqual(["sources", "database_facts", "verified", "findings", "findings"]);
+  // single angle → findings persisted once (the one map's completion = the full ordered snapshot)
+  expect(calls.map((c) => c.name)).toEqual(["sources", "database_facts", "verified", "findings"]);
   const sources = calls.find((c) => c.name === "sources")!.payload;
   expect(sources.count).toBe(1);
   expect(sources.sources[0].url).toBe("https://x.com/a");
@@ -101,6 +101,29 @@ test("research persists incremental assets in order (sources → database_facts 
   expect(verified.confirmed[0].claim).toBe("C1");
   const findings = calls.filter((c) => c.name === "findings").at(-1)!.payload;
   expect(findings.findings[0].angle).toBe("g");
+});
+
+test("research map-reduce: incremental findings snapshot stays in angle order even when a later angle finishes first", async () => {
+  const ANGLES2 = [{ label: "a1", query: "q1" }, { label: "a2", query: "q2" }];
+  // a1's map is slow, so a2 completes (and persists) FIRST — but snapshots must still be angle-ordered
+  const fake: RunAgentFn = async (_phase, prompt, submitName) => {
+    if (submitName === "submit_finding") {
+      const isA1 = prompt.includes("a1");
+      if (isA1) await new Promise((r) => setTimeout(r, 25));
+      return [{ claim: "F-" + (isA1 ? "a1" : "a2"), confidence: "high", sources: [], evidence: "e" }, []];
+    }
+    const canned: Record<string, any> = {
+      submit_results: { results: [{ url: "https://x.com/a", title: "A", relevance: "high" }] },
+      submit_claims: { sourceQuality: "primary", claims: [{ claim: "C", quote: "q", importance: "central" }] },
+      submit_verdict: { refuted: false, evidence: "e", confidence: "high" },
+      submit_merge: { summary: "S", caveats: "", openQuestions: [] },
+    };
+    return [canned[submitName] ?? null, []];
+  };
+  const snapshots: string[][] = [];
+  const r = await research("Q", ANGLES2, { runAgent: fake, lit: {}, persist: (n, p) => { if (n === "findings") snapshots.push((p as any).findings.map((f: any) => f.angle)); } });
+  expect(r.findings.map((f: any) => f.angle)).toEqual(["a1", "a2"]); // report order
+  expect(snapshots.at(-1)).toEqual(["a1", "a2"]); // final snapshot angle-ordered, NOT completion order ([a2,a1])
 });
 
 test("research persists sources even on the no-claims salvage path (verify checkpoint not reached)", async () => {

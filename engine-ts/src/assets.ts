@@ -58,7 +58,7 @@ export function writeOverviewAssets(report: any, artifactsRoot: string, campaign
  * checkpoints (sources / database_facts / verified), so a crashed run still leaves the structured
  * data its predecessor stages produced. Returns the path written. */
 export function writeAsset(artifactsRoot: string, campaign: string, name: string, payload: Record<string, unknown>): string {
-  const file = name.endsWith(".json") ? name : name + ".json";
+  const file = name.includes(".") ? name : name + ".json"; // append .json only to a bare name (not foo.txt)
   const path = join(assetsDir(artifactsRoot, campaign), file);
   // JSON deep clone before write — consistent with writeCandidates; also rejects a non-serializable
   // payload (circular) by throwing here, which research's doPersist catches + surfaces via ev.
@@ -86,7 +86,7 @@ export function writeCandidates(
 /** Read one asset by file name (e.g. 'database_facts.json'); null if absent/unreadable. The entry
  * point for a downstream compute step to pick up an upstream stage's hand-off. */
 export function loadAsset(artifactsRoot: string, campaign: string, name: string): any | null {
-  const file = name.endsWith(".json") ? name : name + ".json"; // accept "sources" or "sources.json" (≡ writeAsset)
+  const file = name.includes(".") ? name : name + ".json"; // accept "sources" or "sources.json" (≡ writeAsset)
   const p = join(assetsDir(artifactsRoot, campaign), file);
   if (!existsSync(p)) return null; // absent → null (skip constructing/catching an ENOENT)
   try {

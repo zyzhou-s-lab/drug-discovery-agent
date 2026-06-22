@@ -475,10 +475,11 @@ export async function research(question: string, angles: Angle[], opts: Research
   prog.synthesize = [0, angles.length + 1]; // N angle-maps + 1 merge
   emitProg("synthesize");
 
-  // MAP — one finding per angle, concurrent (sem-bounded). Persist the findings asset incrementally
-  // as each completes, so a crash mid-synthesis still leaves the finished findings.
-  const findingsAcc: any[] = [];
-  const mapAngle = async (a: Angle): Promise<any> => {
+  // MAP — one finding per angle, concurrent (sem-bounded). Each result is written to its OWN slot
+  // (indexed by angle position, not push) so the incremental snapshot stays in angle order even when
+  // a later angle finishes first; the last completing map persists all N in order. Crash-safe.
+  const findingsAcc: any[] = new Array(angles.length);
+  const mapAngle = async (a: Angle, idx: number): Promise<any> => {
     const conf = confirmedByAngle.get(a.label) ?? [];
     const dbr = dbRawByAngle.get(a.label) ?? [];
     const [f] = await runAgent("synthesize", ANGLE_SYNTH_PROMPT(question, a, conf, dbr), "submit_finding", AngleFindingSchema.shape, {}, budget, sem, {
@@ -486,14 +487,14 @@ export async function research(question: string, angles: Angle[], opts: Research
       shouldStop: opts.shouldStop,
     });
     bump("synthesize", 1);
-    const finding = f
+    findingsAcc[idx] = f
       ? { angle: a.label, ...(f as any) }
       : { angle: a.label, claim: "(synthesis unavailable)", confidence: "low", sources: [], evidence: "Per-angle synthesis did not complete for this angle." };
-    findingsAcc.push(finding);
-    doPersist("findings", { stage: "deep-research", question, count: findingsAcc.length, findings: [...findingsAcc] });
-    return finding;
+    const done = findingsAcc.filter(Boolean); // completed so far, in angle order
+    doPersist("findings", { stage: "deep-research", question, count: done.length, findings: done });
+    return findingsAcc[idx];
   };
-  const findings = await Promise.all(angles.map(mapAngle)); // the result array preserves angle order
+  const findings = await Promise.all(angles.map((a, i) => mapAngle(a, i))); // result array preserves angle order
 
   // REDUCE — merge the per-angle findings into summary / caveats / openQuestions
   const [merged] = await runAgent("synthesize", MERGE_PROMPT(question, findings), "submit_merge", MergeSchema.shape, {}, budget, sem, {
@@ -502,7 +503,6 @@ export async function research(question: string, angles: Angle[], opts: Research
   });
   bump("synthesize", 1);
   ev("synthesize", "报告生成:" + findings.length + " 条 per-angle 发现 + 合并");
-  doPersist("findings", { stage: "deep-research", question, count: findings.length, findings }); // final ordered snapshot
 
   const sourcesOut = allSources.map((s) => ({ url: s.url, quality: s.sourceQuality, angle: s.angle, claimCount: s.claims.length }));
   const references = await bibliography(confirmed, allSources);
