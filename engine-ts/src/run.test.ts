@@ -83,3 +83,21 @@ test("POST /stop → stopped=false when nothing running", async () => {
   const { app } = setup();
   expect((await J(await app.request("/api/campaigns/nope/stop", { method: "POST" }))).stopped).toBe(false);
 });
+
+test("report orphan self-heal: running with no live worker → stopped + persisted", async () => {
+  const { app, art } = setup();
+  const { mkdirSync, writeFileSync, readFileSync } = await import("node:fs");
+  mkdirSync(join(art, "orph"), { recursive: true });
+  const sp = join(art, "orph", "search_status.json");
+  writeFileSync(sp, JSON.stringify({ state: "running", run: 1 })); // no live worker in registry
+  const j = await J(await app.request("/api/campaigns/orph/report"));
+  expect(j.status.state).toBe("stopped"); // healed on read
+  expect(JSON.parse(readFileSync(sp, "utf-8")).state).toBe("stopped"); // and persisted to the file
+});
+
+test("stop + create-campaign reject path traversal (400)", async () => {
+  const { app } = setup();
+  expect((await app.request("/api/campaigns/" + encodeURIComponent("../x") + "/stop", { method: "POST" })).status).toBe(400);
+  const r = await app.request("/api/campaigns", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ campaign: "../x", disease: "d" }) });
+  expect(r.status).toBe(400);
+});

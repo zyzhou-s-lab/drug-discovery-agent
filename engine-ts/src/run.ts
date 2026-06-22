@@ -46,6 +46,7 @@ export function normalizeAngles(raw: unknown): Angle[] {
     const label = String(a?.label ?? "").trim();
     const query = String(a?.query ?? "").trim() || label;
     if (!query) continue;
+    // label falls back to the query head (verbatim from api.py); a label-only custom angle is fine.
     out.push({ label: label || query.slice(0, 60), query, rationale: String(a?.rationale ?? "") });
   }
   return out;
@@ -83,6 +84,8 @@ export async function runSearch(
   rmSync(reportPath, { force: true });
   rmSync(join(evDir, `${SEARCH_STAGE}.jsonl`), { force: true });
 
+  // run id (api.py: int(time.time()*1000)) — the frontend resets its event view per (re)start.
+  // isRunning() blocks a same-campaign concurrent start, so a same-ms collision can't happen.
   const runId = Date.now();
   writeJson(statusPath, { state: "running", angles: angles.length, run: runId });
 

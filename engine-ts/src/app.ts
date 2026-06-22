@@ -3,7 +3,7 @@
 // 4b: config (settings page, GET/POST /api/config) + the SSE campaign-view stream.
 // The run trigger (scope/search → research()) + chat/files/intake are the later 4c slice.
 // createApp takes an injectable Index so it tests against a temp DB. See bun-migration-eval Phase 4.
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { Hono } from "hono";
@@ -112,11 +112,17 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
     const campaign = c.req.param("campaign");
     if (!safeSegment(campaign)) return c.json({ error: "invalid campaign" }, 400);
     const base = join(artifactsRoot, campaign);
-    let status = readJson(join(base, "search_status.json")) ?? { state: "none" };
+    const statusPath = join(base, "search_status.json");
+    let status = readJson(statusPath) ?? { state: "none" };
     // self-heal orphans: a running/stopping status with no live worker means the task died (e.g.
-    // server restart) and will never finish. Computed on read (keeps the read path non-writing).
+    // server restart) and will never finish — mark it stopped AND persist, so the file converges.
     if ((status.state === "running" || status.state === "stopping") && !isRunning(campaign)) {
       status = { state: "stopped", note: "worker ended (server restart)" };
+      try {
+        writeFileSync(statusPath, JSON.stringify(status), "utf-8");
+      } catch {
+        /* best-effort persist */
+      }
     }
     const report = readJson(join(base, "report.json"));
     return c.json({ campaign, status, report });
@@ -136,6 +142,7 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
   app.post("/api/campaigns", async (c) => {
     const body = await c.req.json().catch(() => ({}) as any);
     const campaign = String(body.campaign ?? "demo");
+    if (!safeSegment(campaign)) return c.json({ error: "invalid campaign" }, 400); // path-segment downstream
     const disease = String(body.disease ?? "");
     index.recordCampaign(campaign, disease);
     return c.json({ campaign, disease, started: true });
@@ -158,6 +165,7 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
 
   app.post("/api/campaigns/:campaign/stop", (c) => {
     const campaign = c.req.param("campaign");
+    if (!safeSegment(campaign)) return c.json({ error: "invalid campaign" }, 400);
     return c.json({ campaign, stopped: signalStop(campaign) });
   });
 
