@@ -48,6 +48,21 @@ export const ReportSchema = z.object({
   openQuestions: z.array(z.string()).optional(),
 });
 
+// ── per-angle map-reduce synthesis (#30 phase 3) ──
+// MAP: one finding from a SINGLE angle's confirmed claims (angle injected by the caller).
+export const AngleFindingSchema = z.object({
+  claim: z.string(),
+  confidence: z.enum(["high", "medium", "low"]),
+  sources: z.array(z.string()),
+  evidence: z.string(),
+});
+// REDUCE: the overview prose merged from the per-angle findings.
+export const MergeSchema = z.object({
+  summary: z.string(),
+  caveats: z.string(),
+  openQuestions: z.array(z.string()).optional(),
+});
+
 // ── shared data models (zod mirror of schemas.py) ──
 export const EvidenceSchema = z.object({
   kind: z.string(),
