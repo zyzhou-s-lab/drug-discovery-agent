@@ -1,7 +1,7 @@
 // Tests for the per-campaign asset layer (port of assets.py): overview projection envelopes,
 // candidates, load round-trip, defaults, atomicity.
 import { expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -58,7 +58,6 @@ test("writes are atomic — no orphan .tmp left in the assets dir", () => {
 test("loadAsset returns null for a present-but-corrupt asset", () => {
   const root = setup();
   const dir = assetsDir(root, "camp");
-  const { mkdirSync, writeFileSync } = require("node:fs");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "sources.json"), "{ not json", "utf-8");
   expect(loadAsset(root, "camp", "sources.json")).toBeNull();

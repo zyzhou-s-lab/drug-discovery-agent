@@ -41,7 +41,7 @@ function writeAtomic(path: string, obj: unknown): void {
  * database/ontology records). Returns the paths written. Idempotent. */
 export function writeOverviewAssets(report: any, artifactsRoot: string, campaign: string): string[] {
   const d = assetsDir(artifactsRoot, campaign);
-  const question = report?.question;
+  const question = report?.question ?? null; // explicit null so the key is always present (≡ assets.py report.get)
   const sources = report?.sources ?? [];
   const references = report?.references ?? [];
   const facts = report?.databaseFacts ?? [];
@@ -61,9 +61,10 @@ export function writeCandidates(
   campaign: string,
   opts: { efoId?: string; sortBy?: string } = {},
 ): string {
-  // deep clone so a later mutation of the caller's candidate objects can't leak into the (already
-  // serialized) asset; Python's model_dump() is likewise a fresh deep copy.
-  const rows = candidates.map((c) => (c && typeof c === "object" ? structuredClone(c) : c));
+  // JSON deep clone so a later mutation of the caller's objects can't leak into the (already
+  // serialized) asset; JSON-clone (not structuredClone) matches the eventual serialization exactly
+  // and can't throw DataCloneError on a function/Symbol that an `any` candidate might carry.
+  const rows = candidates.map((c) => (c && typeof c === "object" ? JSON.parse(JSON.stringify(c)) : c));
   const path = join(assetsDir(artifactsRoot, campaign), "candidates.json");
   writeAtomic(path, { campaign, stage: "nomination", efo_id: opts.efoId ?? "", sort_by: opts.sortBy ?? "", count: rows.length, candidates: rows });
   return path;
