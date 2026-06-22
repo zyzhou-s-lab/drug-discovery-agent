@@ -101,3 +101,21 @@ test("stop + create-campaign reject path traversal (400)", async () => {
   const r = await app.request("/api/campaigns", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ campaign: "../x", disease: "d" }) });
   expect(r.status).toBe(400);
 });
+
+test("runSearch heals a stale 'running' status then completes the re-run", async () => {
+  const { art } = setup();
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  mkdirSync(join(art, "re-run"), { recursive: true });
+  writeFileSync(join(art, "re-run", "search_status.json"), JSON.stringify({ state: "running", run: 1 })); // orphan
+  const fake = async () => ({ question: "Q", findings: [], stats: {} }) as any;
+  await runSearch(art, "re-run", "X", ANGLES, { research: fake });
+  expect(readJson(join(art, "re-run", "search_status.json")).state).toBe("done"); // re-run took over cleanly
+});
+
+test("POST /research/scope rejects an over-long disease (400)", async () => {
+  const fakeScope = async (d: string) => ({ question: d, angles: [], budget: {} });
+  const { app } = setup({ scopeFn: fakeScope as any });
+  const long = "x".repeat(2001);
+  const r = await app.request("/api/research/scope", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ disease: long }) });
+  expect(r.status).toBe(400);
+});

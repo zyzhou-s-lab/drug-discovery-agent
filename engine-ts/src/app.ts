@@ -134,6 +134,7 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
     const body = await c.req.json().catch(() => ({}) as any);
     const disease = String(body.disease ?? "").trim();
     if (!disease) return c.json({ error: "disease required" }, 400);
+    if (disease.length > 2000) return c.json({ error: "disease too long" }, 400); // bound the LLM input
     const out = await scopeFn(disease);
     return c.json(out ?? { question: disease, summary: "", angles: [], budget: null });
   });

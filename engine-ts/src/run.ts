@@ -3,7 +3,7 @@
 // eventsDir AsyncLocalStorage so emit() writes under the campaign, and writing search_status.json +
 // report.json. Stop is cooperative (a shouldStop flag — no new agents; in-flight ones drain).
 // research is injectable for offline tests. See docs/bun-migration-eval.md Phase 4.
-import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { research as realResearch } from "./deep_research";
@@ -55,8 +55,16 @@ export function normalizeAngles(raw: unknown): Angle[] {
 function writeJson(path: string, obj: unknown): void {
   mkdirSync(join(path, ".."), { recursive: true });
   const tmp = path + ".tmp";
-  writeFileSync(tmp, JSON.stringify(obj, null, 0), "utf-8");
+  writeFileSync(tmp, JSON.stringify(obj), "utf-8");
   renameSync(tmp, path);
+}
+
+function readJson(path: string): any | null {
+  try {
+    return JSON.parse(readFileSync(path, "utf-8"));
+  } catch {
+    return null;
+  }
 }
 
 export interface RunDeps {
@@ -73,14 +81,23 @@ export async function runSearch(
   deps: RunDeps = {},
 ): Promise<void> {
   const research = deps.research ?? realResearch;
-  const entry: RunEntry = { stopped: false };
-  registry.set(campaign, entry);
-
   const base = join(artifactsRoot, campaign);
   const statusPath = join(base, "search_status.json");
   const reportPath = join(base, "report.json");
   const evDir = join(base, "events");
-  // restart hygiene: clear the prior run's report + this stage's event log
+
+  // Heal a prior-lifetime orphan first: an on-disk 'running' with no live worker (checked BEFORE we
+  // register) is a dead run — mark it stopped so its terminal state is recorded before this re-run.
+  const prior = readJson(statusPath);
+  if (prior?.state === "running" && !registry.has(campaign)) {
+    writeJson(statusPath, { state: "stopped", note: "orphan cleared on restart", run: prior.run });
+  }
+
+  const entry: RunEntry = { stopped: false };
+  registry.set(campaign, entry);
+
+  // restart hygiene: a re-search starts clean — clear the prior run's report + this stage's event
+  // log (verbatim from api.py _run_search), so old and new agent cards never mix.
   rmSync(reportPath, { force: true });
   rmSync(join(evDir, `${SEARCH_STAGE}.jsonl`), { force: true });
 
