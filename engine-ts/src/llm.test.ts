@@ -1,7 +1,7 @@
 // Tests for the direct-Anthropic LLM helper config (no network).
 import { afterEach, expect, test } from "bun:test";
 
-import { defaultChat, makeJudgeClient } from "./llm";
+import { defaultChat, makeJudgeClient, streamChatText } from "./llm";
 
 const CREDS = ["ANTHROPIC_AUTH_TOKEN", "DD_JUDGE_API_KEY", "ANTHROPIC_API_KEY", "DD_JUDGE_MODEL", "ANTHROPIC_MODEL", "DD_JUDGE_BASE_URL", "ANTHROPIC_BASE_URL"];
 const saved: Record<string, string | undefined> = {};
@@ -37,4 +37,9 @@ test("defaultChat degrades to a plain message when no credential is configured",
   let out = "";
   await defaultChat("sys", [{ role: "user", content: "hi" }], (t) => { out += t; });
   expect(out).toContain("未配置 LLM 密钥");
+});
+
+test("streamChatText propagates an API error (which defaultChat catches → degrades)", async () => {
+  const jc = { model: "x", client: { messages: { stream: () => (async function* () { throw new Error("quota exceeded"); })() } } } as any;
+  await expect(streamChatText(jc, "s", [{ role: "user", content: "hi" }], () => {})).rejects.toThrow("quota exceeded");
 });

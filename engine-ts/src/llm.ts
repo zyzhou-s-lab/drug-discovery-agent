@@ -50,7 +50,12 @@ export async function streamChatText(
 
 /** Default chat sink used by the /chat endpoint: builds the client, streams, and degrades to a
  * plain message when there's no credential or the call errors (never throws — it's a stream body). */
-export async function defaultChat(system: string, messages: ChatMessage[], onText: (t: string) => void | Promise<void>): Promise<void> {
+export async function defaultChat(
+  system: string,
+  messages: ChatMessage[],
+  onText: (t: string) => void | Promise<void>,
+  logMeta?: Record<string, unknown>,
+): Promise<void> {
   const jc = makeJudgeClient();
   if (!jc) {
     await onText("(后端未配置 LLM 密钥,无法回答。)");
@@ -60,7 +65,7 @@ export async function defaultChat(system: string, messages: ChatMessage[], onTex
     await streamChatText(jc, system, messages, onText);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error("[defaultChat]", msg); // surface in the server log for ops (network/quota/model)
+    console.error("[defaultChat]", { ...logMeta, error: msg }); // ops can correlate by campaign (network/quota/model)
     await onText(`(出错: ${msg})`);
   }
 }

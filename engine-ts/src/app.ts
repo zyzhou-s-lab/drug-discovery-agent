@@ -222,7 +222,7 @@ export interface AppOpts {
   sseMaxLifetimeMs?: number;
   scopeFn?: typeof realScope; // injectable for offline run-trigger tests
   researchFn?: typeof realResearch;
-  chatFn?: (system: string, messages: ChatMessage[], onText: (t: string) => void | Promise<void>) => Promise<void>; // injectable; defaults to the Anthropic stream
+  chatFn?: (system: string, messages: ChatMessage[], onText: (t: string) => void | Promise<void>, logMeta?: Record<string, unknown>) => Promise<void>; // injectable; defaults to the Anthropic stream
 }
 
 export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: AppOpts = {}): Hono {
@@ -373,7 +373,7 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
     return stream(c, async (s) => {
       await chatFn(system, messages, async (t) => {
         await s.write(t);
-      });
+      }, { campaign, msgs: messages.length });
     });
   });
 
