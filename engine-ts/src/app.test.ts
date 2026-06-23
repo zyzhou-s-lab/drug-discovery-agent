@@ -183,3 +183,21 @@ test("files/raw rejects a real symlink escaping the campaign dir (realpath guard
   // a plain path check would pass (link.txt is "inside" c1); realpath resolves it OUT → 400
   expect((await app.request("/api/campaigns/c1/files/raw?path=link.txt")).status).toBe(400);
 });
+
+test("SSE /stages/:s/events/stream streams existing events then 'done' when terminal", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ddsst-"));
+  const art = join(dir, "art");
+  const idx = new Index(join(dir, "s.sqlite"), art);
+  mkdirSync(join(art, "c1"), { recursive: true });
+  writeFileSync(join(art, "c1", "search_status.json"), JSON.stringify({ state: "done" })); // deep-research terminal
+  eventsDir.run(join(art, "c1", "events"), () => emit("deep-research", "search · g", "tool_use", { name: "WebSearch" }));
+  const app = createApp(idx, art, { sseIntervalMs: 5 });
+  const text = await (await app.request("/api/campaigns/c1/stages/deep-research/events/stream")).text();
+  expect(text).toContain("WebSearch"); // streamed the existing step event
+  expect(text).toContain("event: done"); // search_status done + idle → close
+}, 5000);
+
+test("SSE /stages/:s/events/stream rejects path traversal (400)", async () => {
+  const { app } = setup();
+  expect((await app.request("/api/campaigns/c1/stages/" + encodeURIComponent("../x") + "/events/stream")).status).toBe(400);
+});

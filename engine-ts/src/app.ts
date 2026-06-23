@@ -12,7 +12,7 @@ import { streamSSE } from "hono/streaming";
 import { applySettings, ConfigUpdateSchema, getConfig, NUM_BOUNDS, saveSettings, trustedOrigin } from "./config";
 import { research as realResearch } from "./deep_research";
 import { readStageEvents } from "./events";
-import { isRunning, normalizeAngles, runSearch, signalStop } from "./run";
+import { isRunning, normalizeAngles, runSearch, SEARCH_STAGE, signalStop } from "./run";
 import { scope as realScope } from "./scope";
 import { Index } from "./store";
 import { citeByDoi, normDoi } from "./tools/paperfetch";
@@ -264,6 +264,42 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
     const stage = c.req.param("stage");
     if (!safeSegment(campaign) || !safeSegment(stage)) return c.json({ error: "invalid path" }, 400);
     return c.json({ events: readStageEvents(artifactsRoot, campaign, stage) });
+  });
+
+  // SSE: stream existing step events then tail new ones; close when the stage is terminal + idle.
+  app.get("/api/campaigns/:campaign/stages/:stage/events/stream", (c) => {
+    const campaign = c.req.param("campaign");
+    const stage = c.req.param("stage");
+    if (!safeSegment(campaign) || !safeSegment(stage)) return c.json({ error: "invalid path" }, 400);
+    // deep-research lives in search_status.json (not a pipeline stage); other stages use the Index.
+    const stageTerminal = (): boolean => {
+      if (stage === SEARCH_STAGE) {
+        const st = readJson(join(artifactsRoot, campaign, "search_status.json"))?.state;
+        return st === "done" || st === "stopped" || st === "error";
+      }
+      const s = index.status(campaign, stage);
+      return s === "done" || s === "exhausted";
+    };
+    return streamSSE(c, async (stream) => {
+      let sent = 0;
+      let idle = 0;
+      const start = Date.now();
+      while (!stream.aborted && !stream.closed && Date.now() - start < sseMaxLifetimeMs) {
+        const evs = readStageEvents(artifactsRoot, campaign, stage);
+        if (evs.length > sent) {
+          for (const e of evs.slice(sent)) await stream.writeSSE({ data: JSON.stringify(e) });
+          sent = evs.length;
+          idle = 0;
+        } else {
+          idle++;
+        }
+        if (stageTerminal() && idle >= 2) {
+          await stream.writeSSE({ event: "done", data: "{}" });
+          break;
+        }
+        await stream.sleep(sseIntervalMs);
+      }
+    });
   });
 
   // stage detail (status/attempts/output/verdict) for the canonical PIPELINE stage

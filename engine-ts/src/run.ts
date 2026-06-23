@@ -8,7 +8,7 @@ import { join } from "node:path";
 
 import { writeAsset, writeOverviewAssets } from "./assets";
 import { research as realResearch } from "./deep_research";
-import { emit, eventsDir } from "./events";
+import { emit, emitStream, eventsDir } from "./events";
 
 export const SEARCH_STAGE = "deep-research";
 
@@ -127,6 +127,8 @@ export async function runSearch(
         shouldStop: () => entry.stopped,
         onProgress: (phase, done, total) => emit(SEARCH_STAGE, phase, "progress", { done, total }),
         onEvent: (phase, msg) => emit(SEARCH_STAGE, phase, "log", { msg }),
+        // one expandable step card per agent (its thinking / tool calls / outcome) — api.py _run_search
+        onAgent: (label, msg) => emitStream(SEARCH_STAGE, label, msg, { skipText: true, withOutcome: true }),
         // incremental per-stage asset checkpoints (#30). A throw here propagates to research's
         // doPersist, which surfaces it via ev (→ the event stream) and continues — never failing
         // the run, but no longer silently swallowed.
