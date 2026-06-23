@@ -320,7 +320,13 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
       return c.json({ error: "not found" }, 404);
     }
     if (full !== root && !full.startsWith(root + sep)) return c.json({ error: "bad path" }, 400); // traversal/symlink guard
-    if (!statSync(full).isFile()) return c.json({ error: "not found" }, 404);
+    let isFile = false;
+    try {
+      isFile = statSync(full).isFile(); // re-stat: the file may have vanished/changed since realpath (TOCTOU)
+    } catch {
+      return c.json({ error: "not found" }, 404);
+    }
+    if (!isFile) return c.json({ error: "not found" }, 404);
     return c.json({ path: reqPath, content: readFileSync(full, "utf-8").slice(0, 200_000) });
   });
 

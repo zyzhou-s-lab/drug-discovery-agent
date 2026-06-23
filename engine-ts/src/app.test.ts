@@ -1,6 +1,6 @@
 // Read-API tests via Hono's app.request against a temp Index + artifact dir. No network.
 import { expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -167,10 +167,19 @@ test("GET /files lists artifacts (sorted); /files/raw reads + guards traversal",
   expect((await app.request("/api/campaigns/c1/files/raw?path=nope.json")).status).toBe(404); // absent → 404
 });
 
-test("PATCH / stage-detail / references reject path traversal (400)", async () => {
+test("PATCH /campaigns, stage-detail, and references reject path traversal (400)", async () => {
   const { app } = setup();
   const bad = encodeURIComponent("../x");
   expect((await app.request(`/api/campaigns/${bad}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: "{}" })).status).toBe(400);
   expect((await app.request(`/api/campaigns/${bad}/stages/disease-overview`)).status).toBe(400);
   expect((await app.request(`/api/campaigns/${bad}/references`)).status).toBe(400);
+});
+
+test("files/raw rejects a real symlink escaping the campaign dir (realpath guard → 400)", async () => {
+  const { app, art } = setup();
+  mkdirSync(join(art, "c1"), { recursive: true });
+  writeFileSync(join(art, "outside.txt"), "secret"); // sibling of c1, outside it
+  symlinkSync(join(art, "outside.txt"), join(art, "c1", "link.txt")); // symlink inside c1 → outside
+  // a plain path check would pass (link.txt is "inside" c1); realpath resolves it OUT → 400
+  expect((await app.request("/api/campaigns/c1/files/raw?path=link.txt")).status).toBe(400);
 });
