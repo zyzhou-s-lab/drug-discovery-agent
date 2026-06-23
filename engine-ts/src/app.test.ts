@@ -113,11 +113,14 @@ test("SSE keeps polling a non-terminal campaign, then closes at the lifetime cap
 }, 5000);
 
 // ── Phase-1 port: read/CRUD endpoints (stage detail / references / rename / delete / files) ──
-test("PATCH /api/campaigns/:c renames (title trimmed)", async () => {
+test("PATCH /api/campaigns/:c renames (trimmed); 404 unknown, 400 empty title", async () => {
   const { app, idx } = setup();
   idx.recordCampaign("c1", "AMD");
-  const j = await J(await app.request("/api/campaigns/c1", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "  My Run  " }) }));
-  expect(j.title).toBe("My Run");
+  const patch = (c: string, body: unknown) =>
+    app.request(`/api/campaigns/${c}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  expect((await J(await patch("c1", { title: "  My Run  " }))).title).toBe("My Run");
+  expect((await patch("nope", { title: "X" })).status).toBe(404); // don't UPSERT a phantom
+  expect((await patch("c1", { title: "  " })).status).toBe(400); // empty title rejected
 });
 
 test("DELETE /api/campaigns/:c removes record + artifact dir; rejects traversal", async () => {

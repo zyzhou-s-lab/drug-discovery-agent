@@ -15,7 +15,7 @@ import { readStageEvents } from "./events";
 import { isRunning, normalizeAngles, runSearch, signalStop } from "./run";
 import { scope as realScope } from "./scope";
 import { Index } from "./store";
-import { citeByDoi } from "./tools/paperfetch";
+import { citeByDoi, normDoi } from "./tools/paperfetch";
 
 const DB_PATH = process.env.DD_DB ?? "/tmp/dd/state.sqlite";
 const ARTIFACTS = process.env.DD_ARTIFACTS ?? "/tmp/dd/artifacts";
@@ -77,14 +77,11 @@ function walkFiles(root: string): { path: string; size: number }[] {
   return out;
 }
 
-/** Extract a bare lowercase DOI from a literature-evidence ref (api.py _ref_to_doi). */
+/** A bare lowercase DOI from a literature-evidence ref (api.py _ref_to_doi) — reuses paperfetch's
+ * normDoi (strips doi.org/doi: prefixes + lowercases) and keeps it only if it's a real DOI. */
 function refToDoi(ref: string): string {
-  let s = (ref ?? "").trim();
-  for (const p of ["https://doi.org/", "http://doi.org/", "doi:"]) {
-    if (s.toLowerCase().startsWith(p)) s = s.slice(p.length);
-  }
-  s = s.trim().toLowerCase();
-  return s.startsWith("10.") ? s : "";
+  const d = normDoi(ref);
+  return d.startsWith("10.") ? d : "";
 }
 
 /** Deduped, first-seen DOIs from every literature evidence across all stages (api.py _campaign_dois). */
@@ -174,8 +171,11 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
   app.patch("/api/campaigns/:campaign", async (c) => {
     const campaign = c.req.param("campaign");
     if (!safeSegment(campaign)) return c.json({ error: "invalid campaign" }, 400);
+    // renameCampaign UPSERTs — guard against creating a phantom record for an unknown campaign
+    if (!index.campaignExists(campaign)) return c.json({ error: "unknown campaign" }, 404);
     const body = await c.req.json().catch(() => ({}) as any);
     const title = String(body.title ?? "").trim();
+    if (!title) return c.json({ error: "title required" }, 400);
     index.renameCampaign(campaign, title);
     return c.json({ campaign, title });
   });
@@ -183,7 +183,11 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
   app.delete("/api/campaigns/:campaign", (c) => {
     const campaign = c.req.param("campaign");
     if (!safeSegment(campaign)) return c.json({ error: "invalid campaign" }, 400);
-    signalStop(campaign); // halt a running search before removing its records/artifacts
+    try {
+      signalStop(campaign); // halt a running search before removing its records/artifacts
+    } catch {
+      /* best-effort: signalStop is an in-memory flag set and shouldn't throw */
+    }
     index.deleteCampaign(campaign);
     rmSync(join(artifactsRoot, campaign), { recursive: true, force: true }); // events + artifacts
     return c.json({ campaign, deleted: true });
