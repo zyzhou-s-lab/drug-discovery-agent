@@ -1,6 +1,6 @@
 // Read-API tests via Hono's app.request against a temp Index + artifact dir. No network.
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -111,3 +111,55 @@ test("SSE keeps polling a non-terminal campaign, then closes at the lifetime cap
   expect(text).toContain("data:"); // pushed the running view
   expect(text).not.toContain("event: done"); // never terminal → closed by the lifetime cap, not 'done'
 }, 5000);
+
+// ── Phase-1 port: read/CRUD endpoints (stage detail / references / rename / delete / files) ──
+test("PATCH /api/campaigns/:c renames (title trimmed)", async () => {
+  const { app, idx } = setup();
+  idx.recordCampaign("c1", "AMD");
+  const j = await J(await app.request("/api/campaigns/c1", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "  My Run  " }) }));
+  expect(j.title).toBe("My Run");
+});
+
+test("DELETE /api/campaigns/:c removes record + artifact dir; rejects traversal", async () => {
+  const { app, idx, art } = setup();
+  idx.recordCampaign("c1", "AMD");
+  mkdirSync(join(art, "c1"), { recursive: true });
+  writeFileSync(join(art, "c1", "report.json"), "{}");
+  const j = await J(await app.request("/api/campaigns/c1", { method: "DELETE" }));
+  expect(j.deleted).toBe(true);
+  expect(idx.campaignExists("c1")).toBe(false);
+  expect(existsSync(join(art, "c1"))).toBe(false);
+  expect((await app.request("/api/campaigns/" + encodeURIComponent("../x"), { method: "DELETE" })).status).toBe(400);
+});
+
+test("GET /api/campaigns/:c/stages/:s → detail; unknown stage 404", async () => {
+  const { app, idx } = setup();
+  idx.recordCampaign("c1", "AMD");
+  const j = await J(await app.request("/api/campaigns/c1/stages/disease-overview"));
+  expect(j.stage).toBe("disease-overview");
+  expect(j.status).toBe("queued"); // nothing recorded yet
+  expect(j.attempts).toBe(0);
+  expect((await app.request("/api/campaigns/c1/stages/nope")).status).toBe(404);
+});
+
+test("GET /api/campaigns/:c/references → empty when no literature evidence", async () => {
+  const { app, idx } = setup();
+  idx.recordCampaign("c1", "AMD");
+  const j = await J(await app.request("/api/campaigns/c1/references"));
+  expect(j.count).toBe(0);
+  expect(j.references).toEqual([]);
+  expect(j.unresolved).toEqual([]);
+});
+
+test("GET /files lists artifacts (sorted); /files/raw reads + guards traversal", async () => {
+  const { app, art } = setup();
+  mkdirSync(join(art, "c1", "events"), { recursive: true });
+  writeFileSync(join(art, "c1", "report.json"), '{"x":1}');
+  writeFileSync(join(art, "c1", "events", "deep-research.jsonl"), "line\n");
+  writeFileSync(join(art, "secret.txt"), "outside"); // a real file OUTSIDE the campaign dir
+  const list = await J(await app.request("/api/campaigns/c1/files"));
+  expect(list.files.map((f: any) => f.path)).toEqual(["events/deep-research.jsonl", "report.json"]); // sorted
+  expect((await J(await app.request("/api/campaigns/c1/files/raw?path=report.json"))).content).toBe('{"x":1}');
+  expect((await app.request("/api/campaigns/c1/files/raw?path=" + encodeURIComponent("../secret.txt"))).status).toBe(400); // escapes root → guard
+  expect((await app.request("/api/campaigns/c1/files/raw?path=nope.json")).status).toBe(404); // absent → 404
+});
