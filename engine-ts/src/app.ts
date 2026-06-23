@@ -3,8 +3,8 @@
 // 4b: config (settings page, GET/POST /api/config) + the SSE campaign-view stream.
 // The run trigger (scope/search → research()) + chat/files/intake are the later 4c slice.
 // createApp takes an injectable Index so it tests against a temp DB. See bun-migration-eval Phase 4.
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { join, relative, sep } from "node:path";
 
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
@@ -15,6 +15,7 @@ import { readStageEvents } from "./events";
 import { isRunning, normalizeAngles, runSearch, signalStop } from "./run";
 import { scope as realScope } from "./scope";
 import { Index } from "./store";
+import { citeByDoi, normDoi } from "./tools/paperfetch";
 
 const DB_PATH = process.env.DD_DB ?? "/tmp/dd/state.sqlite";
 const ARTIFACTS = process.env.DD_ARTIFACTS ?? "/tmp/dd/artifacts";
@@ -47,6 +48,61 @@ function writeJsonAtomic(path: string, obj: unknown): void {
   const tmp = path + ".tmp";
   writeFileSync(tmp, JSON.stringify(obj), "utf-8");
   renameSync(tmp, path); // atomic: a crash mid-write can't truncate the live file
+}
+
+/** Recursively list a dir tree → relative paths + sizes, sorted (api.py campaign_files). */
+function walkFiles(root: string): { path: string; size: number }[] {
+  const out: { path: string; size: number }[] = [];
+  const walk = (dir: string): void => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else {
+        try {
+          out.push({ path: relative(root, p), size: statSync(p).size });
+        } catch {
+          /* skip a file that vanished mid-walk */
+        }
+      }
+    }
+  };
+  walk(root);
+  out.sort((a, b) => a.path.localeCompare(b.path));
+  return out;
+}
+
+/** A bare lowercase DOI from a literature-evidence ref (api.py _ref_to_doi) — reuses paperfetch's
+ * normDoi (strips doi.org/doi: prefixes + lowercases) and keeps it only if it's a real DOI. */
+function refToDoi(ref: string): string {
+  const d = normDoi(ref);
+  return d.startsWith("10.") ? d : "";
+}
+
+/** Deduped, first-seen DOIs from every literature evidence across all stages (api.py _campaign_dois). */
+function campaignDois(idx: Index, campaign: string): string[] {
+  const seen = new Set<string>();
+  const order: string[] = [];
+  for (const s of PIPELINE) {
+    const out = idx.output(campaign, s.name) as any;
+    if (!out) continue;
+    for (const cand of out.candidates ?? []) {
+      for (const e of cand.evidence ?? []) {
+        if (e.kind !== "literature") continue;
+        const doi = refToDoi(e.ref ?? "");
+        if (doi && !seen.has(doi)) {
+          seen.add(doi);
+          order.push(doi);
+        }
+      }
+    }
+  }
+  return order;
 }
 
 /** Join recorded stage_state onto the canonical PIPELINE order (not-yet-started stages → queued). */
@@ -111,6 +167,31 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
   app.get("/api/campaigns", (c) => c.json({ campaigns: index.listCampaigns() }));
 
   app.get("/api/campaigns/:campaign", (c) => c.json(campaignView(index, c.req.param("campaign"))));
+
+  app.patch("/api/campaigns/:campaign", async (c) => {
+    const campaign = c.req.param("campaign");
+    if (!safeSegment(campaign)) return c.json({ error: "invalid campaign" }, 400);
+    // renameCampaign UPSERTs — guard against creating a phantom record for an unknown campaign
+    if (!index.campaignExists(campaign)) return c.json({ error: "unknown campaign" }, 404);
+    const body = await c.req.json().catch(() => ({}) as any);
+    const title = String(body.title ?? "").trim();
+    if (!title) return c.json({ error: "title required" }, 400);
+    index.renameCampaign(campaign, title);
+    return c.json({ campaign, title });
+  });
+
+  app.delete("/api/campaigns/:campaign", (c) => {
+    const campaign = c.req.param("campaign");
+    if (!safeSegment(campaign)) return c.json({ error: "invalid campaign" }, 400);
+    try {
+      signalStop(campaign); // halt a running search before removing its records/artifacts
+    } catch {
+      /* best-effort: signalStop is an in-memory flag set and shouldn't throw */
+    }
+    index.deleteCampaign(campaign);
+    rmSync(join(artifactsRoot, campaign), { recursive: true, force: true }); // events + artifacts
+    return c.json({ campaign, deleted: true });
+  });
 
   // Poll the Search phase: {campaign, status:{state}, report|null}. (Orphan self-heal lives with
   // the run registry — added in the run-trigger slice.)
@@ -183,6 +264,70 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
     const stage = c.req.param("stage");
     if (!safeSegment(campaign) || !safeSegment(stage)) return c.json({ error: "invalid path" }, 400);
     return c.json({ events: readStageEvents(artifactsRoot, campaign, stage) });
+  });
+
+  // stage detail (status/attempts/output/verdict) for the canonical PIPELINE stage
+  app.get("/api/campaigns/:campaign/stages/:stage", (c) => {
+    const campaign = c.req.param("campaign");
+    const stage = c.req.param("stage");
+    if (!safeSegment(campaign)) return c.json({ error: "invalid campaign" }, 400);
+    if (!PIPELINE.some((s) => s.name === stage)) return c.json({ error: `unknown stage ${stage}` }, 404);
+    return c.json({
+      campaign, stage,
+      status: index.status(campaign, stage) ?? "queued",
+      attempts: index.attempts(campaign, stage),
+      output: index.output(campaign, stage),
+      verdict: index.verdict(campaign, stage),
+    });
+  });
+
+  // campaign-level APA7 bibliography: every literature-evidence DOI across stages, resolved via OpenAlex
+  app.get("/api/campaigns/:campaign/references", async (c) => {
+    const campaign = c.req.param("campaign");
+    if (!safeSegment(campaign)) return c.json({ error: "invalid campaign" }, 400);
+    const references: { n: number; doi: string; apa7: string }[] = [];
+    const unresolved: string[] = [];
+    for (const doi of campaignDois(index, campaign)) {
+      let apa7: string | null = null;
+      try {
+        apa7 = await citeByDoi(doi);
+      } catch {
+        apa7 = null;
+      }
+      if (apa7) references.push({ n: references.length + 1, doi, apa7 });
+      else unresolved.push(doi);
+    }
+    return c.json({ campaign, count: references.length, references, unresolved });
+  });
+
+  // Files panel: list the campaign's on-disk artifacts + event logs
+  app.get("/api/campaigns/:campaign/files", (c) => {
+    const campaign = c.req.param("campaign");
+    if (!safeSegment(campaign)) return c.json({ error: "invalid campaign" }, 400);
+    const root = join(artifactsRoot, campaign);
+    return c.json({ campaign, root, files: walkFiles(root) });
+  });
+
+  app.get("/api/campaigns/:campaign/files/raw", (c) => {
+    const campaign = c.req.param("campaign");
+    if (!safeSegment(campaign)) return c.json({ error: "invalid campaign" }, 400);
+    const reqPath = c.req.query("path") ?? "";
+    let root: string, full: string;
+    try {
+      root = realpathSync(join(artifactsRoot, campaign));
+      full = realpathSync(join(root, reqPath));
+    } catch {
+      return c.json({ error: "not found" }, 404);
+    }
+    if (full !== root && !full.startsWith(root + sep)) return c.json({ error: "bad path" }, 400); // traversal/symlink guard
+    let isFile = false;
+    try {
+      isFile = statSync(full).isFile(); // re-stat: the file may have vanished/changed since realpath (TOCTOU)
+    } catch {
+      return c.json({ error: "not found" }, 404);
+    }
+    if (!isFile) return c.json({ error: "not found" }, 404);
+    return c.json({ path: reqPath, content: readFileSync(full, "utf-8").slice(0, 200_000) });
   });
 
   // SSE: push a fresh campaign view whenever stage_state changes; close once every stage is
