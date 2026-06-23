@@ -173,6 +173,7 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
 
   app.patch("/api/campaigns/:campaign", async (c) => {
     const campaign = c.req.param("campaign");
+    if (!safeSegment(campaign)) return c.json({ error: "invalid campaign" }, 400);
     const body = await c.req.json().catch(() => ({}) as any);
     const title = String(body.title ?? "").trim();
     index.renameCampaign(campaign, title);
@@ -265,6 +266,7 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
   app.get("/api/campaigns/:campaign/stages/:stage", (c) => {
     const campaign = c.req.param("campaign");
     const stage = c.req.param("stage");
+    if (!safeSegment(campaign)) return c.json({ error: "invalid campaign" }, 400);
     if (!PIPELINE.some((s) => s.name === stage)) return c.json({ error: `unknown stage ${stage}` }, 404);
     return c.json({
       campaign, stage,
@@ -278,6 +280,7 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
   // campaign-level APA7 bibliography: every literature-evidence DOI across stages, resolved via OpenAlex
   app.get("/api/campaigns/:campaign/references", async (c) => {
     const campaign = c.req.param("campaign");
+    if (!safeSegment(campaign)) return c.json({ error: "invalid campaign" }, 400);
     const references: { n: number; doi: string; apa7: string }[] = [];
     const unresolved: string[] = [];
     for (const doi of campaignDois(index, campaign)) {

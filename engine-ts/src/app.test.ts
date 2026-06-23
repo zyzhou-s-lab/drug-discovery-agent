@@ -163,3 +163,11 @@ test("GET /files lists artifacts (sorted); /files/raw reads + guards traversal",
   expect((await app.request("/api/campaigns/c1/files/raw?path=" + encodeURIComponent("../secret.txt"))).status).toBe(400); // escapes root → guard
   expect((await app.request("/api/campaigns/c1/files/raw?path=nope.json")).status).toBe(404); // absent → 404
 });
+
+test("PATCH / stage-detail / references reject path traversal (400)", async () => {
+  const { app } = setup();
+  const bad = encodeURIComponent("../x");
+  expect((await app.request(`/api/campaigns/${bad}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: "{}" })).status).toBe(400);
+  expect((await app.request(`/api/campaigns/${bad}/stages/disease-overview`)).status).toBe(400);
+  expect((await app.request(`/api/campaigns/${bad}/references`)).status).toBe(400);
+});
