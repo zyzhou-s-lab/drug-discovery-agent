@@ -94,6 +94,10 @@ export interface RunAgentOpts {
   onMessage?: OnMessage;
   maxTurns?: number;
   shouldStop?: ShouldStop;
+  systemPrompt?: string; // agent system prompt (e.g. the intake gate persona)
+  model?: string; // overrides DD_DR_MODEL (e.g. intake's DD_INTAKE_MODEL)
+  allowedTools?: string[]; // whitelist — restrict the agent's tools (intake: only submit + search_disease)
+  disallowedTools?: string[]; // blocklist (belt-and-suspenders alongside allowedTools)
 }
 
 /**
@@ -112,7 +116,7 @@ export async function runAgent(
   sem: Semaphore,
   opts: RunAgentOpts = {},
 ): Promise<[Record<string, unknown> | null, ToolResult[]]> {
-  const { onMessage, maxTurns = 12, shouldStop } = opts;
+  const { onMessage, maxTurns = 12, shouldStop, systemPrompt, model: modelOpt, allowedTools, disallowedTools } = opts;
   if ((shouldStop && shouldStop()) || budget.exhausted()) return [null, []];
 
   const cap: { v: Record<string, unknown> | null } = { v: null };
@@ -133,7 +137,11 @@ export async function runAgent(
     maxTurns,
     settingSources: [], // don't inherit host CLAUDE.md
   };
-  if (process.env.DD_DR_MODEL) options.model = process.env.DD_DR_MODEL;
+  if (systemPrompt) options.systemPrompt = systemPrompt;
+  if (allowedTools) options.allowedTools = allowedTools;
+  if (disallowedTools) options.disallowedTools = disallowedTools;
+  const model = modelOpt ?? process.env.DD_DR_MODEL; // opts.model (e.g. intake) wins over DD_DR_MODEL
+  if (model) options.model = model;
   if (envOver) options.env = { ...process.env, ...envOver };
 
   const maxNudges = parseInt(process.env.DD_DR_NUDGE || "2", 10);

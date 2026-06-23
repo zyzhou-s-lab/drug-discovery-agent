@@ -13,6 +13,7 @@ import { applySettings, ConfigUpdateSchema, getConfig, NUM_BOUNDS, saveSettings,
 import { type ChatMessage, defaultChat } from "./llm";
 import { research as realResearch } from "./deep_research";
 import { readStageEvents } from "./events";
+import { type DiseaseIntake, validateDisease } from "./intake";
 import { isRunning, normalizeAngles, runSearch, SEARCH_STAGE, signalStop } from "./run";
 import { scope as realScope } from "./scope";
 import { Index } from "./store";
@@ -223,6 +224,7 @@ export interface AppOpts {
   scopeFn?: typeof realScope; // injectable for offline run-trigger tests
   researchFn?: typeof realResearch;
   chatFn?: (system: string, messages: ChatMessage[], onText: (t: string) => void | Promise<void>, logMeta?: Record<string, unknown>) => Promise<void>; // injectable; defaults to the Anthropic stream
+  intakeFn?: (disease: string) => Promise<DiseaseIntake>; // injectable; defaults to validateDisease
 }
 
 export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: AppOpts = {}): Hono {
@@ -231,6 +233,7 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
   const sseMaxLifetimeMs = opts.sseMaxLifetimeMs ?? 300_000; // cap a connection (client auto-reconnects)
   const scopeFn = opts.scopeFn ?? realScope;
   const chatFn = opts.chatFn ?? defaultChat;
+  const intakeFn = opts.intakeFn ?? validateDisease;
   const app = new Hono();
 
   app.get("/api/health", (c) => c.json({ ok: true })); // don't leak internal db/artifacts paths
@@ -313,6 +316,13 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
     }
     const report = readJson(join(base, "report.json"));
     return c.json({ campaign, status, report });
+  });
+
+  // Pre-flight disease validation (intake gate) — junk / non-disease input is rejected BEFORE a run.
+  app.post("/api/intake/check", async (c) => {
+    const body = await c.req.json().catch(() => ({}) as any);
+    const disease = String(body.disease ?? "");
+    return c.json(await intakeFn(disease));
   });
 
   // ── run trigger (api.py research_scope / start_run / start_search / stop_search) ──
