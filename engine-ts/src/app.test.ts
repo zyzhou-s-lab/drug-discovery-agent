@@ -227,3 +227,50 @@ test("SSE /stages/:s/events/stream closes 'done' for a terminal pipeline stage (
   expect(text).toContain("search_literature");
   expect(text).toContain("event: done"); // pipeline stage done via idx.status
 }, 5000);
+
+// ── Phase-3a port: side-chat (LLM) ──
+test("POST /chat streams text via the injected chat fn; system carries the run context", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ddchat-"));
+  const art = join(dir, "art");
+  const idx = new Index(join(dir, "s.sqlite"), art);
+  idx.recordCampaign("c1", "AMD");
+  mkdirSync(join(art, "c1"), { recursive: true });
+  writeFileSync(join(art, "c1", "report.json"), JSON.stringify({ summary: "RPT", findings: [{ confidence: "high", claim: "F1", sources: ["u"] }] }));
+  let captured = "";
+  const chatFn = async (system: string, messages: any[], onText: (t: string) => void | Promise<void>) => {
+    captured = system;
+    await onText("hello ");
+    await onText(messages[0].content);
+  };
+  const app = createApp(idx, art, { chatFn });
+  const res = await app.request("/api/campaigns/c1/chat", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ messages: [{ role: "user", content: "hi" }, { role: "x", content: "" }] }), // empty dropped
+  });
+  expect(res.headers.get("content-type")).toContain("text/plain");
+  expect(await res.text()).toBe("hello hi");
+  expect(captured).toContain("药物靶点发现助手"); // persona
+  expect(captured).toContain("RPT"); // report summary grounded in ctx
+  expect(captured).toContain("F1"); // finding grounded in ctx
+});
+
+test("POST /chat rejects path traversal (400)", async () => {
+  const { app } = setup();
+  expect((await app.request("/api/campaigns/" + encodeURIComponent("../x") + "/chat", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).status).toBe(400);
+});
+
+test("POST /chat grounds on the live-run digest when running (no report yet)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ddchat2-"));
+  const art = join(dir, "art");
+  const idx = new Index(join(dir, "s.sqlite"), art);
+  idx.recordCampaign("c1", "AMD");
+  mkdirSync(join(art, "c1"), { recursive: true });
+  writeFileSync(join(art, "c1", "search_status.json"), JSON.stringify({ state: "running", angles: 2 })); // running, no report
+  eventsDir.run(join(art, "c1", "events"), () => emit("deep-research", "search · genetics", "session_start", { prompt: "p" }));
+  let captured = "";
+  const chatFn = async (system: string, _m: any[], onText: (t: string) => void | Promise<void>) => { captured = system; await onText("ok"); };
+  const app = createApp(idx, art, { chatFn });
+  await (await app.request("/api/campaigns/c1/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messages: [{ role: "user", content: "?" }] }) })).text();
+  expect(captured).toContain("深度检索运行"); // running branch
+  expect(captured).toContain("子任务"); // live-run digest from the session_start event
+});
