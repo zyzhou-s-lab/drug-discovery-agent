@@ -274,6 +274,7 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
     // deep-research lives in search_status.json (not a pipeline stage); other stages use the Index.
     const stageTerminal = (): boolean => {
       if (stage === SEARCH_STAGE) {
+        // a missing/unparseable status file → state undefined → not terminal (keep streaming)
         const st = readJson(join(artifactsRoot, campaign, "search_status.json"))?.state;
         return st === "done" || st === "stopped" || st === "error";
       }

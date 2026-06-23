@@ -201,3 +201,29 @@ test("SSE /stages/:s/events/stream rejects path traversal (400)", async () => {
   const { app } = setup();
   expect((await app.request("/api/campaigns/c1/stages/" + encodeURIComponent("../x") + "/events/stream")).status).toBe(400);
 });
+
+test("SSE /stages/:s/events/stream closes at the lifetime cap (no 'done') while non-terminal", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ddsst2-"));
+  const art = join(dir, "art");
+  const idx = new Index(join(dir, "s.sqlite"), art);
+  mkdirSync(join(art, "c1"), { recursive: true });
+  writeFileSync(join(art, "c1", "search_status.json"), JSON.stringify({ state: "running" })); // never terminal
+  eventsDir.run(join(art, "c1", "events"), () => emit("deep-research", "search · g", "tool_use", { name: "WebSearch" }));
+  const app = createApp(idx, art, { sseIntervalMs: 5, sseMaxLifetimeMs: 60 });
+  const text = await (await app.request("/api/campaigns/c1/stages/deep-research/events/stream")).text();
+  expect(text).toContain("WebSearch");
+  expect(text).not.toContain("event: done"); // running → closed by the lifetime cap, not 'done'
+}, 5000);
+
+test("SSE /stages/:s/events/stream closes 'done' for a terminal pipeline stage (Index status)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ddsst3-"));
+  const art = join(dir, "art");
+  const idx = new Index(join(dir, "s.sqlite"), art);
+  idx.recordAttempt("c1", "disease-overview");
+  idx.markDone("c1", "disease-overview", {}, {}); // Index status → done
+  eventsDir.run(join(art, "c1", "events"), () => emit("disease-overview", "scope", "tool_use", { name: "search_literature" }));
+  const app = createApp(idx, art, { sseIntervalMs: 5 });
+  const text = await (await app.request("/api/campaigns/c1/stages/disease-overview/events/stream")).text();
+  expect(text).toContain("search_literature");
+  expect(text).toContain("event: done"); // pipeline stage done via idx.status
+}, 5000);
