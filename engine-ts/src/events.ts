@@ -37,6 +37,45 @@ export function emit(stage: string, label: string, type: string, fields: Record<
   appendFileSync(join(d, `${stage}.jsonl`), JSON.stringify(rec) + "\n", "utf-8");
 }
 
+/** Map one Agent SDK stream message (or runAgent's `{__dd_prompt__}` sentinel) to step-card events
+ * via emit(), mirroring worker.py _emit_stream. `skipText` drops chatty assistant prose; `withOutcome`
+ * includes ResultMessage.result as the card's Outcome (on for search agents, off for scope). Never
+ * throws — telemetry must not break the run. */
+export function emitStream(stage: string, label: string, msg: any, opts: { skipText?: boolean; withOutcome?: boolean } = {}): void {
+  try {
+    if (msg && typeof msg === "object" && "__dd_prompt__" in msg) {
+      emit(stage, label, "session_start", { prompt: String(msg.__dd_prompt__) });
+      return;
+    }
+    const t = msg?.type;
+    if (t === "assistant") {
+      for (const b of msg.message?.content ?? []) {
+        if (b.type === "thinking") emit(stage, label, "thinking", { text: b.thinking });
+        else if (b.type === "text") {
+          if (!opts.skipText && b.text && String(b.text).trim()) emit(stage, label, "text", { text: b.text });
+        } else if (b.type === "tool_use") emit(stage, label, "tool_use", { tool_id: b.id, name: b.name, input: b.input });
+      }
+    } else if (t === "user" && Array.isArray(msg.message?.content)) {
+      for (const b of msg.message.content) {
+        if (b.type === "tool_result") emit(stage, label, "tool_result", { tool_id: b.tool_use_id, content: b.content, is_error: Boolean(b.is_error) });
+      }
+    } else if (t === "result") {
+      const u = msg.usage ?? {};
+      const tokens = (u.input_tokens ?? 0) + (u.output_tokens ?? 0);
+      emit(stage, label, "result", {
+        session_id: msg.session_id ?? null,
+        is_error: Boolean(msg.is_error),
+        cost: msg.total_cost_usd ?? null,
+        num_turns: msg.num_turns ?? null,
+        result: opts.withOutcome ? (msg.result ?? null) : null,
+        tokens,
+      });
+    }
+  } catch {
+    /* telemetry must never break the run */
+  }
+}
+
 export function readStageEvents(artifactsRoot: string, campaign: string, stage: string): Record<string, unknown>[] {
   const path = join(artifactsRoot, campaign, "events", `${stage}.jsonl`);
   if (!existsSync(path)) return [];
