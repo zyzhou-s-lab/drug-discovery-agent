@@ -1,7 +1,7 @@
 // Tests for the direct-Anthropic LLM helper config (no network).
 import { afterEach, expect, test } from "bun:test";
 
-import { makeJudgeClient } from "./llm";
+import { defaultChat, makeJudgeClient } from "./llm";
 
 const CREDS = ["ANTHROPIC_AUTH_TOKEN", "DD_JUDGE_API_KEY", "ANTHROPIC_API_KEY", "DD_JUDGE_MODEL", "ANTHROPIC_MODEL", "DD_JUDGE_BASE_URL", "ANTHROPIC_BASE_URL"];
 const saved: Record<string, string | undefined> = {};
@@ -24,4 +24,17 @@ test("makeJudgeClient picks DD_JUDGE_* over ANTHROPIC_*; defaults the model", ()
   expect(makeJudgeClient()?.model).toBe("claude-sonnet-4-5"); // default
   process.env.DD_JUDGE_MODEL = "mimo-x";
   expect(makeJudgeClient()?.model).toBe("mimo-x");
+});
+
+test("makeJudgeClient works with ANTHROPIC_AUTH_TOKEN alone (no api key)", () => {
+  for (const k of CREDS) delete process.env[k];
+  process.env.ANTHROPIC_AUTH_TOKEN = "tok";
+  expect(makeJudgeClient()).not.toBeNull();
+});
+
+test("defaultChat degrades to a plain message when no credential is configured", async () => {
+  for (const k of CREDS) delete process.env[k];
+  let out = "";
+  await defaultChat("sys", [{ role: "user", content: "hi" }], (t) => { out += t; });
+  expect(out).toContain("未配置 LLM 密钥");
 });

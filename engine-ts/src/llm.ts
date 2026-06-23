@@ -34,11 +34,14 @@ export async function streamChatText(
   messages: ChatMessage[],
   onText: (t: string) => void | Promise<void>,
 ): Promise<void> {
+  // only user/assistant reach the API — an unknown role (e.g. a stray frontend value) would make the
+  // SDK throw mid-stream; drop it rather than fail the whole turn.
+  const clean = messages.filter((m) => m.role === "user" || m.role === "assistant");
   const stream = jc.client.messages.stream({
     model: jc.model,
     max_tokens: 1024,
     system,
-    messages: messages as Anthropic.MessageParam[],
+    messages: clean as Anthropic.MessageParam[],
   });
   for await (const event of stream) {
     if (event.type === "content_block_delta" && event.delta.type === "text_delta") await onText(event.delta.text);
@@ -56,6 +59,8 @@ export async function defaultChat(system: string, messages: ChatMessage[], onTex
   try {
     await streamChatText(jc, system, messages, onText);
   } catch (e) {
-    await onText(`(出错: ${e instanceof Error ? e.message : String(e)})`);
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("[defaultChat]", msg); // surface in the server log for ops (network/quota/model)
+    await onText(`(出错: ${msg})`);
   }
 }
