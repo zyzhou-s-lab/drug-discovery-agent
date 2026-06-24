@@ -22,7 +22,7 @@ export function intakeGate(raw: string): string | null {
   const s = (raw ?? "").trim();
   if (!s) return "empty input";
   if (s.length > 200) return "input too long for a disease name (>200 chars)";
-  if (!/[a-zA-Z0-9一-鿿]/.test(s)) return "no alphanumeric content";
+  if (!/[\p{L}\p{N}]/u.test(s)) return "no alphanumeric content"; // Unicode letter/number (≡ Python str.isalnum)
   return null;
 }
 
@@ -75,7 +75,8 @@ async function realTranslateCodepoints(codepoints: string): Promise<string | nul
         for (const b of msg.message?.content ?? []) if (b.type === "text" && b.text) resultText = String(b.text).trim();
       }
     }
-  } catch {
+  } catch (e) {
+    console.warn(`[intake] translateCodepoints failed: ${e instanceof Error ? e.message : String(e)}`);
     return null;
   }
   return resultText && isAscii(resultText) ? resultText : null;
@@ -133,9 +134,14 @@ export async function validateDisease(raw: string, deps: IntakeDeps = {}): Promi
     if (codepoints) {
       const translated = await translateCodepoints(codepoints);
       if (translated) {
-        const hits = await searchDisease(translated, 3);
+        let hits: { id: string; name: string }[] = [];
+        try {
+          hits = await searchDisease(translated, 3);
+        } catch (e) {
+          console.warn(`[intake] fallback searchDisease failed: ${e instanceof Error ? e.message : String(e)}`); // never 500 the endpoint
+        }
         if (hits.length) {
-          return { accepted: true, normalized_en: hits[0]!.name, efo_id: hits[0]!.id, reason: `SDK encoding bug — translated via codepoints: '${raw}' → '${translated}' → '${hits[0]!.name}'` };
+          return { accepted: true, normalized_en: hits[0]!.name, efo_id: hits[0]!.id, reason: `SDK encoding bug — translated via codepoints: ${JSON.stringify(raw)} → ${JSON.stringify(translated)} → ${JSON.stringify(hits[0]!.name)}` };
         }
       }
     }

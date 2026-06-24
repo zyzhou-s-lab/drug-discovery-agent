@@ -283,3 +283,11 @@ test("POST /intake/check returns the intake verdict (injected)", async () => {
   expect(j.accepted).toBe(true);
   expect(j.efo_id).toBe("EFO_1");
 });
+
+test("POST /intake/check rejects an over-long disease (400)", async () => {
+  const { art } = setup();
+  const idx = new Index(join(art, "..", "s3.sqlite"), art);
+  const app = createApp(idx, art, { intakeFn: async () => ({ accepted: true, normalized_en: "", efo_id: "", reason: "" }) });
+  const r = await app.request("/api/intake/check", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ disease: "x".repeat(2001) }) });
+  expect(r.status).toBe(400);
+});

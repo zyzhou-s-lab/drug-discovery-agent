@@ -322,6 +322,7 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
   app.post("/api/intake/check", async (c) => {
     const body = await c.req.json().catch(() => ({}) as any);
     const disease = String(body.disease ?? "");
+    if (disease.length > 2000) return c.json({ error: "disease too long" }, 400); // bound the input (the gate's own 200 cap aside)
     return c.json(await intakeFn(disease));
   });
 

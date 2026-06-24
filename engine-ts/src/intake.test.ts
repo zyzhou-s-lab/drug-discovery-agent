@@ -60,3 +60,18 @@ test("validateDisease: CJK rejected + fallback fails → rejected with explanati
   expect(r.accepted).toBe(false);
   expect(r.reason).toContain("fallback translation failed");
 });
+
+test("intakeGate accepts non-CJK non-ASCII scripts (Japanese/Korean) — Unicode-aware", () => {
+  expect(intakeGate("がん")).toBeNull(); // Japanese
+  expect(intakeGate("암")).toBeNull(); // Korean
+});
+
+test("validateDisease: a throwing fallback searchDisease never 500s — degrades to rejected", async () => {
+  const r = await validateDisease("阿尔茨海默病", {
+    runAgent: fakeRunAgent({ accepted: true, normalized_en: "Болезнь", efo_id: "", reason: "garbled" }),
+    translateCodepoints: (async () => "Alzheimer disease") as any,
+    searchDisease: (async () => { throw new Error("OT down"); }) as any,
+  });
+  expect(r.accepted).toBe(false);
+  expect(r.reason).toContain("fallback translation failed");
+});
