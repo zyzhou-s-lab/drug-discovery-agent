@@ -1,5 +1,8 @@
 # 领域落地：发现 → 设计 全链路（anchor：复现已验证案例）
 
+> 🟡 **STATUS：MIXED（领域绑定有效 / 全流水线属蓝图）** · as-of 2026-06-24
+> §1–§4（anchor、领域↔harness 绑定、真实 schema）**与语言无关、仍有效**（schema 现以 TS zod 实现）。§5 的 **8 阶段流水线是目标蓝图**：master 当前只跑 stage-0 `disease-overview`，发现段 **stage 1–4 已归档到 `legacy-discovery-pipeline` 分支**，§5.1 的节点清单对应那套 legacy pipeline。设计段（stage 5–7）仍是 Phase B，阻塞于 §6 的 qiaoy1 工具访问。
+
 把 [ARCHITECTURE](ARCHITECTURE.md) 的「领域无关 harness 壳」接到具体场景。
 
 > **scope（2026-05-31 已定）**：本项目覆盖**发现 → 设计 全链路**——**靶点发现（上游）** + **计算药物设计（下游：结构准备 → 生成/对接 → MD 验证）**。anchor 仍用 **dry-AMD → ROCK → ripasudil**，两端都有 ground truth（发现端 → ROCK；设计端 → ROCK 抑制剂）。完整 pipeline 见 §5。
@@ -158,4 +161,4 @@ class DesignArtifact(BaseModel):
 8. 跑设计段：**ripasudil 对接 ROCK + MD 作正对照**，校准设计段 rubric。
 9. `report`，端到端复现已知结论。
 
-> harness 骨架（Runner/worker/judge/index）见 [DETAILED-DESIGN §路线图](DETAILED-DESIGN.md#路线图)；本页管「领域内容」这一半。
+> harness 骨架（Runner/worker/judge/index）见 [DETAILED-DESIGN §路线图](history/DETAILED-DESIGN.md#路线图)（Phase A Python，已归档）；本页管「领域内容」这一半。

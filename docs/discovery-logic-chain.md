@@ -1,5 +1,8 @@
 # 靶点发现逻辑链条 + 数据可得性报告
 
+> 🟢 **STATUS：TIMELESS（领域科学调研）** · as-of 2026-06-24（调研日 2026-05-31）· stack: 语言无关
+> 文献逻辑链 + 集群数据可得性，不受语言重写 / scope 收窄影响。是发现段（无论将来在哪个栈重建）的科学依据。
+
 > 调研方法：用 `gpu-zhouy1:~/.agents/skills/paper-fetch`（OpenAlex + Semantic Scholar + Europe PMC 聚合检索）做文献检索梳理逻辑链条；在 gpu-zhouy1 / cpu-zhouy1 / 共享 `/data` 上调研所需数据。原始检索日志见 [`refs/discovery-literature-search.md`](refs/discovery-literature-search.md)，原始数据调研见 [`refs/cluster-data-survey.md`](refs/cluster-data-survey.md)。日期 2026-05-31。
 >
 > 本报告填充 [DOMAIN.md](DOMAIN.md) 发现段（stage 1-4，含 `target-validation`）的 `DOMAIN-FILL`。验证段的多角度工具映射与 scatter-gather 结构另见 [target-validation.md](target-validation.md)。生物学阈值仍需领域专家最终核定。

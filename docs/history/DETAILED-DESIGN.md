@@ -1,6 +1,9 @@
 # 细节设计
 
-承接 [ARCHITECTURE.md](ARCHITECTURE.md)。本页给到可实现的细节：schema、目录结构、各组件接口、领域阶段流程、headless 配置、caching、路线图。
+> 🗄️ **STATUS：HISTORICAL（已归档）** · as-of 2026-06-24 · stack: **Python（Phase A）**
+> 本页是 **Phase A Python 栈**的细节设计（pydantic schema / `claude_agent_sdk` / `anthropic.messages` / `sqlite3` 代码）。该实现已归档到分支 **`python-stack`**，编排核心正被重写为 TS（见 [../engine-ts-status.md](../engine-ts-status.md)）。**这里的概念（节点 I/O 契约、judge schema、index、CC 资产、控制谱系）仍然有效且与语言无关**，但其中的 Python 代码片段不代表当前实现。判官的最终形态（§4 raw API 与 §13 `claude -p` 的取舍）以 [../engine-ts-status.md](../engine-ts-status.md) 为准。
+
+承接 [ARCHITECTURE.md](../ARCHITECTURE.md)。本页给到可实现的细节：schema、目录结构、各组件接口、领域阶段流程、headless 配置、caching、路线图。
 
 技术栈默认：**Python**（Runner / judge / index），**Claude Agent SDK**（worker，底层 `claude` CLI），**MCP**（领域工具），模型 `claude-opus-4-8`（worker，adaptive thinking + effort=high）/ `claude-opus-4-8` 或更省的 judge 模型。
 
@@ -245,9 +248,9 @@ Runner 全确定性：没有 LLM、没有累积 context（ARCHITECTURE §2 硬�
 
 ## 7. 领域阶段流程（药物靶点发现 workflow）
 
-> **权威 pipeline 见 [DOMAIN.md §5](DOMAIN.md)——scope 已扩为「发现→设计」全链路（7 阶段：发现 1-3 / 桥接 4=structure-prep / 设计 5-6 / report）。下表是早期 6 阶段 sketch，保留作结构示意。**
+> **权威 pipeline 见 [DOMAIN.md §5](../DOMAIN.md)——scope 已扩为「发现→设计」全链路（7 阶段：发现 1-3 / 桥接 4=structure-prep / 设计 5-6 / report）。下表是早期 6 阶段 sketch，保留作结构示意。** 注意：master 当前线上**只跑单个 `disease-overview`（deep-research）阶段**，发现段 stage 1–4 归档在 `legacy-discovery-pipeline` 分支。
 
-借鉴 Robin 的 pipeline 形状 + Biomni 的工具集（见 [REFERENCES.md](REFERENCES.md)）。每阶段一个 `.claude/skills/<stage>/SKILL.md` + `/td-<stage>` command + 若干子 agent。
+借鉴 Robin 的 pipeline 形状 + Biomni 的工具集（见 [REFERENCES.md](../REFERENCES.md)）。每阶段一个 `.claude/skills/<stage>/SKILL.md` + `/td-<stage>` command + 若干子 agent。
 
 | # | 阶段 (stage) | 输入 | 节点内部做什么（CC harness） | 产出（写 index） | judge 验收 |
 |---|---|---|---|---|---|

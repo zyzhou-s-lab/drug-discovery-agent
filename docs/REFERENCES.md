@@ -1,5 +1,8 @@
 # 参考项目与开源现状
 
+> 🟢 **STATUS：TIMELESS / RECORD（参考审计）** · as-of 2026-06-24
+> 外部项目审计，基本不过时。**一处已反转**：原文多处"本项目定 Python → 把 coder-loop 算法照 Python 重写"，但语言已改判为 **TS/bun**——而 coder-loop 本身就是 TS+Bun+SQLite，**现在是同语言直接参考**（见下方 coder-loop 段已标注）。
+
 本页记录我们调研过的参考系统，以及它们对本方案的具体借鉴/取舍。
 
 ---
@@ -114,7 +117,7 @@
 
 [`mouriya-s-lab/coder-loop`](https://github.com/mouriya-s-lab/coder-loop)——项目无关的「N 角色字符串调度引擎」：哑引擎（loop/scheduler/daemon）读 preset + target runtime，按 phase spawn agent、据 SQLite 里 item status 推进；GitHub issue/PR 迭代只是内置 preset。与本项目「哑 Runner + 外部判断 + 状态契约 + durable」**几乎同构**，但落在软件工程域、TS 写、且对 LLM 判断信任度更高（其 gate 是**有状态 prompt 链**、非独立 typed judge）。
 
-**硬约束**：本项目定 Python（领域工具生态），coder-loop 是 TS → **不直接当骨架；借鉴其算法/契约纪律（语言无关）用 Python 重写。**
+**硬约束**：~~本项目定 Python（领域工具生态），coder-loop 是 TS → 借鉴其算法/契约纪律用 Python 重写。~~ **【2026-06-21 已反转】引擎改判 TS/bun，与 coder-loop 同栈（TS+Bun+SQLite）→ 其 `sqlite-state.ts` / `daemon.ts` 可更直接地参考甚至移植，不再是跨语言重写。**
 
 **该吸收（coder-loop 更成熟）：**
 1. **持久层 = SQLite(WAL) state-DB + content-addressed artifact-store 分离**（`sqlite-state.ts`：事务/`busy_timeout`/`UNIQUE` 防重/schema 迁移）→ ✅ 已更新 ARCHITECTURE §3.8 / DETAILED §6 / DOMAIN §6。

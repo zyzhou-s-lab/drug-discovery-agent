@@ -1,5 +1,8 @@
 # 进度记录（Progress Timeline）
 
+> 📒 **STATUS：RECORD（append-only，覆盖到 Phase A）** · as-of 2026-06-24
+> 权威时间线，但**仅记到 Phase A（Python，2026-06-02 收尾）**。其后的 **TS 引擎 cutover（2026-06-20 起）这条主线未在此记录**——cutover 现状见 [engine-ts-status.md](engine-ts-status.md)，发布粒度见根目录 `CHANGELOG.md`。
+
 > drug-discovery-agent harness 的里程碑流水，按完成时间排列。设计决策的细节见各
 > `docs/*.md`（CONCEPTS / ARCHITECTURE / DOMAIN / DETAILED-DESIGN / phase-a-plan），
 > 本页只做"何时完成了什么 + 对应 commit"的索引。
