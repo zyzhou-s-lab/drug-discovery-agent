@@ -14,7 +14,7 @@ import { type ChatMessage, defaultChat } from "./llm";
 import { research as realResearch } from "./deep_research";
 import { readStageEvents } from "./events";
 import { type DiseaseIntake, validateDisease } from "./intake";
-import { isRunning, normalizeAngles, runSearch, SEARCH_STAGE, signalStop } from "./run";
+import { isRunning, normalizeAngles, runPipeline, runSearch, SEARCH_STAGE, signalStop } from "./run";
 import { scope as realScope } from "./scope";
 import { Index } from "./store";
 import { citeByDoi, normDoi } from "./tools/paperfetch";
@@ -225,6 +225,7 @@ export interface AppOpts {
   researchFn?: typeof realResearch;
   chatFn?: (system: string, messages: ChatMessage[], onText: (t: string) => void | Promise<void>, logMeta?: Record<string, unknown>) => Promise<void>; // injectable; defaults to the Anthropic stream
   intakeFn?: (disease: string) => Promise<DiseaseIntake>; // injectable; defaults to validateDisease
+  pipelineFn?: typeof runPipeline; // injectable; defaults to runPipeline (disease-overview scope)
 }
 
 export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: AppOpts = {}): Hono {
@@ -234,6 +235,7 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
   const scopeFn = opts.scopeFn ?? realScope;
   const chatFn = opts.chatFn ?? defaultChat;
   const intakeFn = opts.intakeFn ?? validateDisease;
+  const pipelineFn = opts.pipelineFn ?? runPipeline;
   const app = new Hono();
 
   app.get("/api/health", (c) => c.json({ ok: true })); // don't leak internal db/artifacts paths
@@ -337,14 +339,18 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
     return c.json(out ?? { question: disease, summary: "", angles: [], budget: null });
   });
 
-  // Create/record a campaign (groups by disease) — fire-and-forget; the search is triggered separately.
+  // Create a campaign + fire-and-forget the disease-overview (scope) pipeline (api.py start_run).
   app.post("/api/campaigns", async (c) => {
     const body = await c.req.json().catch(() => ({}) as any);
     const campaign = String(body.campaign ?? "demo");
     if (!safeSegment(campaign)) return c.json({ error: "invalid campaign" }, 400); // path-segment downstream
     const disease = String(body.disease ?? "");
-    index.recordCampaign(campaign, disease);
-    return c.json({ campaign, disease, started: true });
+    if (disease.length > 2000) return c.json({ error: "disease too long" }, 400);
+    const real = body.real !== false;
+    index.recordCampaign(campaign, disease); // group by disease immediately
+    // runPipeline catches its own errors, but guard the fire-and-forget against an unhandled rejection
+    void pipelineFn(index, artifactsRoot, campaign, disease, { real, skipIntake: Boolean(body.skip_intake) }).catch((e) => console.warn(`pipeline failed for ${campaign}:`, e));
+    return c.json({ campaign, disease, real, started: true });
   });
 
   // Kick off the Search phase over the approved angles — fire-and-forget background run.

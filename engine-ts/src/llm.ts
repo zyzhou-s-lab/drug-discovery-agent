@@ -48,6 +48,35 @@ export async function streamChatText(
   }
 }
 
+/** Single-shot completion (non-streaming) → text, with backoff retry. Fires right after a 70+-agent
+ * run that may have saturated the backend (429/overload), so retry a few times; "" on no credential
+ * or final failure (never throws). Used for the report narrative (api.py _present_report). */
+export async function completeText(
+  system: string,
+  user: string,
+  opts: { maxTokens?: number; retries?: number; backoffMs?: (attempt: number) => number } = {},
+): Promise<string> {
+  const jc = makeJudgeClient();
+  if (!jc) return "";
+  const retries = opts.retries ?? 5;
+  const backoff = opts.backoffMs ?? ((a) => 2 ** a * 3000); // sleeps before attempts 1..4: 3,6,12,24s (no sleep after the last)
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const msg = await jc.client.messages.create({
+        model: jc.model,
+        max_tokens: opts.maxTokens ?? 8192,
+        system,
+        messages: [{ role: "user", content: user }],
+      });
+      return msg.content.map((b) => (b.type === "text" ? b.text : "")).join("").trim();
+    } catch (e) {
+      if (attempt < retries - 1) await new Promise((r) => setTimeout(r, backoff(attempt)));
+      else console.error("[completeText] giving up after retries:", e instanceof Error ? e.message : String(e));
+    }
+  }
+  return "";
+}
+
 /** Default chat sink used by the /chat endpoint: builds the client, streams, and degrades to a
  * plain message when there's no credential or the call errors (never throws — it's a stream body). */
 export async function defaultChat(
