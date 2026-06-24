@@ -5,13 +5,19 @@
 // (the same CSRF guard as writes). See docs/bun-migration-eval.md Phase 4 + the merged #27 design.
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { isIP } from "node:net";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { z } from "zod";
 
-/** Resolved each call (not a module const) so DD_SETTINGS_FILE / DD_DB can be set per test. */
+/** User-level config location (≈ ~/.claude/settings.json), NOT the data dir — the LLM endpoint +
+ * api key + run knobs are this deployment's creds, nothing project-shareable, so they live in the
+ * user config home, persistent and out of any repo. DD_SETTINGS_FILE overrides; resolved each call
+ * (not a module const) so tests can point it elsewhere. */
 export function settingsPath(): string {
-  return process.env.DD_SETTINGS_FILE ?? join(dirname(process.env.DD_DB ?? "/tmp/dd/state.sqlite") || ".", "settings.json");
+  if (process.env.DD_SETTINGS_FILE) return process.env.DD_SETTINGS_FILE;
+  const cfgHome = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
+  return join(cfgHome, "dda", "settings.json");
 }
 
 // UI field -> the env var it drives.
@@ -49,8 +55,8 @@ export function loadSettings(): Record<string, unknown> {
 }
 
 export function saveSettings(cfg: Record<string, unknown>): void {
-  mkdirSync(dirname(settingsPath()) || ".", { recursive: true });
   const p = settingsPath();
+  mkdirSync(dirname(p), { recursive: true }); // dirname always returns an absolute dir or "." — no `|| "."` needed
   const tmp = p + ".tmp";
   writeFileSync(tmp, JSON.stringify(cfg, null, 2), "utf-8");
   try {
