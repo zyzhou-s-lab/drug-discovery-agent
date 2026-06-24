@@ -61,3 +61,13 @@ test("CircuitBreaker ignores non-rate-limit errors (a bug shouldn't pause the ru
   b.note(true, "some other failure");
   expect(b.tripped).toBe(false);
 });
+
+test("CircuitBreaker: a junk threshold (NaN/≤0) falls back to 8 — protection not disabled", () => {
+  for (const bad of [NaN, 0, -1]) {
+    const b = new CircuitBreaker(bad as any);
+    for (let i = 0; i < 7; i++) b.note(true, "429");
+    expect(b.tripped).toBe(false); // 7 < 8 default
+    b.note(true, "429");
+    expect(b.tripped).toBe(true); // 8th → trip
+  }
+});

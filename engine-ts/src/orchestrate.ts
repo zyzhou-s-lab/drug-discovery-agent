@@ -24,15 +24,18 @@ const TRANSIENT = [
 // A sustained run of THESE (rate-limit / quota / out-of-balance) means the provider is unusable for
 // the rest of the run — the circuit breaker trips and auto-pauses rather than grinding every agent
 // to a failed call (the t2d incident: ~52 min of all-429 verify calls).
-const RATELIMIT = ["429", "too many requests", "rate limit", "rate_limit", "quota", "usage limit", "402", "insufficient", "balance"];
+const RATELIMIT = ["429", "too many requests", "rate limit", "rate_limit", "quota", "usage limit", "402", "insufficient", "out of balance"];
 
 /** Trips after `threshold` CONSECUTIVE rate-limit/quota agent failures (any success resets). Fed by
  * runAgent; research checks `tripped` in its stop predicate so the run pauses instead of burning out. */
 export class CircuitBreaker {
   private fails = 0;
+  private readonly threshold: number;
   tripped = false;
   reason = "";
-  constructor(private readonly threshold = parseInt(process.env.DD_DR_BREAKER || "8", 10)) {}
+  constructor(threshold = parseInt(process.env.DD_DR_BREAKER || "8", 10)) {
+    this.threshold = Number.isFinite(threshold) && threshold > 0 ? threshold : 8; // a junk DD_DR_BREAKER must not disable protection
+  }
   note(isError: boolean, msg = ""): void {
     if (!isError) {
       this.fails = 0;
@@ -145,7 +148,9 @@ export async function runAgent(
   opts: RunAgentOpts = {},
 ): Promise<[Record<string, unknown> | null, ToolResult[]]> {
   const { onMessage, maxTurns = 12, shouldStop, systemPrompt, model: modelOpt, allowedTools, disallowedTools, breaker } = opts;
-  let lastErrMsg = ""; // most recent error text (for the circuit breaker's rate-limit classification)
+  let lastErrMsg = ""; // most recent error text (any attempt)
+  let rateLimitMsg = ""; // a rate-limit/quota error seen on ANY attempt — survives a later attempt's
+  // different error so a 429-then-other-error call is still counted as rate-limited by the breaker
   if ((shouldStop && shouldStop()) || budget.exhausted()) return [null, []];
 
   const cap: { v: Record<string, unknown> | null } = { v: null };
@@ -206,7 +211,9 @@ export async function runAgent(
             budget.add(phase, msg.usage, msg.total_cost_usd ?? 0);
             if (msg.is_error) {
               lastErrMsg = String(msg.result ?? "");
-              if (TRANSIENT.some((m) => lastErrMsg.toLowerCase().includes(m))) transient = true;
+              const low = lastErrMsg.toLowerCase();
+              if (TRANSIENT.some((m) => low.includes(m))) transient = true;
+              if (RATELIMIT.some((m) => low.includes(m))) rateLimitMsg = lastErrMsg;
             }
             // turn boundary: submitted → done; else nudge (bounded) or close
             if (cap.v != null) { input.close(); break; }
@@ -221,6 +228,7 @@ export async function runAgent(
         // instead of looping maxRetries times in silence. Not rethrown (would crash the run vs salvage).
         const m = String(err instanceof Error ? err.message : err).toLowerCase();
         lastErrMsg = m;
+        if (RATELIMIT.some((x) => m.includes(x))) rateLimitMsg = m;
         transient = TRANSIENT.some((x) => m.includes(x));
         if (!transient) console.warn(`[runAgent ${phase}] non-transient error: ${m.slice(0, 200)}`);
       }
@@ -234,7 +242,9 @@ export async function runAgent(
   } finally {
     sem.release();
   }
-  breaker?.note(cap.v == null, lastErrMsg); // one outcome per agent call: success resets, rate-limit fail counts
+  // one outcome per agent call: success resets the streak; a failure that hit a rate-limit on ANY
+  // attempt counts (rateLimitMsg, not just the last attempt's error).
+  breaker?.note(cap.v == null, rateLimitMsg || lastErrMsg);
   return [cap.v, toolResults];
 }
 
