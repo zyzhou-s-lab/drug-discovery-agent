@@ -64,6 +64,55 @@
 
 > 组件职责见 §2，关键设计决定见 §3，发现段节点清单见 [DOMAIN §5.1](DOMAIN.md)。
 
+## 0.5 当前实现架构（deep-research + TS 引擎）
+
+> §0 的 8 阶段是**目标蓝图**（其完整 Python 实现归档在 `legacy-discovery-pipeline` 分支）。**当前线上跑的是 deep-research 流**（disease-overview：scope → search → fetch → verify → 合成），且后端正从 Python 迁移到 **Bun/TS 引擎 `engine-ts/`**（cutover 进行中：读/SSE/run/chat/intake 已移植；pipeline-run + narrative 收尾中。线上 live 暂仍为 Python `uvicorn:8099`，切换后换成 `bun engine-ts/src/server.ts`）。
+
+```mermaid
+flowchart TB
+    USER([用户浏览器]) --> NGINX["nginx 反代 :8088 · 公网入口"]
+    NGINX --> WEB["React 前端 :5173 · web/ (Vite)"]
+    WEB -->|"/api/* 代理"| API
+
+    subgraph ENGINE["engine-ts · Bun + Hono 后端 :8099 (迁移目标)"]
+        direction TB
+        API["app.ts · HTTP API + SSE"]
+        API --> READ["读/CRUD · 报告 · 文件 · references"]
+        API --> RUN["run.ts · 后台 search runner"]
+        API --> INTAKE["intake.ts · 疾病校验门"]
+        API --> CHAT["旁路对话 (llm.ts 直连 Anthropic)"]
+        RUN --> DR
+        subgraph DR["deep_research.ts · 五阶段 (per scope angle)"]
+            direction LR
+            S1[Scope] --> S2[Search] --> S3[Fetch] --> S4["Verify · 3票对抗"] --> S5["Synthesize · per-angle map-reduce"]
+        end
+    end
+
+    DR --> ORCH["orchestrate.ts · runAgent (forced-tool agent)"]
+    INTAKE --> ORCH
+    ORCH --> SDK["Claude Agent SDK"]
+    SDK --> LLM[("LLM · Kimi / mimo")]
+    CHAT --> LLM
+    ORCH --> MCP["MCP 工具 (in-process) · litmcp · OpenTargets · submit_*"]
+
+    subgraph STORE["存储 / 读模型 · CQRS"]
+        direction LR
+        SQLITE[("bun:sqlite · store.ts")]
+        EVENTS["events.ts · per-stage JSONL"]
+        ASSETS["assets.ts · 增量资产 (#30)"]
+        ART["artifacts/ · report · search_status"]
+    end
+    RUN --> EVENTS
+    RUN --> ART
+    DR --> ASSETS
+    READ --> SQLITE
+    READ --> ART
+
+    MCP -. 后续/分离 .-> PY["Python 科学计算 (经 MCP)<br/>scGen · geneformer 扰动<br/>legacy 8 阶段管线 (legacy 分支)"]
+```
+
+**与 §0 蓝图的对应：** RUNNER＝`run.ts`（确定性后台 runner）；boxed agent 节点＝`runAgent` 跑的每个 search/fetch/verify/synth/intake session（fresh context + 强制 `submit_*` 结构化产出）；INDEX＝`store.ts`(bun:sqlite) + `events.ts` + `assets.ts` + artifacts（CQRS 读模型，observer 只读）；tools/MCP＝`litmcp`/`OpenTargets`（科学算法 scGen/geneformer 后续经 MCP 接入）。当前 deep-research 是单 `disease-overview` 阶段；§0 的 8 阶段 + scatter-gather 是后续展开方向。
+
 ## 1. 三层 + index + observer
 
 ```

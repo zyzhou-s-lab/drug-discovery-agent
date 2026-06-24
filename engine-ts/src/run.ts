@@ -9,8 +9,13 @@ import { join } from "node:path";
 import { writeAsset, writeOverviewAssets } from "./assets";
 import { research as realResearch } from "./deep_research";
 import { emit, emitStream, eventsDir } from "./events";
+import { validateDisease as realValidate } from "./intake";
+import { presentReport as realPresent } from "./present";
+import { scope as realScope } from "./scope";
+import type { Index } from "./store";
 
 export const SEARCH_STAGE = "deep-research";
+export const OVERVIEW_STAGE = "disease-overview";
 
 type ResearchFn = typeof realResearch;
 
@@ -84,6 +89,7 @@ function readJson(path: string): any | null {
 
 export interface RunDeps {
   research?: ResearchFn;
+  present?: typeof realPresent; // injectable narrative (defaults to presentReport); tests pass a no-op
 }
 
 /** Run the Search phase in the background. Awaitable (tests await it); the HTTP endpoint
@@ -147,9 +153,71 @@ export async function runSearch(
     const final = entry.stopped ? "stopped" : "done";
     writeJson(statusPath, { state: final, stats: report.stats, run: runId });
     emit(SEARCH_STAGE, "synthesize", "result", { num_turns: report.stats?.agentCalls });
+    // presentation (best-effort, AFTER the report is live so the tab shows immediately): turn the
+    // structured English report into a polished Chinese Markdown narrative; fills in on next poll.
+    try {
+      const present = deps.present ?? realPresent;
+      const nar = await present(report, disease, angles);
+      if (nar) {
+        report.narrative = nar;
+        writeJson(reportPath, report);
+      }
+    } catch (e) {
+      console.warn(`narrative failed for ${campaign}:`, e);
+    }
   } catch (e) {
     writeJson(statusPath, { state: "error", error: String(e instanceof Error ? e.message : e), run: runId });
   } finally {
     registry.delete(campaign);
+  }
+}
+
+export interface PipelineDeps {
+  scope?: typeof realScope;
+  intake?: typeof realValidate;
+}
+
+/** Run the disease-overview pipeline (scope) for a new campaign — api.py _run_pipeline. Optional
+ * intake gate (skipped when the dialog already pre-checked), then scope → record the stage output
+ * (angles) in the Index + step events. Fire-and-forget; awaitable for tests. */
+export async function runPipeline(
+  idx: Index,
+  artifactsRoot: string,
+  campaign: string,
+  disease: string,
+  opts: { real?: boolean; skipIntake?: boolean } & PipelineDeps = {},
+): Promise<void> {
+  const scope = opts.scope ?? realScope;
+  const validate = opts.intake ?? realValidate;
+
+  // intake gate (real runs without a prior /intake/check) — a rejection records & returns
+  if (opts.real !== false && !opts.skipIntake) {
+    let intake: { accepted: boolean; reason: string } | null = null;
+    try {
+      intake = await validate(disease);
+    } catch {
+      intake = null; // an intake error shouldn't block the run
+    }
+    if (intake && !intake.accepted) {
+      idx.recordAttempt(campaign, OVERVIEW_STAGE);
+      idx.markDone(campaign, OVERVIEW_STAGE, { stage: OVERVIEW_STAGE, summary: `intake rejected: ${intake.reason}`, data: { kind: "rejected", reason: intake.reason } }, {});
+      return;
+    }
+  }
+
+  idx.recordAttempt(campaign, OVERVIEW_STAGE);
+  const evDir = join(artifactsRoot, campaign, "events");
+  try {
+    const res = await eventsDir.run(evDir, async () => {
+      emit(OVERVIEW_STAGE, "scope", "session_start", { prompt: `deep-research scope: ${disease}` });
+      return scope(disease, { onMessage: (m) => emitStream(OVERVIEW_STAGE, "scope", m, { skipText: true }) });
+    });
+    const angles = ((res as any)?.angles as any[]) ?? [];
+    const output = angles.length
+      ? { stage: OVERVIEW_STAGE, summary: `Deep-research scope: ${angles.length} 个研究角度`, candidates: [], open_questions: ["scope-only 研究计划;完整检索简报(search→verify→synth)待 M2"], data: { kind: "scope", question: (res as any)?.question ?? disease, angles, budget: (res as any)?.budget } }
+      : { stage: OVERVIEW_STAGE, summary: "[deep-research scope] 未能拆解出研究角度", open_questions: ["scope returned no angles"] };
+    idx.markDone(campaign, OVERVIEW_STAGE, output, {});
+  } catch (e) {
+    idx.markDone(campaign, OVERVIEW_STAGE, { stage: OVERVIEW_STAGE, summary: `pipeline failed: ${e instanceof Error ? e.message : String(e)}` }, {});
   }
 }

@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createApp, type AppOpts } from "./app";
-import { isRunning, runSearch, signalStop } from "./run";
+import { isRunning, OVERVIEW_STAGE, runPipeline, runSearch, signalStop } from "./run";
 import { Index } from "./store";
 
 function setup(opts: AppOpts = {}) {
@@ -63,10 +63,13 @@ test("POST /research/scope returns angles (injected scope), 400 on empty", async
   expect((await app.request("/api/research/scope", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).status).toBe(400);
 });
 
-test("POST /campaigns records the campaign", async () => {
-  const { app, idx } = setup();
-  await app.request("/api/campaigns", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ campaign: "ep-camp", disease: "AMD" }) });
+test("POST /campaigns records the campaign + fires the disease-overview pipeline", async () => {
+  let fired: any = null;
+  const { app, idx } = setup({ pipelineFn: (async (_i: any, _a: any, campaign: string, disease: string, o: any) => { fired = { campaign, disease, o }; }) as any });
+  const j = await J(await app.request("/api/campaigns", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ campaign: "ep-camp", disease: "AMD", skip_intake: true }) }));
   expect(idx.campaignExists("ep-camp")).toBe(true);
+  expect(j.started).toBe(true);
+  expect(fired).toMatchObject({ campaign: "ep-camp", disease: "AMD", o: { real: true, skipIntake: true } });
 });
 
 test("POST /search: 400 no-angles, 200 started, 409 already-running", async () => {
@@ -172,4 +175,36 @@ test("runSearch wires persist → incremental assets land via writeAsset", async
   const a = readJson(join(art, "rs-persist", "assets", "sources.json"));
   expect(a.campaign).toBe("rs-persist"); // writeAsset stamped the campaign
   expect(a.count).toBe(1);
+});
+
+// ── Phase-3c: disease-overview pipeline (scope) + narrative ──
+test("runPipeline runs scope → records the disease-overview output (angles)", async () => {
+  const { idx, art } = setup();
+  const fakeScope = (async () => ({ question: "Q", angles: [{ label: "genetics", query: "g" }, { label: "expression", query: "e" }], budget: {} })) as any;
+  await runPipeline(idx, art, "pl1", "AMD", { skipIntake: true, scope: fakeScope });
+  const out = idx.output("pl1", OVERVIEW_STAGE) as any;
+  expect(idx.status("pl1", OVERVIEW_STAGE)).toBe("done");
+  expect(out.data.kind).toBe("scope");
+  expect(out.data.angles.length).toBe(2);
+  expect(out.summary).toContain("2 个研究角度");
+});
+
+test("runPipeline: intake rejection records a rejected output (no scope)", async () => {
+  const { idx, art } = setup();
+  let scoped = false;
+  await runPipeline(idx, art, "pl2", "asdfqwer", {
+    intake: (async () => ({ accepted: false, normalized_en: "", efo_id: "", reason: "not a disease" })) as any,
+    scope: (async () => { scoped = true; return null; }) as any,
+  });
+  const out = idx.output("pl2", OVERVIEW_STAGE) as any;
+  expect(out.data.kind).toBe("rejected");
+  expect(out.summary).toContain("intake rejected");
+  expect(scoped).toBe(false);
+});
+
+test("runSearch writes the narrative from the injected present fn", async () => {
+  const { art } = setup();
+  const fakeResearch = async () => ({ question: "Q", findings: [{ claim: "c" }], stats: {} }) as any;
+  await runSearch(art, "nar1", "AMD", ANGLES, { research: fakeResearch, present: (async () => "## 执行摘要\n叙述正文") as any });
+  expect(readJson(join(art, "nar1", "report.json")).narrative).toContain("叙述正文");
 });
