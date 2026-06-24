@@ -348,7 +348,8 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
     if (disease.length > 2000) return c.json({ error: "disease too long" }, 400);
     const real = body.real !== false;
     index.recordCampaign(campaign, disease); // group by disease immediately
-    void pipelineFn(index, artifactsRoot, campaign, disease, { real, skipIntake: Boolean(body.skip_intake) });
+    // runPipeline catches its own errors, but guard the fire-and-forget against an unhandled rejection
+    void pipelineFn(index, artifactsRoot, campaign, disease, { real, skipIntake: Boolean(body.skip_intake) }).catch((e) => console.warn(`pipeline failed for ${campaign}:`, e));
     return c.json({ campaign, disease, real, started: true });
   });
 

@@ -47,3 +47,12 @@ test("presentReport: feeds disease + digest to the injected completion", async (
   expect(captured).toContain("研究对象:AMD");
   expect(captured).toContain("## 执行摘要");
 });
+
+test("presentReport: a complete fn returning '' yields '' (not undefined)", async () => {
+  expect(await presentReport(REPORT, "AMD", undefined, { complete: async () => "" })).toBe("");
+});
+
+test("buildDigest caps the digest at 60k chars", () => {
+  const huge = { summary: "s", findings: [{ confidence: "high", claim: "C", sources: [] }], references: [], caveats: "x".repeat(80000) };
+  expect(buildDigest(huge).length).toBe(60000);
+});

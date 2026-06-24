@@ -189,6 +189,7 @@ export async function runPipeline(
 ): Promise<void> {
   const scope = opts.scope ?? realScope;
   const validate = opts.intake ?? realValidate;
+  const evDir = join(artifactsRoot, campaign, "events");
 
   // intake gate (real runs without a prior /intake/check) — a rejection records & returns
   if (opts.real !== false && !opts.skipIntake) {
@@ -200,13 +201,13 @@ export async function runPipeline(
     }
     if (intake && !intake.accepted) {
       idx.recordAttempt(campaign, OVERVIEW_STAGE);
+      eventsDir.run(evDir, () => emit(OVERVIEW_STAGE, "scope", "log", { msg: `intake 拒绝: ${intake.reason}` })); // surface in the step stream
       idx.markDone(campaign, OVERVIEW_STAGE, { stage: OVERVIEW_STAGE, summary: `intake rejected: ${intake.reason}`, data: { kind: "rejected", reason: intake.reason } }, {});
       return;
     }
   }
 
   idx.recordAttempt(campaign, OVERVIEW_STAGE);
-  const evDir = join(artifactsRoot, campaign, "events");
   try {
     const res = await eventsDir.run(evDir, async () => {
       emit(OVERVIEW_STAGE, "scope", "session_start", { prompt: `deep-research scope: ${disease}` });
@@ -215,7 +216,7 @@ export async function runPipeline(
     const angles = ((res as any)?.angles as any[]) ?? [];
     const output = angles.length
       ? { stage: OVERVIEW_STAGE, summary: `Deep-research scope: ${angles.length} 个研究角度`, candidates: [], open_questions: ["scope-only 研究计划;完整检索简报(search→verify→synth)待 M2"], data: { kind: "scope", question: (res as any)?.question ?? disease, angles, budget: (res as any)?.budget } }
-      : { stage: OVERVIEW_STAGE, summary: "[deep-research scope] 未能拆解出研究角度", open_questions: ["scope returned no angles"] };
+      : { stage: OVERVIEW_STAGE, summary: "[deep-research scope] 未能拆解出研究角度", candidates: [], open_questions: ["scope returned no angles"] };
     idx.markDone(campaign, OVERVIEW_STAGE, output, {});
   } catch (e) {
     idx.markDone(campaign, OVERVIEW_STAGE, { stage: OVERVIEW_STAGE, summary: `pipeline failed: ${e instanceof Error ? e.message : String(e)}` }, {});

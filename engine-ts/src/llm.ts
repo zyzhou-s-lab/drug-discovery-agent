@@ -59,7 +59,7 @@ export async function completeText(
   const jc = makeJudgeClient();
   if (!jc) return "";
   const retries = opts.retries ?? 5;
-  const backoff = opts.backoffMs ?? ((a) => 2 ** a * 3000); // 3,6,12,24s
+  const backoff = opts.backoffMs ?? ((a) => 2 ** a * 3000); // sleeps before attempts 1..4: 3,6,12,24s (no sleep after the last)
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
       const msg = await jc.client.messages.create({

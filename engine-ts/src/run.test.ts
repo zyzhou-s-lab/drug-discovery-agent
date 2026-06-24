@@ -208,3 +208,11 @@ test("runSearch writes the narrative from the injected present fn", async () => 
   await runSearch(art, "nar1", "AMD", ANGLES, { research: fakeResearch, present: (async () => "## 执行摘要\n叙述正文") as any });
   expect(readJson(join(art, "nar1", "report.json")).narrative).toContain("叙述正文");
 });
+
+test("runPipeline: scope throwing → records a 'pipeline failed' output (no crash)", async () => {
+  const { idx, art } = setup();
+  await runPipeline(idx, art, "plerr", "AMD", { skipIntake: true, scope: (async () => { throw new Error("scope boom"); }) as any });
+  const out = idx.output("plerr", OVERVIEW_STAGE) as any;
+  expect(idx.status("plerr", OVERVIEW_STAGE)).toBe("done");
+  expect(out.summary).toContain("pipeline failed");
+});
