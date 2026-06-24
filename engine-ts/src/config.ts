@@ -55,8 +55,8 @@ export function loadSettings(): Record<string, unknown> {
 }
 
 export function saveSettings(cfg: Record<string, unknown>): void {
-  mkdirSync(dirname(settingsPath()) || ".", { recursive: true });
   const p = settingsPath();
+  mkdirSync(dirname(p), { recursive: true }); // dirname always returns an absolute dir or "." — no `|| "."` needed
   const tmp = p + ".tmp";
   writeFileSync(tmp, JSON.stringify(cfg, null, 2), "utf-8");
   try {
