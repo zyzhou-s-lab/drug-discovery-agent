@@ -48,6 +48,14 @@ export const ReportSchema = z.object({
   openQuestions: z.array(z.string()).optional(),
 });
 
+// ── intake gate (disease validation) — the submit_intake forced-output tool ──
+export const IntakeSchema = z.object({
+  accepted: z.boolean(),
+  normalized_en: z.string().default(""),
+  efo_id: z.string().default(""),
+  reason: z.string().default(""),
+});
+
 // ── per-angle map-reduce synthesis (#30 phase 3) ──
 // MAP: one finding from a SINGLE angle's confirmed claims (angle injected by the caller).
 export const AngleFindingSchema = z.object({
