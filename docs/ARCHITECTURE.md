@@ -1,10 +1,13 @@
 # 架构
 
-承接 [CONCEPTS.md](CONCEPTS.md)。这一页定义组件、职责、边界、以及节点执行器的选型。细节 schema 见 [DETAILED-DESIGN.md](DETAILED-DESIGN.md)。
+> 🧭 **STATUS：CURRENT（混合：蓝图 + 现状）** · as-of 2026-06-24 · stack: 概念语言无关
+> **§0 是目标蓝图（8 阶段发现→设计全链路）**——其 Python 实现归档在 `legacy-discovery-pipeline` 分支，尚未在 TS 上展开。**当前线上真正在跑的是 §0.5（deep-research 单阶段 + TS 引擎 cutover）**，以 §0.5 为现状的权威描述。§1–§3 的组件职责与设计决定与语言无关、仍有效；其中 §3.1/§3.8 的 Python 代码片段属 Phase A，TS 落点见 [engine-ts-status.md](engine-ts-status.md)。
+
+承接 [CONCEPTS.md](CONCEPTS.md)。这一页定义组件、职责、边界、以及节点执行器的选型。细节 schema 见 [history/DETAILED-DESIGN.md](history/DETAILED-DESIGN.md)（Phase A Python，已归档）。
 
 ---
 
-## 0. 总览图
+## 0. 总览图（目标蓝图 · 8 阶段）
 
 图例：`[…节点]` = boxed agent session（worker / planner / judge）；**RUNNER 与聚合 = 确定性代码，不是节点**；箭头 = 数据流。
 

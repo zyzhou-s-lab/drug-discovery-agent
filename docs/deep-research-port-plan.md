@@ -1,5 +1,8 @@
 # deep-research → SDK 复写计划(stage-0 disease-overview,可复用引擎)
 
+> 🟡 **STATUS：CURRENT 设计（措辞为 Python，已 port 到 TS）** · as-of 2026-06-24
+> 这是**当前唯一在线上跑的阶段**（disease-overview / deep-research）的设计源，仍然权威。但文中代码/路径是 **Python 措辞（`worker.py`/`judge.py`/`events.py`）**；该引擎已 port 到 TS（`engine-ts/src/deep_research.ts` + `orchestrate.ts` + `scope.ts`），TS 落点与差异见 [engine-ts-status.md](engine-ts-status.md)。
+
 > 目标:把 Claude Code 内置的 **deep-research Workflow** 的编排逻辑,用 **claude-agent-sdk** 在 dd-agent 自有栈(gpu / DeepSeek)上**复写成一个参数化引擎**,首个实例 = `disease-overview`(stage-0),并预留 nomination / validation 复用。
 >
 > 蓝本(逐字参考):落盘脚本 `…/workflows/scripts/deep-research-wf_*.js`(五阶段 prompt/schema/编排/去重/计票全在内)。SDK 范例 = 本仓库 `worker.py`(`_run_session` + `_*_server` forced 工具)、`judge.py`(consensus)、`events.py`(`emit`)。

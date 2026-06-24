@@ -1,5 +1,8 @@
 # Bun/TS 后端迁移 — 评估与计划
 
+> 🟡 **STATUS：CURRENT 迁移计划（决策已执行中）** · as-of 2026-06-24
+> 记录"要不要迁 / 怎么迁"的评估与 GO 决策（仍有效）。**实际迁移进度不在本页**——cutover 已推进到 phase 3c + circuit-breaker 并入 master，但**线上 8099 暂仍是 Python uvicorn，engine-ts 尚未在 gpu 部署**（`node_modules` 未装、bun 未上 PATH）。当前真实状态见 [engine-ts-status.md](engine-ts-status.md)。
+
 > 评估「把后端/引擎从 Python 迁到 Bun/TS,科学计算继续留 Python 藏在 MCP 后」是否值得、怎么做。
 > 触发点:计算层全在 MCP 后面、资产层是 JSON 文件 —— 引擎↔计算的契约**已经是语言无关的 JSON**,所以引擎理论上可换任意语言。
 

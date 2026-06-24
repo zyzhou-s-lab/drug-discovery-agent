@@ -3,16 +3,20 @@
 > 一个面向**药物靶点发现（therapeutic target discovery）**的长程 Agent 系统的架构方案。
 > 核心立场：用程序语言理论（PL）的视角设计 harness，而不是堆一个"会聊天的大 agent"。
 
-最后更新：2026-06-01
+> 🧭 **现状速读（as-of 2026-06-24）**
+> - **线上在跑的**：单个 `disease-overview` 深度研究流（scope → search → fetch → verify → synthesize）+ web 可视化。
+> - **栈迁移中**：编排核心正从 **Python（`src/dd_agent/`）** 重写为 **TS/bun（`engine-ts/`）**；代码已并入 `master`，但**线上 8099 暂仍是 Python uvicorn**，engine-ts 尚未在 gpu 部署。详见 **[docs/engine-ts-status.md](docs/engine-ts-status.md)**。
+> - **已归档**：8 阶段发现→设计全流水线（stage 1–4）= 蓝图，Python 实现在分支 `legacy-discovery-pipeline`；整个 Python 栈在分支 `python-stack`。
+> - **被阻塞**：Phase B 设计段（结构/对接/MD），卡在 qiaoy1 工具访问。
 
 ---
 
-## 一句话方案
+## 一句话方案（设计哲学，语言无关）
 
 > **可靠的长程任务 = 一套 harness，而不是一个自由对话的 agent。**
 > 把"聪明"关进**可丢弃的盒子（boxed agent node）**里，让外层的**确定性指挥棒（Runner / 状态机）**保持愚蠢；
-> 节点内部**尽情复用 Claude Code 的 harness 能力**（skills / 子 agent / tools / todo 自检）跑完一个有界阶段；
-> 外层只编码**药物靶点发现这一个场景的固定阶段流程**：阶段序列 + 类型化边界 + **独立 judge 验收** + 共享 **index（权威数据源）**。
+> 节点内部**尽情复用 harness 能力**（skills / 子 agent / tools / todo 自检）跑完一个有界阶段；
+> 外层只编码**这一个场景的固定阶段流程**：阶段序列 + 类型化边界 + **独立验收** + 共享 **index（权威数据源）**。
 
 ```
                           人类（仅在边界）   设计期→config↓    观察期→读 index(只读/CQRS)↑
@@ -21,102 +25,101 @@
       │ 定义阶段·类型契约·路由·副作用收敛·loop/terminate（愚蠢而确定，不推理）
       │ spawn 节点 → 收 typed 产出 → 写 index → 据 verdict 做确定性转移
 ═══════════════════════════════════════════════════════════════════════════
- 中层 │ 8 阶段 pipeline（boxed agent 节点 ＝ functional core，每阶段全新 session）
-      │  发现段(per disease；stage 2–4 per 候选靶点)         桥接      设计段
-      │  [1假设]→[2文献]→[3选定]→[4验证]  →  [5结构]→[6生成·对接]→[7模拟]→[8报告]
-      │    └SG·固定          └SG·动态planner      · 每阶段挂 1 个 [judge 节点]
-      │  SG = scatter-gather：planner → 并行角度节点 → 聚合(代码) → judge
+ 中层 │ boxed agent 节点 ＝ functional core，每阶段全新 session、强制 typed 产出
+      │ 【蓝图】8 阶段：[1假设]→[2文献]→[3选定]→[4验证] → [5结构]→[6生成·对接]→[7模拟]→[8报告]
+      │ 【现状】只跑 stage-0 `disease-overview`（deep-research 五阶段）
 ═══════════════════════════════════════════════════════════════════════════
- 底层 │ tools/MCP（封装算法：OpenTargets·FUSION·iRIGS·GRN_transfer·Vina·GROMACS·AF3…）
-      │ INDEX ＝ 权威数据源（共享 /data）：context 每节点可丢，知识/状态持久累积
+ 底层 │ tools/MCP（封装算法：OpenTargets·文献·后续 FUSION/GRN_transfer/Vina/GROMACS/AF3…）
+      │ INDEX ＝ 权威数据源：context 每节点可丢，知识/状态持久累积
 ═══════════════════════════════════════════════════════════════════════════
-
-[…节点]=boxed agent（worker/planner/judge，需验收）；Runner·聚合=确定性代码（不是节点）
-完整总览(含 scatter-gather 放大)见 docs/ARCHITECTURE.md §0；发现段节点清单见 docs/DOMAIN.md §5.1
 ```
+
+完整蓝图（含 scatter-gather 放大）见 [ARCHITECTURE §0](docs/ARCHITECTURE.md)；当前 TS 引擎架构见 [ARCHITECTURE §0.5](docs/ARCHITECTURE.md) + [engine-ts-status.md](docs/engine-ts-status.md)。
 
 ---
 
-## 文档索引
+## 文档地图（按状态分层）
 
-| 文档 | 内容 |
-|---|---|
-| [docs/CONCEPTS.md](docs/CONCEPTS.md) | 设计哲学：LLM=纯函数、context 污染、副作用=state、代数效应/Koka、agent-as-tool、信息索引化、对话被赶到两端 |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 三层架构、组件职责、关键设计决定、节点执行器选型对比 |
-| [docs/DETAILED-DESIGN.md](docs/DETAILED-DESIGN.md) | 细节设计：节点 I/O 契约、Runner、judge schema、index、CC 原生资产、headless 配置、prompt caching、领域阶段流程、目录结构 |
-| [docs/DOMAIN.md](docs/DOMAIN.md) | **领域落地**：**发现→设计全链路（7 阶段）**；anchor 复现 dry-AMD→ROCK→ripasudil（两端 ground truth）；领域↔harness 绑定、真实 schema、stage-1 切片、工具层+访问约束、数据底座、落地顺序（Phase A 发现 / B 设计） |
-| [docs/discovery-logic-chain.md](docs/discovery-logic-chain.md) | **发现段调研报告**：完整靶点发现逻辑链条（文献支撑）+ 各步数据需求 + gpu/cpu 数据可得性调研 + 缺口分析；anchor 纠偏（genetics→补体, ROCK=repurposing）。原始日志见 `docs/refs/discovery-*` |
-| [docs/target-validation.md](docs/target-validation.md) | **靶点验证（新增 stage 4）**：多角度计算实验验证（TWAS/GWAS/coloc/MR/in-silico 基因扰动/表达/网络）→ 本地工具映射（cpu FUSION/LDSC/ANNOVAR、gpu GRN_transfer/iRIGS/CellOracle/扰动模型、/data PrediXcan/DRKG）+ 缺口（coloc/MR 待补）+ judge 收敛规则。日志见 `docs/refs/validation-*` |
-| [docs/REFERENCES.md](docs/REFERENCES.md) | 参考项目分析：Robin、Biomni、pi/oh-my-pi、paper-agent；开源现状（含内部 manifesto 副本 `docs/refs/`） |
-| [docs/PROGRESS.md](docs/PROGRESS.md) | **进度时间线**：设计期 + 实现期 Phase A 每步完成时间 / 验证结果 / 对应 commit |
+> 状态图例：🟢 **TIMELESS**（哲学/科学，不过时） · 🧭 **CURRENT**（当前栈/现状） · 🟡 **MIXED** · 📒 **RECORD**（历史记录） · 🗄️ **HISTORICAL**（已归档的旧版本设计）。每篇顶部都有 STATUS 横幅。
+
+**先读这两篇了解现状：**
+
+| 文档 | 状态 | 内容 |
+|---|---|---|
+| [docs/engine-ts-status.md](docs/engine-ts-status.md) | 🧭 CURRENT | **当前栈的单一真相**：Python→TS 端口映射、线上 vs 代码、judge 现状、cutover 剩余 |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 🧭 §0.5 现状 / 🟡 §0 蓝图 | 三层架构、组件职责、关键设计决定；§0=8 阶段蓝图，§0.5=当前 TS 引擎 |
+
+**设计哲学与现行设计：**
+
+| 文档 | 状态 | 内容 |
+|---|---|---|
+| [docs/CONCEPTS.md](docs/CONCEPTS.md) | 🟢 TIMELESS | 设计哲学：LLM=纯函数、context 污染、副作用=state、代数效应、agent-as-tool、信息索引化 |
+| [docs/deep-research-port-plan.md](docs/deep-research-port-plan.md) | 🧭 CURRENT | 当前唯一在线阶段（disease-overview）的设计源（措辞为 Python，已 port 到 TS） |
+| [docs/bun-migration-eval.md](docs/bun-migration-eval.md) | 🧭 CURRENT | Python→TS/bun 迁移评估与 GO 决策（实际进度见 engine-ts-status） |
+| [docs/DOMAIN.md](docs/DOMAIN.md) | 🟡 MIXED | 领域落地：anchor dry-AMD→ROCK→ripasudil、领域↔harness 绑定、真实 schema（§1–4 有效；§5 全流水线=蓝图；§6 设计段访问约束） |
+
+**领域科学调研（长期有效）：**
+
+| 文档 | 状态 | 内容 |
+|---|---|---|
+| [docs/discovery-logic-chain.md](docs/discovery-logic-chain.md) | 🟢 TIMELESS | 靶点发现逻辑链（文献支撑）+ gpu/cpu/data 数据可得性；anchor 纠偏（genetics→补体） |
+| [docs/target-validation.md](docs/target-validation.md) | 🟡 MIXED | 多角度验证方法学 + 本地工具映射（TWAS/coloc/MR/in-silico 扰动…）；stage-4 编排=旧版，工具调研=有效 |
+| [docs/REFERENCES.md](docs/REFERENCES.md) | 🟢 TIMELESS | 参考项目分析：Robin / Biomni / pi / coder-loop；含内部 manifesto 副本 `docs/refs/` |
+
+**记录与归档：**
+
+| 文档 | 状态 | 内容 |
+|---|---|---|
+| [docs/PROGRESS.md](docs/PROGRESS.md) | 📒 RECORD | 进度时间线（覆盖到 Phase A；TS cutover 见 engine-ts-status） |
+| [CHANGELOG.md](CHANGELOG.md) | 📒 RECORD | 发布粒度的变更记录 |
+| [docs/history/DETAILED-DESIGN.md](docs/history/DETAILED-DESIGN.md) | 🗄️ HISTORICAL | Phase A **Python** 细节设计（schema/接口/路线图）；概念有效，代码=旧栈 |
+| [docs/history/phase-a-plan.md](docs/history/phase-a-plan.md) | 🗄️ HISTORICAL | Phase A 执行计划/记录（M0–M5 已完成） |
 
 ---
 
-## 怎么运行（Quickstart）
+## 怎么运行
 
-> 运行环境在 **`gpu-zhouy1:~/Projects/drug-discovery-agent`**；本地只编辑 → `git push` → gpu `git pull` 跑。
-> 前置：Python ≥ 3.11 + pydantic ≥ 2（gpu base conda 已有 2.12）。
-> **M0 现为 dummy（零 API）**：worker/judge 是占位的，只验证控制流（状态机 + 断点续 + scatter-gather），真实数据从 M1 起。
+> 运行环境在 **`gpu-zhouy1:~/Projects/drug-discovery-agent`**；本地编辑 → `git push` → gpu `git pull` 跑。
 
-零安装跑法（M0 即用此验证）：
+**当前线上（deep-research，Python 后端 + web）：**
 
 ```bash
-cd ~/Projects/drug-discovery-agent && git pull --ff-only
-
-# 跑发现段 pipeline（stage 1-4）
-PYTHONPATH=src python -m dd_agent.cli run --disease "dry AMD" --campaign c1 \
-    --db /tmp/dd/state.sqlite --artifacts /tmp/dd/artifacts
-
-# 只看状态表
-PYTHONPATH=src python -m dd_agent.cli status --campaign c1 \
-    --db /tmp/dd/state.sqlite --artifacts /tmp/dd/artifacts
-
-# 断点续：重跑会跳过 state-DB 里已 done 的阶段
-PYTHONPATH=src python -m dd_agent.cli resume --disease "dry AMD" --campaign c1 \
-    --db /tmp/dd/state.sqlite --artifacts /tmp/dd/artifacts
+# gpu 上：Python API 已常驻 127.0.0.1:8099（uvicorn dd_agent.api:app），web 在 :5173
+# 浏览器访问（gpu tailscale）：http://10.202.2.224:5173  或  ssh -L 5173:localhost:5173 gpu-zhouy1
+# 触发一次研究：POST /api/campaigns {disease, real:true}
 ```
 
-装成包（多一个 `dd-agent` 命令 + 可跑 pytest；本地无 pydantic 时建 venv 用这个）：
+**TS 引擎（迁移目标，部署后顶替 8099）：**
 
 ```bash
-python -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/dd-agent run --disease "dry AMD" --campaign c1
-.venv/bin/pytest -q          # M0 smoke
+cd ~/Projects/drug-discovery-agent/engine-ts
+bun install
+bun test            # 全模块有 *.test.ts
+bun src/server.ts   # 起 Hono API（与 api.py 路由兼容，前端不用改）
 ```
 
-`--db` / `--artifacts` 不传默认落 `/tmp/dd/`。
+**Phase A 旧发现段 CLI（已归档，需切分支）：**
 
-**子命令**：`run`（从当前状态跑）、`resume`（= run，靠 SQLite 跳过已 done 阶段）、`status`（只打印状态表，不执行）。
-
-**结果在哪**：状态机 → `--db` 的 SQLite（`stage_state` 表：status / attempts / output_json / verdict_json）；每阶段产物 → `--artifacts/<campaign>/01_discovery/<stage>-<sha>.json`（内容寻址，tmp+rename 原子写）。
+```bash
+git checkout legacy-discovery-pipeline
+PYTHONPATH=src python -m dd_agent.cli run --disease "dry AMD" --campaign c1
+```
 
 ---
 
 ## 状态
 
-- [x] 架构方向确定（三层 + index + observer）
-- [x] 节点执行器选型确定（worker = CC harness headless；judge = raw API 结构化输出）
-- [x] 锚定场景：**复现 dry-AMD→ROCK→ripasudil**（两端 ground truth，可校准 judge）→ `docs/DOMAIN.md`
-- [x] scope 定为**发现→设计全链路**（**8 阶段**：发现 1-3 / **验证 4 target-validation** / 桥接 5 / 设计 6-7 / report）
-- [x] 参考文档集中：manifesto + PL 源笔记 + 药物设计工具链调查 收进 `docs/refs/`
-- [~] stage-1（target-hypothesis）领域资产 scaffold（待从 Robin `prompts.py` 挖科学内容填 `DOMAIN-FILL`）
-- [x] **Phase A 调研**：文献梳理逻辑链条 + 数据可得性调研完成（`docs/discovery-logic-chain.md`）——发现段资源充足、无阻塞（本地 OpenTargets 25.03 + GTEx/GO/KEGG/L1000，在线 API 全可达，`iRIGS` env）
-- [x] **发现段补入 `target-validation` 阶段**（TWAS/GWAS/coloc/MR/in-silico 扰动/表达/网络）→ `docs/target-validation.md`；本地工具映射完成（最强项=基因扰动 GRN_transfer 等已跑、TWAS=FUSION/iRIGS；缺口=coloc/MR，R 易补）
-- [x] **验证结构 = scatter-gather**（planner 动态选角度[模式 a：菜单] → 并行角度节点[分层] → 聚合 → 加权/冲突 judge）+ **节点/工具粒度原则**（算法=封装工具调用、不单开 session；session=1角度工作流）→ ARCHITECTURE §3.7。动态加工具 (b)/(c) 列为未来规划
-- [x] **工具选择 + 消融判断**：同角度工具集+策略（**关键角度 consensus / 否则 best / fallback**）+ 选择判据；in-silico 消融**强制对照**（正/负）；judge **leave-one-angle-out 敏感性**（仅对"通过边缘"靶点，省算力）→ ARCHITECTURE §3.7C
-- [x] **语言定为 Python**（科学 agent 全 Python + 领域工具生态；Agent SDK 双语成熟，不构成 TS 理由）→ 调研见 REFERENCES
-- [x] **持久化/恢复策略**：CC 只给 session 级恢复（resume 会重复 tool call），durable 必须自建 → ARCHITECTURE §3.8。**(c)→(a) 渐进**：快节点先跑通(c)，接 GPU/slurm 长算上(a)；(b) Temporal 留待生产化。**(a) 实现三件套**：daemon watchdog（监控 pid + stream-json 提 session_id + 检 524/崩溃 → `claude --resume`+继续）+ `PreToolUse`/`PostToolUse` hook 幂等（防 524 重复提交）+ Runner/index 跨节点
-- [x] **审计 coder-loop**（TS+Bun+SQLite harness 现成参考）→ 吸收：**持久层 = SQLite(WAL) state-DB + content-addressed artifact-store 分离**、**daemon watchdog 算法**（进程组 kill / recover-stale / 退避预算 / `probe-claude-resume`）照其 Python 重写；保留 judge/scatter-gather/tool 幂等/Agent SDK worker（科学域独有或更强）。详见 REFERENCES + ARCHITECTURE §3.8
-- [x] **Phase A 发现段（M0–M4a）+ observer（M5）跑通**：发现段 1-4 全链真实（提名→文献→选定→验证）+ web 可视化（详见下方里程碑 + `docs/PROGRESS.md`）
-- [ ] **Phase B（设计）**：qiaoy1 访问手段已具备（凭据 + remote `sshpass`）→ wrap AlphaFold3/Vina/GROMACS/RDKit/ORCA（建议迁共享 `/data`）
-- [x] **M0 骨架（dummy，零 API）跑通**（gpu 验证：状态机 stage 1-4 全 done + 断点续跳过已 done + scatter-gather 聚合）→ `src/dd_agent/`、`docs/phase-a-plan.md`
-- [x] **M1（2026-06-01）stage-1 真实切片端到端跑通**：Agent SDK worker 自主调 OpenTargets（in-process MCP）出候选含补体 C3(0.71)/CFH(0.67)；judge（forced-tool typed Verdict）converged=true、score=0.9。后端实证 = DeepSeek Anthropic 兼容层（详见 `docs/phase-a-plan.md`「M1 完成记录」）
-- [x] **M2**：stage-1 scatter（4 角度并行 → 确定性去重合并），补体多角度命中，judge 0.9
-- [x] **M3a**：stage 间数据流 + stage-2 文献证据（Europe PMC 真实 PMID），judge 0.85（含修 `--only` 隐藏上游 bug）
-- [x] **M3b**：stage-3 选定（OT `target_profile` 三联评估）→ C3=Top / CFH=biologic（modality 分支）/ HTRA1=次选，judge 0.85
-- [x] **M4a**：stage-4 验证（planner 动态选角度 + 动态 scatter + 加权/冲突 judge）→ C3/CFH/HTRA1 各 genetic+safety，judge 0.45 显式标注 C3 safety 冲突；**发现段 1-4 全链真实跑通**
-- [x] **M5 observer**（HAPI 并行 + 联调）：Index 上 CQRS 只读 API + SSE + SDK 事件流 + web 前端，serve 真实 m3（含 stage-4），浏览器 `http://10.202.2.224:5173`
-- [ ] **M4b**：stage-4 接重型本地工具（FUSION / GRN_transfer + 独立源 GWAS/GTEx/STRING + stage-1 planner 回填 + 可能 slurm/durable）
-- [ ] **stage-1 独立源**（GTEx/STRING，解决 M2 暴露的 expression/network 空转）
+**Phase A（Python，已完成 → 归档）**
+- [x] 架构方向（三层 + index + observer）、节点执行器选型、anchor（dry-AMD→ROCK→ripasudil）
+- [x] 发现段调研：逻辑链 + 数据可得性（[discovery-logic-chain.md](docs/discovery-logic-chain.md)）
+- [x] 发现段 M0–M4a + observer M5 跑通（提名→文献→选定→验证 全链真实 + web），详见 [PROGRESS.md](docs/PROGRESS.md)
+- [x] judge 形态定稿：gate + `claude -p` + `submit_verdict`（agentic，std≈0.025）
 
-详见 [DETAILED-DESIGN §路线图](docs/DETAILED-DESIGN.md#路线图) + [DOMAIN §7 落地顺序](docs/DOMAIN.md)。
+**当前（TS cutover + deep-research）**
+- [x] deep-research 引擎（scope→search→fetch→verify→synthesize）+ web
+- [x] bun/TS 迁移 GO（Phase 0 spike：非 Anthropic 后端驱动 forced-tool 通过）
+- [~] **engine-ts cutover**：phase 1–3c + circuit-breaker 已并入 master；**线上 8099 暂仍 Python，engine-ts 待 gpu 部署 + 对拍切流量** → [engine-ts-status.md](docs/engine-ts-status.md)
+- [ ] 发现段（stage 1–4）在 TS 上重建（现归 `legacy-discovery-pipeline`）
+
+**Phase B（设计，阻塞）**
+- [ ] qiaoy1 工具访问（AlphaFold3/Vina/GROMACS/RDKit/ORCA）→ 解决后 wrap 为 MCP（建议迁共享 `/data`）

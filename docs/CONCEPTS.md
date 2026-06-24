@@ -1,5 +1,8 @@
 # 设计哲学：用 PL 视角设计 Agent Harness
 
+> 🟢 **STATUS：TIMELESS（设计哲学）** · as-of 2026-06-24 · stack: 语言无关
+> 纯"为什么"，不绑定 Python/TS、不绑定阶段数——无论后端是 Python 还是 TS 引擎都成立，不会过时。
+
 本项目的所有架构决定都从一组程序语言理论（PL）/ 函数式编程（FP）的观念推导而来。这一页是"为什么"，[ARCHITECTURE.md](ARCHITECTURE.md) 是"怎么做"。
 
 ---

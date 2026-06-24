@@ -1,5 +1,8 @@
 # 靶点验证（target-validation）：多角度计算/实验验证
 
+> 🟡 **STATUS：MIXED（stage-4 设计已归档 / 工具调研仍有效）** · as-of 2026-06-24
+> 作为 harness 阶段的 **stage-4 设计**对应已归档的发现段（`legacy-discovery-pipeline` 分支），其 scatter-gather 编排将来会在 TS 引擎上重做。但本页的**多角度方法学 + 本地工具映射（FUSION/iRIGS/GRN_transfer/coloc/MR…）= 领域科学调研，长期有效**，是 Phase B 重做验证段时的依据。
+
 > 给发现段补上**实验验证**环节（逻辑链条 [discovery-logic-chain.md](discovery-logic-chain.md) 的 Step 4 落成一个 pipeline 阶段）。验证 = **多条正交角度交叉确认**候选靶点的因果性与可干预性，再交付设计段。
 >
 > 调研依据：`gpu-zhouy1:~/Projects/`（已收集项目 + 已做实验）、`cpu-zhouy1:~/software/`（已部署工具）、`/data`（数据库）、+ 文献。原始日志见 `refs/validation-*`。生物学阈值待领域专家核定。

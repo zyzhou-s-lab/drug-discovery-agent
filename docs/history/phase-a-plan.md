@@ -1,6 +1,9 @@
 # Phase A 实现计划（发现段 stage 1–4 端到端跑通 dry-AMD）
 
-> 决策依据散见 [ARCHITECTURE](ARCHITECTURE.md) / [DOMAIN](DOMAIN.md) / [DETAILED-DESIGN](DETAILED-DESIGN.md) / [target-validation](target-validation.md)；本页是落地编排。
+> 🗄️ **STATUS：HISTORICAL（已完成的执行记录）** · as-of 2026-06-24 · stack: **Python（Phase A）**
+> Phase A（M0–M4a + observer M5）**已全部完成**——本页现为**历史执行记录**，不是当前待办。其产出的 Python 发现段（stage 1–4）已归档到分支 **`legacy-discovery-pipeline`**，整个 Python 栈归档到 **`python-stack`**。当前工作转向 TS 引擎 cutover + 单 `disease-overview` 流，见 [../engine-ts-status.md](../engine-ts-status.md)。唯一仍**待办**的部分是文末 M4b / Phase B（重型本地工具 + 设计段），但会在 TS 栈上重做。
+
+> 决策依据散见 [ARCHITECTURE](../ARCHITECTURE.md) / [DOMAIN](../DOMAIN.md) / [DETAILED-DESIGN](DETAILED-DESIGN.md) / [target-validation](../target-validation.md)；本页是落地编排。
 > **代码家 = `gpu-zhouy1:~/Projects/drug-discovery-agent`**（运行环境：Agent SDK、领域工具、SQLite、`/data` 都在 gpu）。本地编辑 → push GitHub → gpu `git pull` 运行/验证。
 
 ## 范围 & 前置（已定）
