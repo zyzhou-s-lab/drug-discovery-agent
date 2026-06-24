@@ -21,6 +21,36 @@ const TRANSIENT = [
   "503", "502", "500", "socket", "connection", "timed out", "timeout", "reset",
 ];
 
+// A sustained run of THESE (rate-limit / quota / out-of-balance) means the provider is unusable for
+// the rest of the run — the circuit breaker trips and auto-pauses rather than grinding every agent
+// to a failed call (the t2d incident: ~52 min of all-429 verify calls).
+const RATELIMIT = ["429", "too many requests", "rate limit", "rate_limit", "quota", "usage limit", "402", "insufficient", "out of balance"];
+
+/** Trips after `threshold` CONSECUTIVE rate-limit/quota agent failures (any success resets). Fed by
+ * runAgent; research checks `tripped` in its stop predicate so the run pauses instead of burning out. */
+export class CircuitBreaker {
+  private fails = 0;
+  private readonly threshold: number;
+  tripped = false;
+  reason = "";
+  constructor(threshold = parseInt(process.env.DD_DR_BREAKER || "8", 10)) {
+    this.threshold = Number.isFinite(threshold) && threshold > 0 ? threshold : 8; // a junk DD_DR_BREAKER must not disable protection
+  }
+  note(isError: boolean, msg = ""): void {
+    if (!isError) {
+      this.fails = 0;
+      return;
+    }
+    if (RATELIMIT.some((m) => msg.toLowerCase().includes(m))) {
+      this.fails++;
+      if (this.fails >= this.threshold && !this.tripped) {
+        this.tripped = true;
+        this.reason = (msg.slice(0, 200) || "provider rate-limited").trim();
+      }
+    }
+  }
+}
+
 /** A manually-driven async iterable of user messages — lets us push the initial prompt, then a
  * nudge after a turn ends (the SDK streaming-input multi-turn pattern). */
 class InputStream {
@@ -98,6 +128,7 @@ export interface RunAgentOpts {
   model?: string; // overrides DD_DR_MODEL (e.g. intake's DD_INTAKE_MODEL)
   allowedTools?: string[]; // whitelist — restrict the agent's tools (intake: only submit + search_disease)
   disallowedTools?: string[]; // blocklist (belt-and-suspenders alongside allowedTools)
+  breaker?: CircuitBreaker; // fed this agent's outcome (success/rate-limit fail) for auto-pause
 }
 
 /**
@@ -116,7 +147,10 @@ export async function runAgent(
   sem: Semaphore,
   opts: RunAgentOpts = {},
 ): Promise<[Record<string, unknown> | null, ToolResult[]]> {
-  const { onMessage, maxTurns = 12, shouldStop, systemPrompt, model: modelOpt, allowedTools, disallowedTools } = opts;
+  const { onMessage, maxTurns = 12, shouldStop, systemPrompt, model: modelOpt, allowedTools, disallowedTools, breaker } = opts;
+  let lastErrMsg = ""; // most recent error text (any attempt)
+  let rateLimitMsg = ""; // a rate-limit/quota error seen on ANY attempt — survives a later attempt's
+  // different error so a 429-then-other-error call is still counted as rate-limited by the breaker
   if ((shouldStop && shouldStop()) || budget.exhausted()) return [null, []];
 
   const cap: { v: Record<string, unknown> | null } = { v: null };
@@ -175,7 +209,12 @@ export async function runAgent(
             }
           } else if (msg.type === "result") {
             budget.add(phase, msg.usage, msg.total_cost_usd ?? 0);
-            if (msg.is_error && TRANSIENT.some((m) => String(msg.result ?? "").toLowerCase().includes(m))) transient = true;
+            if (msg.is_error) {
+              lastErrMsg = String(msg.result ?? "");
+              const low = lastErrMsg.toLowerCase();
+              if (TRANSIENT.some((m) => low.includes(m))) transient = true;
+              if (RATELIMIT.some((m) => low.includes(m))) rateLimitMsg = lastErrMsg;
+            }
             // turn boundary: submitted → done; else nudge (bounded) or close
             if (cap.v != null) { input.close(); break; }
             if (nudges < maxNudges && !(shouldStop && shouldStop()) && !budget.exhausted()) { nudges++; input.push(nudge); }
@@ -188,6 +227,8 @@ export async function runAgent(
         // through to return [null, []] (the salvage path), so a programming bug fails fast & visibly
         // instead of looping maxRetries times in silence. Not rethrown (would crash the run vs salvage).
         const m = String(err instanceof Error ? err.message : err).toLowerCase();
+        lastErrMsg = m;
+        if (RATELIMIT.some((x) => m.includes(x))) rateLimitMsg = m;
         transient = TRANSIENT.some((x) => m.includes(x));
         if (!transient) console.warn(`[runAgent ${phase}] non-transient error: ${m.slice(0, 200)}`);
       }
@@ -201,6 +242,9 @@ export async function runAgent(
   } finally {
     sem.release();
   }
+  // one outcome per agent call: success resets the streak; a failure that hit a rate-limit on ANY
+  // attempt counts (rateLimitMsg, not just the last attempt's error).
+  breaker?.note(cap.v == null, rateLimitMsg || lastErrMsg);
   return [cap.v, toolResults];
 }
 

@@ -10,6 +10,7 @@ import { writeAsset, writeOverviewAssets } from "./assets";
 import { research as realResearch } from "./deep_research";
 import { emit, emitStream, eventsDir } from "./events";
 import { validateDisease as realValidate } from "./intake";
+import { CircuitBreaker } from "./orchestrate";
 import { presentReport as realPresent } from "./present";
 import { scope as realScope } from "./scope";
 import type { Index } from "./store";
@@ -127,9 +128,11 @@ export async function runSearch(
   const runId = Date.now();
   writeJson(statusPath, { state: "running", angles: angles.length, run: runId });
 
+  const breaker = new CircuitBreaker(); // auto-pause if the provider is sustainedly rate-limited
   try {
     const report = await eventsDir.run(evDir, () =>
       research(disease, angles, {
+        breaker,
         shouldStop: () => entry.stopped,
         onProgress: (phase, done, total) => emit(SEARCH_STAGE, phase, "progress", { done, total }),
         onEvent: (phase, msg) => emit(SEARCH_STAGE, phase, "log", { msg }),
@@ -150,8 +153,15 @@ export async function runSearch(
     } catch (e) {
       console.warn(`overview asset write failed for ${campaign}:`, e);
     }
-    const final = entry.stopped ? "stopped" : "done";
-    writeJson(statusPath, { state: final, stats: report.stats, run: runId });
+    // auto-pause takes precedence over "done": a tripped breaker means the report is a degraded
+    // salvage (the provider was rate-limited), so surface "paused" + the reason, not a false "done".
+    const final = entry.stopped ? "stopped" : breaker.tripped ? "paused" : "done";
+    const status: Record<string, unknown> = { state: final, stats: report.stats, run: runId };
+    if (breaker.tripped) {
+      status.reason = breaker.reason;
+      emit(SEARCH_STAGE, "synthesize", "log", { msg: `自动暂停:provider 限流/配额耗尽(${breaker.reason})` });
+    }
+    writeJson(statusPath, status);
     emit(SEARCH_STAGE, "synthesize", "result", { num_turns: report.stats?.agentCalls });
     // presentation (best-effort, AFTER the report is live so the tab shows immediately): turn the
     // structured English report into a polished Chinese Markdown narrative; fills in on next poll.

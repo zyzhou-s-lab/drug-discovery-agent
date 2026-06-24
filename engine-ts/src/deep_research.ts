@@ -5,7 +5,7 @@
 // runAgent for offline orchestration tests. See docs/bun-migration-eval.md Phase 3.
 import { Budget, MAX_FETCH, MAX_VERIFY_CLAIMS, CONF_RANK, dedupResults, normUrl, rankClaims, type SearchResult, survives, VOTES_PER_CLAIM, REFUTATIONS_REQUIRED, MAX_DB_RAW } from "./core";
 import { makeLitMcp } from "./litmcp";
-import { type OnMessage, runAgent as realRunAgent, type RunAgentOpts, Semaphore, type ToolResult } from "./orchestrate";
+import { CircuitBreaker, type OnMessage, runAgent as realRunAgent, type RunAgentOpts, Semaphore, type ToolResult } from "./orchestrate";
 import { AngleFindingSchema, ExtractSchema, MergeSchema, SearchSchema, VerdictSubmitSchema } from "./schemas";
 import { citeByDoi } from "./tools/paperfetch";
 
@@ -253,6 +253,7 @@ export interface ResearchOpts {
   runAgent?: RunAgentFn; // injectable for offline orchestration tests
   lit?: Record<string, unknown>; // injectable; defaults to makeLitMcp()
   persist?: (name: string, payload: Record<string, unknown>) => void; // incremental per-stage asset sink (#30)
+  breaker?: CircuitBreaker; // rate-limit auto-pause; research checks .tripped in its stop predicate
 }
 
 /** Run Search→Fetch→Verify→Synthesize over pre-scoped `angles`. Returns the report dict (or a
@@ -263,6 +264,9 @@ export async function research(question: string, angles: Angle[], opts: Research
   const fetchBudget = opts.fetchBudget ?? MAX_FETCH;
   const maxVerifyClaims = opts.maxVerifyClaims ?? MAX_VERIFY_CLAIMS;
   const runAgent: RunAgentFn = opts.runAgent ?? realRunAgent;
+  // stop predicate seen by every agent: a user stop OR the circuit breaker tripping (sustained
+  // rate-limit) — so a dead provider auto-pauses the run instead of grinding every agent to failure.
+  const stopPred = () => (opts.shouldStop?.() ?? false) || (opts.breaker?.tripped ?? false);
   let lit = opts.lit;
   if (lit === undefined) {
     try {
@@ -312,7 +316,7 @@ export async function research(question: string, angles: Angle[], opts: Research
   const angleChain = async (angle: Angle): Promise<any[]> => {
     const [sr] = await runAgent("search", SEARCH_PROMPT(question, angle), "submit_results", SearchSchema.shape, lit!, budget, sem, {
       onMessage: amsg("search · " + angle.label.slice(0, 28)),
-      shouldStop: opts.shouldStop,
+      shouldStop: stopPred, breaker: opts.breaker,
     });
     if (!sr || !(sr as any).results) {
       ev("search", angle.label + ": 0 结果");
@@ -334,7 +338,7 @@ export async function research(question: string, angles: Angle[], opts: Research
       const flabel = "fetch · " + String(source.title || host || source.doi || "source").slice(0, 28);
       const [ext, toolResults] = await runAgent("fetch", FETCH_PROMPT(question, source, angle.label), "submit_claims", ExtractSchema.shape, lit!, budget, sem, {
         onMessage: amsg(flabel),
-        shouldStop: opts.shouldStop,
+        shouldStop: stopPred, breaker: opts.breaker,
       });
       bump("fetch", 1);
       if (!ext) return null;
@@ -407,7 +411,7 @@ export async function research(question: string, angles: Angle[], opts: Research
       Array.from({ length: VOTES_PER_CLAIM }, (_, v) =>
         runAgent("verify", VERIFY_PROMPT(question, claim, v), "submit_verdict", VerdictSubmitSchema.shape, lit!, budget, sem, {
           onMessage: amsg("verify · " + claim.claim.slice(0, 18) + " v" + (v + 1)),
-          shouldStop: opts.shouldStop,
+          shouldStop: stopPred, breaker: opts.breaker,
         }).then((r) => r[0]),
       ),
     );
@@ -484,7 +488,7 @@ export async function research(question: string, angles: Angle[], opts: Research
     const dbr = dbRawByAngle.get(a.label) ?? [];
     const [f] = await runAgent("synthesize", ANGLE_SYNTH_PROMPT(question, a, conf, dbr), "submit_finding", AngleFindingSchema.shape, {}, budget, sem, {
       onMessage: amsg("synth · " + a.label.slice(0, 24)),
-      shouldStop: opts.shouldStop,
+      shouldStop: stopPred, breaker: opts.breaker,
     });
     bump("synthesize", 1);
     findingsAcc[idx] = f
@@ -499,7 +503,7 @@ export async function research(question: string, angles: Angle[], opts: Research
   // REDUCE — merge the per-angle findings into summary / caveats / openQuestions
   const [merged] = await runAgent("synthesize", MERGE_PROMPT(question, findings), "submit_merge", MergeSchema.shape, {}, budget, sem, {
     onMessage: amsg("merge"),
-    shouldStop: opts.shouldStop,
+    shouldStop: stopPred, breaker: opts.breaker,
   });
   bump("synthesize", 1);
   ev("synthesize", "报告生成:" + findings.length + " 条 per-angle 发现 + 合并");

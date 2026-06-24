@@ -411,7 +411,7 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
       if (stage === SEARCH_STAGE) {
         // a missing/unparseable status file → state undefined → not terminal (keep streaming)
         const st = readJson(join(artifactsRoot, campaign, "search_status.json"))?.state;
-        return st === "done" || st === "stopped" || st === "error";
+        return st === "done" || st === "stopped" || st === "error" || st === "paused";
       }
       const s = index.status(campaign, stage);
       return s === "done" || s === "exhausted";

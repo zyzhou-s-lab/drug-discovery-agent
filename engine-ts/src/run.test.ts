@@ -216,3 +216,15 @@ test("runPipeline: scope throwing → records a 'pipeline failed' output (no cra
   expect(idx.status("plerr", OVERVIEW_STAGE)).toBe("done");
   expect(out.summary).toContain("pipeline failed");
 });
+
+test("runSearch auto-pauses (status 'paused') when the circuit breaker trips", async () => {
+  const { art } = setup();
+  const tripping = (async (_d: string, _a: unknown, o: any) => {
+    for (let i = 0; i < 10; i++) o.breaker?.note(true, "API Error: 429 rate limit"); // simulate sustained 429
+    return { question: "Q", findings: [], stats: {} } as any;
+  });
+  await runSearch(art, "paused1", "X", ANGLES, { research: tripping as any });
+  const s = readJson(join(art, "paused1", "search_status.json"));
+  expect(s.state).toBe("paused");
+  expect(s.reason).toContain("429");
+});
