@@ -4,6 +4,7 @@
 // The run trigger (scope/search → research()) + chat/files/intake are the later 4c slice.
 // createApp takes an injectable Index so it tests against a temp DB. See bun-migration-eval Phase 4.
 import { readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, relative, sep } from "node:path";
 
 import { Hono } from "hono";
@@ -19,8 +20,11 @@ import { scope as realScope } from "./scope";
 import { Index } from "./store";
 import { citeByDoi, normDoi } from "./tools/paperfetch";
 
-const DB_PATH = process.env.DD_DB ?? "/tmp/dd/state.sqlite";
-const ARTIFACTS = process.env.DD_ARTIFACTS ?? "/tmp/dd/artifacts";
+// Per-deployment data (campaign state DB + artifacts) — defaults to a persistent home dir (≈
+// ~/.claude/projects), NOT /tmp which a reboot wipes. DD_DB / DD_ARTIFACTS still override explicitly.
+const DD_HOME = join(homedir(), ".dda");
+const DB_PATH = process.env.DD_DB ?? join(DD_HOME, "state.sqlite");
+const ARTIFACTS = process.env.DD_ARTIFACTS ?? join(DD_HOME, "artifacts");
 
 export interface PipelineStage {
   name: string;

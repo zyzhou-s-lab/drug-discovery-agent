@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createApp } from "./app";
+import { settingsPath } from "./config";
 
 const J = (r: Response): Promise<any> => r.json() as Promise<any>;
 let app: ReturnType<typeof createApp>;
@@ -58,4 +59,24 @@ test("POST clearing the key (empty string) removes the override", async () => {
   expect(process.env.ANTHROPIC_AUTH_TOKEN).toBe("sk-zzz");
   await post({ ...full, api_key: "" });
   expect(process.env.ANTHROPIC_AUTH_TOKEN).not.toBe("sk-zzz"); // reverted to the launch default
+});
+
+test("settingsPath resolves user-level: DD_SETTINGS_FILE > XDG_CONFIG_HOME > ~/.config/dda", async () => {
+  const { homedir } = await import("node:os");
+  const savedF = process.env.DD_SETTINGS_FILE;
+  const savedX = process.env.XDG_CONFIG_HOME;
+  try {
+    process.env.DD_SETTINGS_FILE = "/explicit/here.json";
+    expect(settingsPath()).toBe("/explicit/here.json"); // explicit override wins
+
+    delete process.env.DD_SETTINGS_FILE;
+    process.env.XDG_CONFIG_HOME = "/xdg";
+    expect(settingsPath()).toBe("/xdg/dda/settings.json"); // XDG config home
+
+    delete process.env.XDG_CONFIG_HOME;
+    expect(settingsPath()).toBe(join(homedir(), ".config", "dda", "settings.json")); // user home fallback — never the data dir / /tmp
+  } finally {
+    if (savedF === undefined) delete process.env.DD_SETTINGS_FILE; else process.env.DD_SETTINGS_FILE = savedF;
+    if (savedX === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = savedX;
+  }
 });
