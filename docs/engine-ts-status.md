@@ -19,7 +19,7 @@
 | **web 前端 :5173** | ✅ 不变（React/Vite，经 `/api` 代理到 8099；TS API 与 Python API 路由/形状保持 byte 兼容，前端不用改） |
 | **启动方式** | ✅ systemd user service（`~/.config/systemd/user/dda-engine-ts.service`），已 enable，支持自动重启；日志走 `journalctl --user -u dda-engine-ts.service` |
 
-> 结论：**engine-ts 已在 8099 上线**。保留 Python 栈作为回滚备选即可。后续=cutover 对拍确认报告一致性。
+> 结论：**engine-ts 已在 8099 上线**，常驻化也已完成。保留 Python 栈作为回滚备选即可。下一步是切流量收尾确认，或开始把发现段（stage 1–4）从 legacy 分支在 TS 上重建。
 
 ## Python → TS 端口映射（按代码内 `Phase-X TS port of …` 注释）
 

@@ -81,10 +81,10 @@
 
 > 运行环境在 **`gpu-zhouy1:~/Projects/drug-discovery-agent`**；本地编辑 → `git push` → gpu `git pull` 跑。
 
-**当前线上（deep-research，Python 后端 + web）：**
+**当前线上（deep-research，TS/bun 后端 + web）：**
 
 ```bash
-# gpu 上：Python API 已常驻 127.0.0.1:8099（uvicorn dd_agent.api:app），web 在 :5173
+# gpu 上：TS API 已常驻 127.0.0.1:8099（systemd user service dda-engine-ts.service），web 在 :5173
 # 浏览器访问（gpu tailscale）：http://10.202.2.224:5173  或  ssh -L 5173:localhost:5173 gpu-zhouy1
 # 触发一次研究：POST /api/campaigns {disease, real:true}
 ```
