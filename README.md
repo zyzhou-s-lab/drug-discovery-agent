@@ -5,7 +5,7 @@
 
 > 🧭 **现状速读（as-of 2026-06-24）**
 > - **线上在跑的**：单个 `disease-overview` 深度研究流（scope → search → fetch → verify → synthesize）+ web 可视化。
-> - **栈迁移中**：编排核心正从 **Python（`src/dd_agent/`）** 重写为 **TS/bun（`engine-ts/`）**；代码已并入 `master`，但**线上 8099 暂仍是 Python uvicorn**，engine-ts 尚未在 gpu 部署。详见 **[docs/engine-ts-status.md](docs/engine-ts-status.md)**。
+> - **栈迁移中**：编排核心正从 **Python（`src/dd_agent/`）** 重写为 **TS/bun（`engine-ts/`）**；代码已并入 `master`，**线上 8099 自 Jun24 起已是 TS/bun**，Python 仅保留回滚能力。详见 **[docs/engine-ts-status.md](docs/engine-ts-status.md)**。
 > - **已归档**：8 阶段发现→设计全流水线（stage 1–4）= 蓝图，Python 实现在分支 `legacy-discovery-pipeline`；整个 Python 栈在分支 `python-stack`。
 > - **被阻塞**：Phase B 设计段（结构/对接/MD），卡在 qiaoy1 工具访问。
 
@@ -118,7 +118,7 @@ PYTHONPATH=src python -m dd_agent.cli run --disease "dry AMD" --campaign c1
 **当前（TS cutover + deep-research）**
 - [x] deep-research 引擎（scope→search→fetch→verify→synthesize）+ web
 - [x] bun/TS 迁移 GO（Phase 0 spike：非 Anthropic 后端驱动 forced-tool 通过）
-- [~] **engine-ts cutover**：phase 1–3c + circuit-breaker 已并入 master；**线上 8099 暂仍 Python，engine-ts 待 gpu 部署 + 对拍切流量** → [engine-ts-status.md](docs/engine-ts-status.md)
+- [~] **engine-ts cutover**：phase 1–3c + circuit-breaker 已并入 master；**线上 8099 自 Jun24 已切换为 TS/bun**；下一步=对拍 + 常驻化（systemd/screen） → [engine-ts-status.md](docs/engine-ts-status.md)
 - [ ] 发现段（stage 1–4）在 TS 上重建（现归 `legacy-discovery-pipeline`）
 
 **Phase B（设计，阻塞）**

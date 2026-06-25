@@ -1,6 +1,6 @@
 # engine-ts 现状（TS/bun 引擎 cutover）
 
-> 🟢 **STATUS：CURRENT（单一真相：当前栈状态）** · as-of 2026-06-24 · stack: **TS/bun（迁移目标）+ Python（仍在线上）**
+> 🟢 **STATUS：CURRENT（单一真相：当前栈状态）** · as-of 2026-06-25 · stack: **TS/bun（已部署）+ Python（仅保留回滚能力）**
 > 这是"现在到底在跑什么、迁到哪了"的权威页。设计哲学见 [CONCEPTS.md](CONCEPTS.md)，蓝图见 [ARCHITECTURE.md](ARCHITECTURE.md) §0.5，迁移评估见 [bun-migration-eval.md](bun-migration-eval.md)，被迁阶段的设计源见 [deep-research-port-plan.md](deep-research-port-plan.md)。
 
 ---
@@ -14,11 +14,12 @@
 | | 状态 |
 |---|---|
 | **engine-ts 代码** | ✅ 已并入 `master`（cutover phase 3a/3b/3c + circuit-breaker #49）；每个模块有完整 `*.test.ts` |
-| **线上 8099** | ⚠️ **仍是 Python** `uvicorn dd_agent.api:app`（gpu pid 自 Jun20）——engine-ts **尚未上线** |
-| **gpu 上 engine-ts 可跑吗** | ❌ 暂不可：`engine-ts/node_modules` 未装、`bun` 未上 PATH（Jun24 有人正在装 bun + `bun install`） |
-| **web 前端 :5173** | ✅ 不变（React/Vite，经 `/api` 代理到 8099；TS API 与 Python API 路由/形状保持 byte 兼容，故前端不用改） |
+| **线上 8099** | ✅ **已是 TS/bun**（pid `3684173`，自 Jun24 21:16 起跑；日志 `/tmp/dd-bun-prod.log`）；Python 后端已不再 serve 8099 |
+| **gpu 上 engine-ts 可跑吗** | ✅ 可跑：`bun` 已装（`~/.bun/bin/bun v1.3.14`）、`engine-ts/node_modules` 已安装 |
+| **web 前端 :5173** | ✅ 不变（React/Vite，经 `/api` 代理到 8099；TS API 与 Python API 路由/形状保持 byte 兼容，前端不用改） |
+| **启动方式** | 当前为手动后台进程（`bun engine-ts/src/server.ts`，stdout/stderr 重定向到 `/tmp/dd-bun-prod.log`），尚未配置 systemd/screen 等常驻托管 |
 
-> 结论：**"current = TS" 指代码已在 master，不是线上已切换。** 切换动作 = 在 gpu 装 bun + `bun install` + 用 `bun engine-ts/src/server.ts` 顶替 8099 的 uvicorn，并跑 `parity.ts` 对拍。
+> 结论：**engine-ts 已在 8099 上线**。保留 Python 栈作为回滚备选即可。后续=cutover 对拍确认报告一致性。
 
 ## Python → TS 端口映射（按代码内 `Phase-X TS port of …` 注释）
 
@@ -62,7 +63,8 @@
 
 ## cutover 剩余 + 下一步
 
-1. **gpu 部署**：装 bun → `cd engine-ts && bun install` → `bun src/server.ts` 顶替 8099 的 uvicorn（先并存对拍）。
+1. ✅ **gpu 部署**：bun 已装、`bun install` 已完成、`bun src/server.ts` 已在 8099 运行。
 2. **对拍**：`parity.ts` 对同一疾病跑 Python vs TS，做报告结构化 diff（golden-master）。
-3. **切流量**：nginx/web 的 `/api` 指向 TS 8099；保留 Python 一段时间可回滚。
-4. **之后**：发现段（stage 1–4）从 legacy 分支按本页结论在 TS 上重建；Phase B 设计段仍阻塞于 qiaoy1 工具访问（见 [DOMAIN.md](DOMAIN.md) §6）。
+3. **常驻化**：当前是手动后台进程；建议补 systemd user service 或 screen/tmux，避免 shell 退出或重启后掉线。
+4. **切流量收尾**：nginx/web 的 `/api` 已指向 TS 8099；保留 Python 一段时间可回滚。
+5. **之后**：发现段（stage 1–4）从 legacy 分支按本页结论在 TS 上重建；Phase B 设计段仍阻塞于 qiaoy1 工具访问（见 [DOMAIN.md](DOMAIN.md) §6）。
