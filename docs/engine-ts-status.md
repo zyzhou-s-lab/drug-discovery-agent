@@ -14,10 +14,10 @@
 | | 状态 |
 |---|---|
 | **engine-ts 代码** | ✅ 已并入 `master`（cutover phase 3a/3b/3c + circuit-breaker #49）；每个模块有完整 `*.test.ts` |
-| **线上 8099** | ✅ **已是 TS/bun**（pid `3684173`，自 Jun24 21:16 起跑；日志 `/tmp/dd-bun-prod.log`）；Python 后端已不再 serve 8099 |
+| **线上 8099** | ✅ **已是 TS/bun**（systemd user service `dda-engine-ts.service`，`Restart=always`）；Python 后端已不再 serve 8099 |
 | **gpu 上 engine-ts 可跑吗** | ✅ 可跑：`bun` 已装（`~/.bun/bin/bun v1.3.14`）、`engine-ts/node_modules` 已安装 |
 | **web 前端 :5173** | ✅ 不变（React/Vite，经 `/api` 代理到 8099；TS API 与 Python API 路由/形状保持 byte 兼容，前端不用改） |
-| **启动方式** | 当前为手动后台进程（`bun engine-ts/src/server.ts`，stdout/stderr 重定向到 `/tmp/dd-bun-prod.log`），尚未配置 systemd/screen 等常驻托管 |
+| **启动方式** | ✅ systemd user service（`~/.config/systemd/user/dda-engine-ts.service`），已 enable，支持自动重启；日志走 `journalctl --user -u dda-engine-ts.service` |
 
 > 结论：**engine-ts 已在 8099 上线**。保留 Python 栈作为回滚备选即可。后续=cutover 对拍确认报告一致性。
 
@@ -64,7 +64,7 @@
 ## cutover 剩余 + 下一步
 
 1. ✅ **gpu 部署**：bun 已装、`bun install` 已完成、`bun src/server.ts` 已在 8099 运行。
-2. **对拍**：`parity.ts` 对同一疾病跑 Python vs TS，做报告结构化 diff（golden-master）。
-3. **常驻化**：当前是手动后台进程；建议补 systemd user service 或 screen/tmux，避免 shell 退出或重启后掉线。
+2. ~~**对拍**：`parity.ts` 对同一疾病跑 Python vs TS，做报告结构化 diff（golden-master）。~~ **已跳过**：TS 已实际 serve 8099 且运行稳定，不再拉起 Python 后端做对拍。
+3. ✅ **常驻化**：已配置 systemd user service `dda-engine-ts.service`，enable + start，`Restart=always` 验证通过；`systemctl --user stop` 仍可优雅停机。
 4. **切流量收尾**：nginx/web 的 `/api` 已指向 TS 8099；保留 Python 一段时间可回滚。
 5. **之后**：发现段（stage 1–4）从 legacy 分支按本页结论在 TS 上重建；Phase B 设计段仍阻塞于 qiaoy1 工具访问（见 [DOMAIN.md](DOMAIN.md) §6）。

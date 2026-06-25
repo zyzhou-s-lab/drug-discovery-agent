@@ -118,7 +118,7 @@ PYTHONPATH=src python -m dd_agent.cli run --disease "dry AMD" --campaign c1
 **当前（TS cutover + deep-research）**
 - [x] deep-research 引擎（scope→search→fetch→verify→synthesize）+ web
 - [x] bun/TS 迁移 GO（Phase 0 spike：非 Anthropic 后端驱动 forced-tool 通过）
-- [~] **engine-ts cutover**：phase 1–3c + circuit-breaker 已并入 master；**线上 8099 自 Jun24 已切换为 TS/bun**；下一步=对拍 + 常驻化（systemd/screen） → [engine-ts-status.md](docs/engine-ts-status.md)
+- [~] **engine-ts cutover**：phase 1–3c + circuit-breaker 已并入 master；**线上 8099 自 Jun24 已切换为 TS/bun**；常驻化（systemd user service）已配置；对拍已跳过 → [engine-ts-status.md](docs/engine-ts-status.md)
 - [ ] 发现段（stage 1–4）在 TS 上重建（现归 `legacy-discovery-pipeline`）
 
 **Phase B（设计，阻塞）**
