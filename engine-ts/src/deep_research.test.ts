@@ -97,7 +97,7 @@ test("research records each sub-agent under deepresearch/ steps, in workflow ord
   expect(calls.find((c) => c.step === "02_search")!.payload.results[0].url).toBe("https://x.com/a");
   const verify = calls.find((c) => c.step === "04_verify")!.payload;
   expect(verify.survives).toBe(true);
-  expect(verify.vote).toBe("1-0");
+  expect(verify.vote).toBe("3-0"); // VOTES_PER_CLAIM = 3, all confirm
   expect(calls.find((c) => c.step === "05_synthesize" && c.key !== "merge")!.payload.angle).toBe("g");
   expect(calls.some((c) => c.step === "05_synthesize" && c.key === "merge")).toBe(true);
 });
