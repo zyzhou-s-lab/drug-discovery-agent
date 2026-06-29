@@ -19,6 +19,54 @@ export function assetsDir(artifactsRoot: string, campaign: string): string {
   return join(artifactsRoot, campaign, ASSETS_SUBDIR);
 }
 
+// Per-step deep-research record (issue: per-sub-agent artifacts). Distinct from the assets/ layer:
+// assets/ is the clean compute-facing hand-off (one file per asset KIND); deepresearch/ is the audit
+// trail of every sub-agent, grouped by the five workflow steps —
+//   {artifacts}/{campaign}/deepresearch/
+//     ├── 01_scope/       scope.json                  (single scope agent)
+//     ├── 02_search/      00_<angle>.json …           (one per angle's search agent)
+//     ├── 03_fetch/       00_<source>.json …          (one per source's fetch/extract agent)
+//     ├── 04_verify/      00_<claim>.json …           (one per claim's 3-vote verification)
+//     └── 05_synthesize/  00_<angle>.json … merge.json (per-angle map + the reduce/merge)
+// Steps are multi-agent (search/fetch/verify), hence a FOLDER per step rather than one file.
+export const DEEPRESEARCH_SUBDIR = "deepresearch";
+
+/** Directory holding one deep-research step's per-sub-agent files, e.g. .../deepresearch/02_search/. */
+export function stepDir(artifactsRoot: string, campaign: string, step: string): string {
+  return join(artifactsRoot, campaign, DEEPRESEARCH_SUBDIR, step);
+}
+
+/** Filesystem-safe slug from an arbitrary label: lowercase, runs of non-alphanumerics → '-',
+ * trimmed of leading/trailing dashes, capped. Empty/garbage input → "item" so a name always exists.
+ * (Digits survive, so a "00_" ordering prefix becomes "00-…".) */
+export function slugify(s: string, max = 64): string {
+  const out = String(s)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, max)
+    .replace(/-+$/g, "");
+  return out || "item";
+}
+
+/** Write ONE sub-agent's output as deepresearch/{step}/{slug(key)}.json, atomically + idempotently
+ * (a re-run overwrites its own file). The payload is wrapped in a self-describing envelope
+ * ({campaign, step, key, ...payload}). `key` is the human label (e.g. "00_genetic-architecture");
+ * it is slugified for the filename but preserved verbatim in the envelope. Returns the path. */
+export function writeStepItem(
+  artifactsRoot: string,
+  campaign: string,
+  step: string,
+  key: string,
+  payload: Record<string, unknown>,
+): string {
+  const path = join(stepDir(artifactsRoot, campaign, step), slugify(key) + ".json");
+  // JSON deep-clone before write (≡ writeAsset): also rejects a non-serializable payload by throwing
+  // here, which research's doPersistStep catches + surfaces via the event stream.
+  writeAtomic(path, { campaign, step, key, ...JSON.parse(JSON.stringify(payload)) });
+  return path;
+}
+
 /** Atomic write (tmp + rename); never leave an orphan .tmp behind on failure. */
 function writeAtomic(path: string, obj: unknown): void {
   const tmp = path + ".tmp";

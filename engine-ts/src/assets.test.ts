@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFil
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { assetsDir, loadAsset, writeAsset, writeCandidates, writeOverviewAssets } from "./assets";
+import { assetsDir, loadAsset, slugify, stepDir, writeAsset, writeCandidates, writeOverviewAssets, writeStepItem } from "./assets";
 
 function setup() {
   return mkdtempSync(join(tmpdir(), "ddasset-"));
@@ -107,4 +107,39 @@ test("loadAsset accepts a name with or without .json (consistent with writeAsset
   writeAsset(root, "camp", "findings", { stage: "deep-research", count: 1, findings: [{ angle: "g" }] });
   expect(loadAsset(root, "camp", "findings").count).toBe(1);        // no extension
   expect(loadAsset(root, "camp", "findings.json").count).toBe(1);   // full name — both resolve
+});
+
+test("slugify lowercases, dashes non-alnum, trims, caps; empty → 'item'", () => {
+  expect(slugify("00_Genetic Architecture & Heritability")).toBe("00-genetic-architecture-heritability");
+  expect(slugify("  --Hello!!--  ")).toBe("hello");
+  expect(slugify("！！！")).toBe("item"); // all non-alnum → fallback
+  expect(slugify("x".repeat(100)).length).toBeLessThanOrEqual(64);
+});
+
+test("writeStepItem writes deepresearch/{step}/{slug}.json with a self-describing envelope", () => {
+  const root = setup();
+  const p = writeStepItem(root, "camp", "02_search", "00_Genetic Architecture", { angle: "Genetic Architecture", count: 3, results: [{ url: "u" }] });
+  expect(p).toBe(join(stepDir(root, "camp", "02_search"), "00-genetic-architecture.json"));
+  const env = read(p);
+  expect(env.campaign).toBe("camp");
+  expect(env.step).toBe("02_search");
+  expect(env.key).toBe("00_Genetic Architecture"); // raw key preserved in the envelope
+  expect(env.count).toBe(3);
+  expect(env.results[0].url).toBe("u");
+});
+
+test("writeStepItem is atomic (no orphan .tmp) and idempotent (re-run overwrites its own file)", () => {
+  const root = setup();
+  writeStepItem(root, "camp", "04_verify", "01_claim", { survives: true });
+  const p2 = writeStepItem(root, "camp", "04_verify", "01_claim", { survives: false });
+  const files = readdirSync(stepDir(root, "camp", "04_verify"));
+  expect(files).toEqual(["01-claim.json"]);          // single file, no .tmp left behind
+  expect(read(p2).survives).toBe(false);             // overwritten in place
+});
+
+test("writeStepItem throws cleanly on a non-serializable payload — no partial file", () => {
+  const root = setup();
+  const circular: any = {}; circular.self = circular;
+  expect(() => writeStepItem(root, "camp", "03_fetch", "x", circular)).toThrow();
+  expect(existsSync(stepDir(root, "camp", "03_fetch"))).toBe(false);
 });

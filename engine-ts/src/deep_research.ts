@@ -253,6 +253,7 @@ export interface ResearchOpts {
   runAgent?: RunAgentFn; // injectable for offline orchestration tests
   lit?: Record<string, unknown>; // injectable; defaults to makeLitMcp()
   persist?: (name: string, payload: Record<string, unknown>) => void; // incremental per-stage asset sink (#30)
+  persistStep?: (step: string, key: string, payload: Record<string, unknown>) => void; // per-sub-agent deepresearch/ record
   breaker?: CircuitBreaker; // rate-limit auto-pause; research checks .tripped in its stop predicate
 }
 
@@ -292,6 +293,18 @@ export async function research(question: string, angles: Angle[], opts: Research
       ev("persist", `资产 '${name}' 增量落盘失败: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
+  // per-sub-agent record under deepresearch/{step}/ — search/fetch/verify each spawn many agents, so
+  // every one is sedimented to its own file the moment it completes. Best-effort, like doPersist.
+  const doPersistStep = (step: string, key: string, payload: Record<string, unknown>) => {
+    try {
+      opts.persistStep?.(step, key, payload);
+    } catch (e) {
+      ev("persist", `step '${step}/${key}' 落盘失败: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+  const pad = (n: number) => String(n).padStart(2, "0"); // ordering prefix for per-item file names
+  let fetchSeq = 0; // global counters → unique, ordered file names across concurrent per-angle chains
+  let verifySeq = 0;
   const amsg = (label: string): OnMessage | undefined => (opts.onAgent ? (m) => opts.onAgent!(label, m) : undefined);
 
   const prog: Record<string, [number, number]> = { search: [0, angles.length], fetch: [0, 0], verify: [0, 0], synthesize: [0, 1] };
@@ -313,17 +326,19 @@ export async function research(question: string, angles: Angle[], opts: Research
   const slots: [number] = [fetchBudget];
 
   // ── pipeline: search → dedup → fetch+extract (link-level concurrency, one barrier at the end) ──
-  const angleChain = async (angle: Angle): Promise<any[]> => {
+  const angleChain = async (angle: Angle, aidx: number): Promise<any[]> => {
     const [sr] = await runAgent("search", SEARCH_PROMPT(question, angle), "submit_results", SearchSchema.shape, lit!, budget, sem, {
       onMessage: amsg("search · " + angle.label.slice(0, 28)),
       shouldStop: stopPred, breaker: opts.breaker,
     });
+    const results = ((sr as any)?.results ?? []) as SearchResult[];
+    // per-angle search agent → 02_search/NN_<angle>.json (recorded even on a 0-result/failed search)
+    doPersistStep("02_search", `${pad(aidx)}_${angle.label}`, { angle: angle.label, query: angle.query, count: results.length, results });
     if (!sr || !(sr as any).results) {
       ev("search", angle.label + ": 0 结果");
       bump("search", 1);
       return [];
     }
-    const results = (sr as any).results as SearchResult[];
     ev("search", angle.label + ": " + results.length + " 结果");
     bump("search", 1);
     const novel = dedupResults(results, angle.label, seen, slots, dupes, budgetDropped);
@@ -362,19 +377,22 @@ export async function research(question: string, angles: Angle[], opts: Research
         }
         raw = parts.join("\n---\n");
       }
-      return {
+      const record = {
         url, title: source.title, angle: angle.label, source_type: st, doi, sourceQuality: sq,
         publishDate: (ext as any).publishDate,
         // claims carry their scope angle (#30 phase 3) — the grouping key for per-angle synthesis
         claims: ((ext as any).claims ?? []).map((c: any) => ({ ...c, sourceUrl: url, doi, source_type: st, sourceQuality: sq, raw, angle: angle.label })),
       };
+      // per-source fetch/extract agent → 03_fetch/NN_<source>.json
+      doPersistStep("03_fetch", `${pad(++fetchSeq)}_${source.title || host || doi || "source"}`, record);
+      return record;
     };
 
     const fetched = await Promise.all(novel.map(fetchOne));
     return fetched.filter((f): f is any => f != null);
   };
 
-  const perAngle = await Promise.all(angles.map(angleChain));
+  const perAngle = await Promise.all(angles.map((a, i) => angleChain(a, i)));
   const allSources = perAngle.flat();
   const allClaims = allSources.flatMap((s) => s.claims);
   const dbFacts = allClaims.filter((c) => c.source_type === "database");
@@ -420,6 +438,12 @@ export async function research(question: string, angles: Angle[], opts: Research
     const refuted = verdicts.filter((v) => v.refuted).length;
     const surv = survives(verdicts);
     ev("verify", '"' + claim.claim.slice(0, 50) + '…": ' + (verdicts.length - refuted) + "-" + refuted + (surv ? " ✓" : " ✗"));
+    // per-claim 3-vote verification → 04_verify/NN_<claim>.json
+    doPersistStep("04_verify", `${pad(++verifySeq)}_${claim.claim}`, {
+      claim: claim.claim, source: claim.sourceUrl, doi: claim.doi, angle: claim.angle,
+      votes: verdicts.length, refutedVotes: refuted, survives: surv,
+      vote: (verdicts.length - refuted) + "-" + refuted, verdicts,
+    });
     return { ...claim, verdicts, refutedVotes: refuted, survives: surv };
   };
   const voted = await Promise.all(ranked.map(verifyClaim));
@@ -496,6 +520,8 @@ export async function research(question: string, angles: Angle[], opts: Research
       : { angle: a.label, claim: "(synthesis unavailable)", confidence: "low", sources: [], evidence: "Per-angle synthesis did not complete for this angle." };
     const done = findingsAcc.filter((v) => v !== undefined); // completed slots (each a truthy finding object), in angle order
     doPersist("findings", { stage: "deep-research", question, count: done.length, findings: done });
+    // per-angle synthesis (MAP) agent → 05_synthesize/NN_<angle>.json
+    doPersistStep("05_synthesize", `${pad(idx)}_${a.label}`, findingsAcc[idx]);
     return findingsAcc[idx];
   };
   const findings = await Promise.all(angles.map((a, i) => mapAngle(a, i))); // result array preserves angle order
@@ -506,6 +532,8 @@ export async function research(question: string, angles: Angle[], opts: Research
     shouldStop: stopPred, breaker: opts.breaker,
   });
   bump("synthesize", 1);
+  // reduce/merge agent → 05_synthesize/merge.json
+  doPersistStep("05_synthesize", "merge", (merged as any) ?? { summary: "", caveats: "", openQuestions: [] });
   ev("synthesize", "报告生成:" + findings.length + " 条 per-angle 发现 + 合并");
 
   const sourcesOut = allSources.map((s) => ({ url: s.url, quality: s.sourceQuality, angle: s.angle, claimCount: s.claims.length }));

@@ -6,7 +6,7 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { writeAsset, writeOverviewAssets } from "./assets";
+import { writeAsset, writeOverviewAssets, writeStepItem } from "./assets";
 import { research as realResearch } from "./deep_research";
 import { emit, emitStream, eventsDir } from "./events";
 import { validateDisease as realValidate } from "./intake";
@@ -142,6 +142,8 @@ export async function runSearch(
         // doPersist, which surfaces it via ev (→ the event stream) and continues — never failing
         // the run, but no longer silently swallowed.
         persist: (name, payload) => writeAsset(artifactsRoot, campaign, name, payload),
+        // per-sub-agent record under deepresearch/{step}/ (search/fetch/verify/synthesize)
+        persistStep: (step, key, payload) => writeStepItem(artifactsRoot, campaign, step, key, payload),
       }),
     );
     writeJson(reportPath, report);
@@ -228,6 +230,14 @@ export async function runPipeline(
       ? { stage: OVERVIEW_STAGE, summary: `Deep-research scope: ${angles.length} 个研究角度`, candidates: [], open_questions: ["scope-only 研究计划;完整检索简报(search→verify→synth)待 M2"], data: { kind: "scope", question: (res as any)?.question ?? disease, angles, budget: (res as any)?.budget } }
       : { stage: OVERVIEW_STAGE, summary: "[deep-research scope] 未能拆解出研究角度", candidates: [], open_questions: ["scope returned no angles"] };
     idx.markDone(campaign, OVERVIEW_STAGE, output, {});
+    // single scope agent → deepresearch/01_scope/scope.json (best-effort; never fails the run)
+    try {
+      writeStepItem(artifactsRoot, campaign, "01_scope", "scope", {
+        question: (res as any)?.question ?? disease, count: angles.length, angles,
+      });
+    } catch (e) {
+      eventsDir.run(evDir, () => emit(OVERVIEW_STAGE, "scope", "log", { msg: `01_scope 落盘失败: ${e instanceof Error ? e.message : String(e)}` }));
+    }
   } catch (e) {
     idx.markDone(campaign, OVERVIEW_STAGE, { stage: OVERVIEW_STAGE, summary: `pipeline failed: ${e instanceof Error ? e.message : String(e)}` }, {});
   }
