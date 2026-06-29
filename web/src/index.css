@@ -209,6 +209,7 @@ body {
     touch-action: pan-x pan-y;
     overscroll-behavior: none;
     -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent; /* no grey flash on tap (mobile) */
 }
 
 html[data-telegram-app="true"],

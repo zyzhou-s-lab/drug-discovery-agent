@@ -2,8 +2,43 @@
 <html lang="en">
     <head>
         <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>dda-frontend-starter — HAPI Tier-A components</title>
+        <!-- viewport-fit=cover enables env(safe-area-inset-*); interactive-widget resizes content for the mobile keyboard -->
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content"
+        />
+        <meta name="description" content="Drug target-discovery agent — research dashboard" />
+
+        <!-- Mobile browser chrome / iOS standalone -->
+        <meta name="theme-color" content="#ffffff" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-mobile-web-app-title" content="DDA" />
+
+        <!-- Set data-theme + theme-color BEFORE first paint (no flash, status bar matches theme).
+             dd-theme is JSON-serialized ('"dark"' / '"light"'); default light. -->
+        <script>
+            ;(function () {
+                try {
+                    var raw = localStorage.getItem('dd-theme')
+                    var scheme = raw && raw.indexOf('dark') !== -1 ? 'dark' : 'light'
+                    document.documentElement.dataset.theme = scheme
+                    var color = scheme === 'dark' ? '#1c1c1e' : '#ffffff'
+                    var meta = document.querySelector('meta[name="theme-color"]')
+                    if (meta) meta.setAttribute('content', color)
+                } catch (e) {
+                    /* localStorage blocked — fall back to light */
+                }
+            })()
+        </script>
+
+        <!-- Prevent flash of mismatched background on dark-mode launch -->
+        <style>
+            html { background: #ffffff }
+            html[data-theme="dark"] { background: #1c1c1e; color-scheme: dark }
+        </style>
+
+        <title>药物靶点发现 · DDA</title>
     </head>
     <body>
         <div id="root"></div>
