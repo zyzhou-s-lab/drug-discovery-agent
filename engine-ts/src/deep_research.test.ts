@@ -82,7 +82,7 @@ test("bibliography double-key includes a confirmed source when doi/url keys dive
   expect(refs[0]!.url).toBe("https://a.com/p");
 });
 
-test("research persists incremental assets in order (sources → database_facts + verified → findings)", async () => {
+test("research records each sub-agent under deepresearch/ steps, in workflow order", async () => {
   const fake = fakeRunAgent({
     submit_results: { results: [{ url: "https://x.com/a", title: "A", relevance: "high" }] },
     submit_claims: { sourceQuality: "primary", claims: [{ claim: "C1", quote: "q", importance: "central" }] },
@@ -90,22 +90,21 @@ test("research persists incremental assets in order (sources → database_facts 
     submit_finding: { claim: "C1", confidence: "high", sources: ["https://x.com/a"], evidence: "ev" },
     submit_merge: { summary: "S", caveats: "none", openQuestions: [] },
   });
-  const calls: Array<{ name: string; payload: any }> = [];
-  await research("Q", ANGLE, { runAgent: fake, lit: {}, persist: (name, payload) => calls.push({ name, payload }) });
-  // single angle → findings persisted once (the one map's completion = the full ordered snapshot)
-  expect(calls.map((c) => c.name)).toEqual(["sources", "database_facts", "verified", "findings"]);
-  const sources = calls.find((c) => c.name === "sources")!.payload;
-  expect(sources.count).toBe(1);
-  expect(sources.sources[0].url).toBe("https://x.com/a");
-  const verified = calls.find((c) => c.name === "verified")!.payload;
-  expect(verified.confirmed[0].claim).toBe("C1");
-  const findings = calls.filter((c) => c.name === "findings").at(-1)!.payload;
-  expect(findings.findings[0].angle).toBe("g");
+  const calls: Array<{ step: string; key: string; payload: any }> = [];
+  await research("Q", ANGLE, { runAgent: fake, lit: {}, persistStep: (step, key, payload) => calls.push({ step, key, payload }) });
+  // one source + one claim + one angle → search, fetch, verify, the angle map, then the merge
+  expect(calls.map((c) => c.step)).toEqual(["02_search", "03_fetch", "04_verify", "05_synthesize", "05_synthesize"]);
+  expect(calls.find((c) => c.step === "02_search")!.payload.results[0].url).toBe("https://x.com/a");
+  const verify = calls.find((c) => c.step === "04_verify")!.payload;
+  expect(verify.survives).toBe(true);
+  expect(verify.vote).toBe("1-0");
+  expect(calls.find((c) => c.step === "05_synthesize" && c.key !== "merge")!.payload.angle).toBe("g");
+  expect(calls.some((c) => c.step === "05_synthesize" && c.key === "merge")).toBe(true);
 });
 
-test("research map-reduce: incremental findings snapshot stays in angle order even when a later angle finishes first", async () => {
+test("05_synthesize keys carry the angle-order prefix even when a later angle finishes first", async () => {
   const ANGLES2 = [{ label: "a1", query: "q1" }, { label: "a2", query: "q2" }];
-  // a1's map is slow, so a2 completes (and persists) FIRST — but snapshots must still be angle-ordered
+  // a1's map is slow, so a2 completes (and persists) FIRST — but the NN_ key prefix is by angle index
   const fake: RunAgentFn = async (_phase, prompt, submitName) => {
     if (submitName === "submit_finding") {
       const isA1 = prompt.includes("a1");
@@ -120,23 +119,23 @@ test("research map-reduce: incremental findings snapshot stays in angle order ev
     };
     return [canned[submitName] ?? null, []];
   };
-  const snapshots: string[][] = [];
-  const r = await research("Q", ANGLES2, { runAgent: fake, lit: {}, persist: (n, p) => { if (n === "findings") snapshots.push((p as any).findings.map((f: any) => f.angle)); } });
+  const keys: string[] = [];
+  const r = await research("Q", ANGLES2, { runAgent: fake, lit: {}, persistStep: (step, key) => { if (step === "05_synthesize" && key !== "merge") keys.push(key); } });
   expect(r.findings.map((f: any) => f.angle)).toEqual(["a1", "a2"]); // report order
-  expect(snapshots.at(-1)).toEqual(["a1", "a2"]); // final snapshot angle-ordered, NOT completion order ([a2,a1])
+  expect([...keys].sort()).toEqual(["00_a1", "01_a2"]); // lexical sort of keys = angle order, NOT completion order
 });
 
-test("research persists sources even on the no-claims salvage path (verify checkpoint not reached)", async () => {
+test("research records search + fetch even on the no-claims salvage path (verify not reached)", async () => {
   const fake = fakeRunAgent({
     submit_results: { results: [{ url: "https://x.com/a", title: "A", relevance: "high" }] },
     submit_claims: { sourceQuality: "unreliable", claims: [] },
   });
-  const calls: string[] = [];
-  await research("Q", ANGLE, { runAgent: fake, lit: {}, persist: (name) => calls.push(name) });
-  expect(calls).toEqual(["sources"]);
+  const steps: string[] = [];
+  await research("Q", ANGLE, { runAgent: fake, lit: {}, persistStep: (step) => steps.push(step) });
+  expect(steps).toEqual(["02_search", "03_fetch"]);
 });
 
-test("research never fails the run when persist throws — and surfaces it via onEvent", async () => {
+test("research never fails the run when persistStep throws — and surfaces it via onEvent", async () => {
   const fake = fakeRunAgent({
     submit_results: { results: [{ url: "https://x.com/a", title: "A", relevance: "high" }] },
     submit_claims: { sourceQuality: "unreliable", claims: [] },
@@ -144,7 +143,7 @@ test("research never fails the run when persist throws — and surfaces it via o
   const events: Array<[string, string]> = [];
   const r = await research("Q", ANGLE, {
     runAgent: fake, lit: {},
-    persist: () => { throw new Error("disk full"); },
+    persistStep: () => { throw new Error("disk full"); },
     onEvent: (p, m) => events.push([p, m]),
   });
   expect(r.summary).toContain("No claims"); // run completed despite the persist error

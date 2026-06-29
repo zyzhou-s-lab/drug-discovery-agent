@@ -6,7 +6,7 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { writeAsset, writeOverviewAssets, writeStepItem } from "./assets";
+import { deriveAssets, writeStepItem } from "./assets";
 import { research as realResearch } from "./deep_research";
 import { emit, emitStream, eventsDir } from "./events";
 import { validateDisease as realValidate } from "./intake";
@@ -138,22 +138,22 @@ export async function runSearch(
         onEvent: (phase, msg) => emit(SEARCH_STAGE, phase, "log", { msg }),
         // one expandable step card per agent (its thinking / tool calls / outcome) — api.py _run_search
         onAgent: (label, msg) => emitStream(SEARCH_STAGE, label, msg, { skipText: true, withOutcome: true }),
-        // incremental per-stage asset checkpoints (#30). A throw here propagates to research's
-        // doPersist, which surfaces it via ev (→ the event stream) and continues — never failing
-        // the run, but no longer silently swallowed.
-        persist: (name, payload) => writeAsset(artifactsRoot, campaign, name, payload),
-        // per-sub-agent record under deepresearch/{step}/ (search/fetch/verify/synthesize)
+        // per-sub-agent record under deepresearch/{step}/ — the single, crash-safe source of truth
+        // (search/fetch/verify/synthesize). assets/ are derived from this after the run
+        // (deriveAssets). A throw here is surfaced via ev (→ the event stream) and continues — never
+        // failing the run, but no longer silently swallowed.
         persistStep: (step, key, payload) => writeStepItem(artifactsRoot, campaign, step, key, payload),
       }),
     );
     writeJson(reportPath, report);
-    // Sediment the compute-facing assets (sources / database_facts) next to the report so the
-    // downstream analysis steps read a stable contract, not the big report.json. Best-effort —
-    // never fail the run on an asset write (mirrors api.py _run_search).
+    // Derive the compute-facing assets/ contract by reducing the deepresearch/ record (the single
+    // source of truth) — so assets/ can't drift from it and is rebuildable. The bibliography
+    // (report.references) is threaded in (a cross-source, network-enriched projection not held in any
+    // one step file). Best-effort — never fail the run on an asset write.
     try {
-      writeOverviewAssets(report, artifactsRoot, campaign);
+      deriveAssets(artifactsRoot, campaign, report.references ?? []);
     } catch (e) {
-      console.warn(`overview asset write failed for ${campaign}:`, e);
+      console.warn(`asset derivation failed for ${campaign}:`, e);
     }
     // auto-pause takes precedence over "done": a tripped breaker means the report is a degraded
     // salvage (the provider was rate-limited), so surface "paused" + the reason, not a false "done".

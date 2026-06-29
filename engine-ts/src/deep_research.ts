@@ -252,8 +252,7 @@ export interface ResearchOpts {
   maxVerifyClaims?: number;
   runAgent?: RunAgentFn; // injectable for offline orchestration tests
   lit?: Record<string, unknown>; // injectable; defaults to makeLitMcp()
-  persist?: (name: string, payload: Record<string, unknown>) => void; // incremental per-stage asset sink (#30)
-  persistStep?: (step: string, key: string, payload: Record<string, unknown>) => void; // per-sub-agent deepresearch/ record
+  persistStep?: (step: string, key: string, payload: Record<string, unknown>) => void; // per-sub-agent deepresearch/ record (single source of truth; assets/ are derived from it)
   breaker?: CircuitBreaker; // rate-limit auto-pause; research checks .tripped in its stop predicate
 }
 
@@ -282,19 +281,11 @@ export async function research(question: string, angles: Angle[], opts: Research
       opts.onEvent?.(phase, message);
     } catch { /* best-effort */ }
   };
-  // incremental per-stage asset checkpoint (#30): sediment a stage's structured output as soon as
-  // it exists so a crash/kill mid-run still leaves the predecessor stages' data. Best-effort — a
-  // persist failure (disk full / permission) NEVER fails the run, but is surfaced via ev (the
-  // event stream) rather than silently swallowed, so ops/UI can see it.
-  const doPersist = (name: string, payload: Record<string, unknown>) => {
-    try {
-      opts.persist?.(name, payload);
-    } catch (e) {
-      ev("persist", `资产 '${name}' 增量落盘失败: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  };
-  // per-sub-agent record under deepresearch/{step}/ — search/fetch/verify each spawn many agents, so
-  // every one is sedimented to its own file the moment it completes. Best-effort, like doPersist.
+  // per-sub-agent record under deepresearch/{step}/ — the incremental, crash-safe source of truth.
+  // search/fetch/verify each spawn many agents, so every one is sedimented to its own file the moment
+  // it completes; a crash/kill mid-run still leaves every finished agent's output, and assets/ are
+  // derived from this afterwards (deriveAssets). Best-effort — a persist failure (disk full /
+  // permission) NEVER fails the run, but is surfaced via ev (the event stream), not swallowed.
   const doPersistStep = (step: string, key: string, payload: Record<string, unknown>) => {
     try {
       opts.persistStep?.(step, key, payload);
@@ -399,14 +390,6 @@ export async function research(question: string, angles: Angle[], opts: Research
   const ranked = rankClaims(allClaims, maxVerifyClaims);
   ev("fetch", "抓取 " + allSources.length + " 源 → " + allClaims.length + " claims(数据库记录 " + dbFacts.length + ",数据保留)→ 验证前 " + ranked.length);
 
-  // checkpoint #1 — the source list (references filled later by the end-of-run snapshot). Runs on
-  // every path, INCLUDING the salvage early-returns below, so the asset always reflects the fetch.
-  doPersist("sources", {
-    stage: "disease-overview", question, count: allSources.length,
-    sources: allSources.map((s) => ({ url: s.url, quality: s.sourceQuality, angle: s.angle, claimCount: s.claims.length })),
-    references: [],
-  });
-
   const statsBase = {
     angles: angles.length, sources: allSources.length, claims: allClaims.length,
     dupes: dupes.length, budgetDropped: budgetDropped.length, databaseFacts: dbFacts.length,
@@ -440,7 +423,7 @@ export async function research(question: string, angles: Angle[], opts: Research
     ev("verify", '"' + claim.claim.slice(0, 50) + '…": ' + (verdicts.length - refuted) + "-" + refuted + (surv ? " ✓" : " ✗"));
     // per-claim 3-vote verification → 04_verify/NN_<claim>.json
     doPersistStep("04_verify", `${pad(++verifySeq)}_${claim.claim}`, {
-      claim: claim.claim, source: claim.sourceUrl, doi: claim.doi, angle: claim.angle,
+      claim: claim.claim, quote: claim.quote, source: claim.sourceUrl, doi: claim.doi, angle: claim.angle,
       votes: verdicts.length, refutedVotes: refuted, survives: surv,
       vote: (verdicts.length - refuted) + "-" + refuted, verdicts,
     });
@@ -461,15 +444,6 @@ export async function research(question: string, angles: Angle[], opts: Research
     return ok.has(k) ? "confirmed" : no.has(k) ? "refuted" : "unverified";
   };
   const dbOut = dbFacts.map((c) => ({ claim: c.claim, quote: c.quote, source: c.sourceUrl, doi: c.doi, quality: c.sourceQuality, status: dbStatus(c), raw: c.raw }));
-
-  // checkpoint #2 — the database records (with verify status) + the verified-claim ledger. Runs
-  // before the no-confirmed salvage too, so both survive a crash after verification.
-  doPersist("database_facts", { stage: "disease-overview", question, count: dbOut.length, facts: dbOut });
-  doPersist("verified", {
-    stage: "deep-research", question, count: confirmed.length,
-    confirmed: confirmed.map((c) => ({ claim: c.claim, source: c.sourceUrl, quote: c.quote, vote: c.verdicts.length - c.refutedVotes + "-" + c.refutedVotes })),
-    refuted: refutedOut,
-  });
 
   if (!confirmed.length) {
     return {
@@ -518,8 +492,6 @@ export async function research(question: string, angles: Angle[], opts: Research
     findingsAcc[idx] = f
       ? { ...(f as any), angle: a.label } // angle AFTER spread — the caller's scope label always wins, even if the agent hallucinated an `angle`
       : { angle: a.label, claim: "(synthesis unavailable)", confidence: "low", sources: [], evidence: "Per-angle synthesis did not complete for this angle." };
-    const done = findingsAcc.filter((v) => v !== undefined); // completed slots (each a truthy finding object), in angle order
-    doPersist("findings", { stage: "deep-research", question, count: done.length, findings: done });
     // per-angle synthesis (MAP) agent → 05_synthesize/NN_<angle>.json
     doPersistStep("05_synthesize", `${pad(idx)}_${a.label}`, findingsAcc[idx]);
     return findingsAcc[idx];

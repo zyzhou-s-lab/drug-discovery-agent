@@ -5,38 +5,62 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFil
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { assetsDir, loadAsset, slugify, stepDir, writeAsset, writeCandidates, writeOverviewAssets, writeStepItem } from "./assets";
+import { assetsDir, deriveAssets, loadAsset, slugify, stepDir, writeAsset, writeCandidates, writeStepItem } from "./assets";
 
 function setup() {
   return mkdtempSync(join(tmpdir(), "ddasset-"));
 }
 const read = (p: string) => JSON.parse(readFileSync(p, "utf-8"));
 
-test("writeOverviewAssets writes sources + database_facts envelopes", () => {
+// helper: lay down a minimal deepresearch/ tree so deriveAssets has something to reduce
+function seedDeepresearch(root: string, campaign: string) {
+  writeStepItem(root, campaign, "01_scope", "scope", { question: "What drives AMD?", count: 1, angles: [{ label: "genetics" }] });
+  writeStepItem(root, campaign, "03_fetch", "00_paper", {
+    url: "https://a.com/p", title: "P", angle: "genetics", source_type: "paper", sourceQuality: "primary",
+    claims: [{ claim: "C1", quote: "q1", source_type: "paper", sourceUrl: "https://a.com/p" }],
+  });
+  writeStepItem(root, campaign, "03_fetch", "01_db", {
+    url: "https://ols/efo", title: "EFO", angle: "genetics", source_type: "database", sourceQuality: "primary",
+    claims: [{ claim: "DBFACT", quote: "dq", source_type: "database", sourceUrl: "https://ols/efo", raw: "{...}" }],
+  });
+  writeStepItem(root, campaign, "04_verify", "01_C1", { claim: "C1", quote: "q1", source: "https://a.com/p", survives: true, vote: "3-0" });
+  writeStepItem(root, campaign, "04_verify", "02_DBFACT", { claim: "DBFACT", quote: "dq", source: "https://ols/efo", survives: false, vote: "1-2" });
+  writeStepItem(root, campaign, "05_synthesize", "00_genetics", { angle: "genetics", claim: "F", confidence: "high", sources: ["https://a.com/p"], evidence: "ev" });
+  writeStepItem(root, campaign, "05_synthesize", "merge", { summary: "S", caveats: "", openQuestions: [] });
+}
+
+test("deriveAssets reduces deepresearch/ into the sources/database_facts/verified/findings contract", () => {
   const root = setup();
-  const report = {
-    question: "What drives AMD?",
-    sources: [{ url: "u", quality: "primary" }],
-    references: [{ n: 1, kind: "web", url: "u" }],
-    databaseFacts: [{ claim: "c", quote: "q", source: "u", status: "confirmed" }],
-  };
-  const [srcPath, dbPath] = writeOverviewAssets(report, root, "camp");
-  const src = read(srcPath!);
-  expect(src).toEqual({ campaign: "camp", stage: "disease-overview", question: "What drives AMD?", count: 1, sources: report.sources, references: report.references });
-  const db = read(dbPath!);
-  expect(db).toEqual({ campaign: "camp", stage: "disease-overview", question: "What drives AMD?", count: 1, facts: report.databaseFacts });
+  seedDeepresearch(root, "camp");
+  const refs = [{ n: 1, kind: "paper", doi: "10.1/x" }];
+  deriveAssets(root, "camp", refs);
+
+  const sources = read(join(assetsDir(root, "camp"), "sources.json"));
+  expect(sources).toEqual({ campaign: "camp", stage: "disease-overview", question: "What drives AMD?", count: 2, sources: [{ url: "https://a.com/p", quality: "primary", angle: "genetics", claimCount: 1 }, { url: "https://ols/efo", quality: "primary", angle: "genetics", claimCount: 1 }], references: refs });
+
+  const facts = read(join(assetsDir(root, "camp"), "database_facts.json"));
+  expect(facts.count).toBe(1); // only the database-typed claim
+  expect(facts.facts[0]).toMatchObject({ claim: "DBFACT", source: "https://ols/efo", status: "refuted", raw: "{...}" });
+
+  const verified = read(join(assetsDir(root, "camp"), "verified.json"));
+  expect(verified.confirmed).toEqual([{ claim: "C1", source: "https://a.com/p", quote: "q1", vote: "3-0" }]);
+  expect(verified.refuted).toEqual([{ claim: "DBFACT", vote: "1-2", source: "https://ols/efo" }]);
+
+  const findings = read(join(assetsDir(root, "camp"), "findings.json"));
+  expect(findings.count).toBe(1); // merge.json excluded
+  expect(findings.findings[0]).toMatchObject({ angle: "genetics", claim: "F", confidence: "high" });
 });
 
-test("writeOverviewAssets defaults missing fields to empty arrays", () => {
+test("deriveAssets on an empty/absent deepresearch/ yields empty (count 0) envelopes, not a throw", () => {
   const root = setup();
-  const [srcPath, dbPath] = writeOverviewAssets({ question: "Q" }, root, "camp");
-  expect(read(srcPath!)).toMatchObject({ count: 0, sources: [], references: [] });
-  expect(read(dbPath!)).toMatchObject({ count: 0, facts: [] });
+  deriveAssets(root, "camp", []);
+  expect(read(join(assetsDir(root, "camp"), "sources.json"))).toMatchObject({ count: 0, sources: [], references: [] });
+  expect(read(join(assetsDir(root, "camp"), "findings.json"))).toMatchObject({ count: 0, findings: [] });
 });
 
 test("loadAsset round-trips a written asset; null when absent", () => {
   const root = setup();
-  writeOverviewAssets({ question: "Q", sources: [{ url: "u" }] }, root, "camp");
+  writeAsset(root, "camp", "sources", { stage: "disease-overview", count: 1, sources: [{ url: "u" }] });
   expect(loadAsset(root, "camp", "sources.json")).toMatchObject({ count: 1 });
   expect(loadAsset(root, "camp", "nope.json")).toBeNull();
 });
@@ -49,7 +73,7 @@ test("writeCandidates writes the nomination envelope", () => {
 
 test("writes are atomic — no orphan .tmp left in the assets dir", () => {
   const root = setup();
-  writeOverviewAssets({ question: "Q", sources: [{ url: "u" }] }, root, "camp");
+  writeAsset(root, "camp", "sources", { stage: "disease-overview", count: 1, sources: [{ url: "u" }] });
   const files = readdirSync(assetsDir(root, "camp"));
   expect(files.some((f) => f.endsWith(".tmp"))).toBe(false);
   expect(existsSync(join(assetsDir(root, "camp"), "sources.json"))).toBe(true);
