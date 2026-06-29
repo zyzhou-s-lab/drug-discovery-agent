@@ -25,6 +25,7 @@ export function ChatPanel(props: {
     attachments: string[]
     onRemoveAttachment: (i: number) => void
     onClearAttachments: () => void
+    mobile?: boolean // rendered as a full-screen overlay: fill the screen, no resize handle
 }) {
     const { width, onPointerDown } = useResizable({ key: 'dd-right-w2', def: 400, min: 220, max: 520, side: 'right' })
     // History persisted in localStorage, scoped to BOTH campaign and run id: App keys this
@@ -99,8 +100,11 @@ export function ChatPanel(props: {
     }
 
     return (
-        <aside style={{ width }} className="relative flex shrink-0 flex-col border-l border-[var(--app-border)]">
-            <div onPointerDown={onPointerDown} className="absolute inset-y-0 -left-0.5 z-20 w-1.5 cursor-col-resize hover:bg-[var(--app-link-muted,rgba(0,0,0,0.12))]" />
+        <aside
+            style={props.mobile ? undefined : { width }}
+            className={'relative flex flex-col border-l border-[var(--app-border)] ' + (props.mobile ? 'h-full w-full bg-[var(--app-bg)]' : 'shrink-0')}
+        >
+            {!props.mobile && <div onPointerDown={onPointerDown} className="absolute inset-y-0 -left-0.5 z-20 w-1.5 cursor-col-resize hover:bg-[var(--app-link-muted,rgba(0,0,0,0.12))]" />}
             <div className="flex items-center justify-between px-3 py-2.5">
                 <span className="text-sm font-semibold">对话</span>
                 <div className="flex items-center gap-1">

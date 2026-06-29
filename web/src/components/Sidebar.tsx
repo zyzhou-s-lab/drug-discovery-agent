@@ -141,6 +141,7 @@ export function Sidebar(props: {
     onSelect: (campaign: string) => void
     onStartRun: (disease: string) => void
     onMutate: (deleted?: string) => void
+    mobile?: boolean // rendered inside a full-screen drawer: fill the panel, no resize handle
 }) {
     const { width, onPointerDown: onResize } = useResizable({ key: 'dd-left-w', def: 320, min: 240, max: 520, side: 'left' })
     const [search, setSearch] = useState('')
@@ -194,8 +195,11 @@ export function Sidebar(props: {
     }
 
     return (
-        <aside style={{ width }} className="relative flex shrink-0 flex-col border-r border-[var(--app-border)]">
-            <div onPointerDown={onResize} className="absolute inset-y-0 -right-0.5 z-20 w-1.5 cursor-col-resize hover:bg-[var(--app-link-muted,rgba(0,0,0,0.12))]" />
+        <aside
+            style={props.mobile ? undefined : { width }}
+            className={'relative flex flex-col border-r border-[var(--app-border)] ' + (props.mobile ? 'h-full w-full bg-[var(--app-bg)]' : 'shrink-0')}
+        >
+            {!props.mobile && <div onPointerDown={onResize} className="absolute inset-y-0 -right-0.5 z-20 w-1.5 cursor-col-resize hover:bg-[var(--app-link-muted,rgba(0,0,0,0.12))]" />}
             <div className="flex items-center justify-between px-3 py-2.5">
                 <div className="text-sm">
                     <span className="font-semibold">药物靶点发现</span>
