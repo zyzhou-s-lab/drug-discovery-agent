@@ -32,14 +32,6 @@ const ChatIcon = () => (
     </svg>
 )
 
-const MenuIcon = () => (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <line x1="3" y1="6" x2="21" y2="6" />
-        <line x1="3" y1="12" x2="21" y2="12" />
-        <line x1="3" y1="18" x2="21" y2="18" />
-    </svg>
-)
-
 const CIRCLE_BTN =
     'flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]'
 
@@ -49,7 +41,6 @@ export function SessionHeader(props: {
     onMutate: (deleted?: string) => void
     onOpenFiles: () => void
     onToggleChat: () => void
-    onOpenNav?: () => void // mobile: open the run-list drawer (hidden on desktop)
 }) {
     const { config } = useConfig()
     const { run } = props
@@ -70,12 +61,7 @@ export function SessionHeader(props: {
 
     return (
         <header className="sticky top-0 z-10 border-b border-[var(--app-border)] bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
-            <div className="mx-auto flex max-w-content items-center gap-2 px-4 py-3 sm:px-6">
-                {props.onOpenNav && (
-                    <button type="button" onClick={props.onOpenNav} className={CIRCLE_BTN + ' lg:hidden'} title="运行列表" aria-label="运行列表">
-                        <MenuIcon />
-                    </button>
-                )}
+            <div className="mx-auto flex w-full max-w-content items-center gap-2 p-3">
                 <button type="button" onClick={props.onBack} className={CIRCLE_BTN} title="返回">
                     <BackChevron />
                 </button>

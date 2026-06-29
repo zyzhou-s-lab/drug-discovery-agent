@@ -946,8 +946,7 @@ function Bibliography(props: { campaign: string }) {
 
 export function App() {
     useTheme() // apply persisted theme on load
-    const isMobile = useIsMobile()
-    const [navOpen, setNavOpen] = useState(false) // mobile run-list drawer
+    const isMobile = useIsMobile() // for the full-screen chat overlay on phones
 
     const { campaigns, error: cErr, refetch } = useCampaigns()
     const [campaign, setCampaign] = useState<string | null>(null)
@@ -1043,61 +1042,22 @@ export function App() {
 
     return (
         <div className="flex h-dvh w-full overflow-hidden" style={{ background: 'var(--app-bg)', color: 'var(--app-fg)' }}>
-            {/* desktop: in-flow resizable sidebar column */}
-            <div className="hidden lg:flex">
-                <Sidebar
-                    campaigns={campaigns}
-                    apiDown={apiDown}
-                    selected={campaign}
-                    onSelect={(c) => {
-                        setSelected(null)
-                        setCampaign(c)
-                    }}
-                    onStartRun={startRun}
-                    onMutate={handleMutate}
-                />
-            </div>
+            {/* List pane (hapi mechanism): full-width on mobile when no run; hidden < lg once a run
+                is open. Self-managed inside Sidebar via its `selected` prop. */}
+            <Sidebar
+                campaigns={campaigns}
+                apiDown={apiDown}
+                selected={campaign}
+                onSelect={(c) => {
+                    setSelected(null)
+                    setCampaign(c)
+                }}
+                onStartRun={startRun}
+                onMutate={handleMutate}
+            />
 
-            {/* mobile: slide-in drawer over a backdrop */}
-            {navOpen && (
-                <div className="fixed inset-0 z-50 flex lg:hidden">
-                    <div className="absolute inset-0 bg-black/40" onClick={() => setNavOpen(false)} />
-                    <div className="relative flex w-[85vw] max-w-[320px] flex-col bg-[var(--app-bg)] pt-[env(safe-area-inset-top)] shadow-xl">
-                        <Sidebar
-                            mobile
-                            campaigns={campaigns}
-                            apiDown={apiDown}
-                            selected={campaign}
-                            onSelect={(c) => {
-                                setSelected(null)
-                                setCampaign(c)
-                                setNavOpen(false)
-                            }}
-                            onStartRun={startRun}
-                            onMutate={handleMutate}
-                        />
-                    </div>
-                </div>
-            )}
-
-            <main className="flex-1 overflow-y-auto">
-                {!selectedRun && (
-                    <div className="flex items-center gap-2 border-b border-[var(--app-border)] px-4 py-3 pt-[calc(env(safe-area-inset-top)+0.75rem)] lg:hidden">
-                        <button
-                            type="button"
-                            onClick={() => setNavOpen(true)}
-                            aria-label="运行列表"
-                            className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
-                        >
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <line x1="3" y1="6" x2="21" y2="6" />
-                                <line x1="3" y1="12" x2="21" y2="12" />
-                                <line x1="3" y1="18" x2="21" y2="18" />
-                            </svg>
-                        </button>
-                        <span className="text-sm font-semibold">药物靶点发现</span>
-                    </div>
-                )}
+            {/* Detail pane: hidden < lg when no run (the list shows), shown once a run is open. */}
+            <main className={`${campaign ? 'flex' : 'hidden lg:flex'} min-w-0 flex-1 flex-col overflow-y-auto`}>
                 {selectedRun && (
                     <SessionHeader
                         run={selectedRun}
@@ -1108,11 +1068,10 @@ export function App() {
                         onMutate={handleMutate}
                         onOpenFiles={() => setFilesOpen(campaign)}
                         onToggleChat={() => setChatOpen((v) => !v)}
-                        onOpenNav={() => setNavOpen(true)}
                     />
                 )}
 
-                <div id="dd-main" className="mx-auto flex max-w-content flex-col gap-5 p-4 lg:p-6">
+                <div id="dd-main" className="mx-auto flex w-full max-w-content flex-col gap-5 p-4 lg:p-6">
                     {!campaign && (
                         <Card className="p-6 text-sm text-[var(--app-hint)]">
                             从左侧选择一个运行,或点右上 ＋ 新建一个疾病项目并运行。
