@@ -202,14 +202,27 @@ export async function runPipeline(
   const scope = opts.scope ?? realScope;
   const validate = opts.intake ?? realValidate;
   const evDir = join(artifactsRoot, campaign, "events");
+  // single-shot gate breaker: threshold 1, so ONE quota/rate-limit failure (403/429/quota) in intake
+  // or scope trips it — the run then records a clear "paused" state instead of a misleading empty/done.
+  const breaker = new CircuitBreaker(1);
+  const markPaused = () => {
+    const reason = breaker.reason || "provider rate-limited";
+    eventsDir.run(evDir, () => emit(OVERVIEW_STAGE, "scope", "log", { msg: `自动暂停:provider 限流/配额耗尽(${reason})` }));
+    idx.markDone(campaign, OVERVIEW_STAGE, { stage: OVERVIEW_STAGE, summary: `provider 限流/配额耗尽,已暂停: ${reason}`, data: { kind: "paused", reason } }, {});
+  };
 
   // intake gate (real runs without a prior /intake/check) — a rejection records & returns
   if (opts.real !== false && !opts.skipIntake) {
     let intake: { accepted: boolean; reason: string } | null = null;
     try {
-      intake = await validate(disease);
+      intake = await validate(disease, { breaker });
     } catch {
       intake = null; // an intake error shouldn't block the run
+    }
+    if (breaker.tripped) {
+      idx.recordAttempt(campaign, OVERVIEW_STAGE);
+      markPaused(); // provider quota/rate-limit during intake → paused, not a false "not a disease"
+      return;
     }
     if (intake && !intake.accepted) {
       idx.recordAttempt(campaign, OVERVIEW_STAGE);
@@ -223,8 +236,12 @@ export async function runPipeline(
   try {
     const res = await eventsDir.run(evDir, async () => {
       emit(OVERVIEW_STAGE, "scope", "session_start", { prompt: `deep-research scope: ${disease}` });
-      return scope(disease, { onMessage: (m) => emitStream(OVERVIEW_STAGE, "scope", m, { skipText: true }) });
+      return scope(disease, { onMessage: (m) => emitStream(OVERVIEW_STAGE, "scope", m, { skipText: true }), breaker });
     });
+    if (breaker.tripped) {
+      markPaused(); // provider quota/rate-limit during scope → paused, not a false "0 angles / done"
+      return;
+    }
     const angles = ((res as any)?.angles as any[]) ?? [];
     const output = angles.length
       ? { stage: OVERVIEW_STAGE, summary: `Deep-research scope: ${angles.length} 个研究角度`, candidates: [], open_questions: ["scope-only 研究计划;完整检索简报(search→verify→synth)待 M2"], data: { kind: "scope", question: (res as any)?.question ?? disease, angles, budget: (res as any)?.budget } }

@@ -6,7 +6,7 @@ import { createSdkMcpServer, query, tool } from "@anthropic-ai/claude-agent-sdk"
 import { z } from "zod";
 
 import { Budget } from "./core";
-import { runAgent as realRunAgent, Semaphore } from "./orchestrate";
+import { type CircuitBreaker, runAgent as realRunAgent, Semaphore } from "./orchestrate";
 import { IntakeSchema } from "./schemas";
 import { searchDisease as realSearchDisease } from "./tools/opentargets";
 
@@ -88,6 +88,7 @@ export interface IntakeDeps {
   translateCodepoints?: (codepoints: string) => Promise<string | null>;
   budget?: Budget;
   sem?: Semaphore;
+  breaker?: CircuitBreaker; // fed the agent's outcome so a quota/rate-limit outage pauses the run (vs a false reject)
 }
 
 /** gate → forced-tool agent (translate + OT EFO lookup) → typed DiseaseIntake. 1:1 with
@@ -110,6 +111,7 @@ export async function validateDisease(raw: string, deps: IntakeDeps = {}): Promi
       allowedTools: ["mcp__submit__submit_intake", "mcp__otdisease__search_disease"], // EFO hit IS the evidence — no WebSearch
       disallowedTools: DISALLOWED,
       maxTurns: parseInt(process.env.DD_INTAKE_MAX_TURNS || "12", 10),
+      breaker: deps.breaker,
     });
   } catch (e) {
     return { accepted: false, normalized_en: "", efo_id: "", reason: `intake session error: ${e instanceof Error ? e.message : String(e)}` };

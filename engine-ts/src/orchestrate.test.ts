@@ -55,6 +55,13 @@ test("CircuitBreaker trips after N consecutive rate-limit failures; a success re
   expect(b.reason.toLowerCase()).toContain("usage limit");
 });
 
+test("CircuitBreaker trips on a 403 permission_error / quota-exhausted message", () => {
+  const b = new CircuitBreaker(1); // single-shot gate semantics (intake/scope)
+  b.note(true, "API Error: 403 permission_error: You've reached your usage limit for this billing cycle");
+  expect(b.tripped).toBe(true);
+  expect(b.reason.toLowerCase()).toContain("permission_error");
+});
+
 test("CircuitBreaker ignores non-rate-limit errors (a bug shouldn't pause the run)", () => {
   const b = new CircuitBreaker(2);
   b.note(true, "TypeError: x is not a function");

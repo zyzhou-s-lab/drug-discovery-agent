@@ -209,6 +209,27 @@ test("runPipeline: intake rejection records a rejected output (no scope)", async
   expect(scoped).toBe(false);
 });
 
+test("runPipeline: a provider quota/rate-limit during scope → paused (not a false empty 'done')", async () => {
+  const { idx, art } = setup();
+  // scope receives the runPipeline breaker; a 403/quota failure trips it (threshold 1)
+  const fakeScope = (async (_d: string, o: any) => { o.breaker.note(true, "403 permission_error: usage limit"); return null; }) as any;
+  await runPipeline(idx, art, "plq", "AMD", { skipIntake: true, scope: fakeScope });
+  const out = idx.output("plq", OVERVIEW_STAGE) as any;
+  expect(out.data.kind).toBe("paused");
+  expect(out.summary).toContain("配额");
+  expect(out.data.reason.toLowerCase()).toContain("permission_error");
+});
+
+test("runPipeline: a provider quota/rate-limit during intake → paused (not a false rejection); scope skipped", async () => {
+  const { idx, art } = setup();
+  let scoped = false;
+  const fakeIntake = (async (_raw: string, deps: any) => { deps.breaker.note(true, "429 quota exceeded"); return { accepted: false, normalized_en: "", efo_id: "", reason: "x" }; }) as any;
+  await runPipeline(idx, art, "plqi", "AMD", { intake: fakeIntake, scope: (async () => { scoped = true; return null; }) as any });
+  const out = idx.output("plqi", OVERVIEW_STAGE) as any;
+  expect(out.data.kind).toBe("paused");
+  expect(scoped).toBe(false);
+});
+
 test("runSearch writes the narrative from the injected present fn", async () => {
   const { art } = setup();
   const fakeResearch = async () => ({ question: "Q", findings: [{ claim: "c" }], stats: {} }) as any;
