@@ -461,8 +461,7 @@ export function StepCards(props: { events: StepEvent[]; terminal?: boolean }) {
         const order: string[] = []
         const by = new Map<string, StepEvent[]>()
         for (const e of props.events) {
-            // 'progress' events are phase counters for PhasesPanel, not agent sessions —
-            // they'd otherwise create empty "会话 · search/fetch/…" cards (0 tools, 运行中).
+            // 'progress' events are phase counters for PhasesPanel, not agent sessions.
             if (e.type === 'progress') continue
             if (!by.has(e.label)) {
                 by.set(e.label, [])
@@ -470,7 +469,12 @@ export function StepCards(props: { events: StepEvent[]; terminal?: boolean }) {
             }
             by.get(e.label)!.push(e)
         }
-        return order.map((label) => ({ label, events: by.get(label)! }))
+        // Only labels with a session_start are real agent sessions. Phase-level events emitted under a
+        // bare phase label ("search"/"fetch"/… — e.g. the onEvent 'log' aggregates, or the synthesize
+        // 'result') otherwise spawn an empty "会话 · search" card that's stuck "运行中" (no result).
+        return order
+            .map((label) => ({ label, events: by.get(label)! }))
+            .filter((g) => g.events.some((e) => e.type === 'session_start'))
     }, [props.events])
 
     if (props.events.length === 0) return null
