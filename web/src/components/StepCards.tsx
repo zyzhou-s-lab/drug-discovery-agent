@@ -408,22 +408,20 @@ function SessionCard(props: { label: string; events: StepEvent[]; terminal?: boo
 
     return (
         <Card id={`dd-session-${props.label}`} className="overflow-hidden scroll-mt-4">
-            <button onClick={() => setOpen((v) => !v)} className="flex w-full flex-col gap-1 px-3 py-2 text-left">
-                {/* header row: status dot + title + expand chevron, always aligned on one line */}
-                <div className="flex w-full items-center gap-2">
-                    <span className="relative flex h-2.5 w-2.5 shrink-0 items-center justify-center">
-                        {running && (
-                            <span className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-75"
-                                  style={{ background: dotColor }} />
-                        )}
-                        <span className="relative h-2.5 w-2.5 rounded-full" style={{ background: dotColor }} />
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium">会话 · {angle}</span>
-                    <span className="shrink-0"><GroupChevron open={open} /></span>
-                </div>
-                {/* stats on their own line so they wrap cleanly without breaking the header */}
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-[18px] text-xs text-[var(--app-hint)]">
-                    <span>{toolCount} 次工具调用 · {thinkCount} 次思考</span>
+            {/* single row: dot + title (truncates) + stats (right, wraps internally on narrow) + chevron.
+                The chevron is a sibling of the wrapping stats (not inside it), so it never drops to a
+                second line — fixes the mobile misalignment while keeping desktop on one line. */}
+            <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
+                <span className="relative flex h-2.5 w-2.5 shrink-0 items-center justify-center">
+                    {running && (
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-75"
+                              style={{ background: dotColor }} />
+                    )}
+                    <span className="relative h-2.5 w-2.5 rounded-full" style={{ background: dotColor }} />
+                </span>
+                <span className="min-w-0 flex-1 truncate text-sm font-medium">会话 · {angle}</span>
+                <span className="flex flex-wrap items-center justify-end gap-x-2 gap-y-0.5 text-xs text-[var(--app-hint)]">
+                    <span className="whitespace-nowrap">{toolCount} 次工具调用 · {thinkCount} 次思考</span>
                     {typeof tokens === 'number' && tokens > 0 && <span>{(tokens / 1000).toFixed(1)}k tokens</span>}
                     {elapsed && <span>{elapsed}</span>}
                     {typeof result?.num_turns === 'number' && <span>{result.num_turns} 轮</span>}
@@ -432,7 +430,8 @@ function SessionCard(props: { label: string; events: StepEvent[]; terminal?: boo
                     {running && !retrying && <span style={{ color: ORANGE }}>运行中</span>}
                     {interrupted && <span>已中断</span>}
                     {isError && <span style={{ color: RED }}>错误</span>}
-                </div>
+                </span>
+                <span className="shrink-0"><GroupChevron open={open} /></span>
             </button>
             {open && (
                 <div className="flex flex-col gap-2 border-t border-[var(--app-border)] px-3 py-2">
