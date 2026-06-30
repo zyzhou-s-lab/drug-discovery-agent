@@ -227,7 +227,7 @@ function ScopeAngles(props: {
                 {props.serverAngles.map((a, i) => (
                     <li key={`s${i}`} className="rounded-lg border border-[var(--app-border)] p-2.5">
                         <div className="text-sm font-medium">{i + 1}. {a.label}</div>
-                        <div className="mt-0.5 break-words font-mono text-xs text-[var(--app-hint)]">{a.query}</div>
+                        <div className="mt-0.5 break-words text-xs text-[var(--app-hint)]">{a.query}</div>
                         {a.rationale && <div className="mt-1 text-xs text-[var(--app-fg)]">{a.rationale}</div>}
                     </li>
                 ))}

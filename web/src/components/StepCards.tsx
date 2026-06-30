@@ -416,8 +416,8 @@ function SessionCard(props: { label: string; events: StepEvent[]; terminal?: boo
                     )}
                     <span className="relative h-2.5 w-2.5 rounded-full" style={{ background: dotColor }} />
                 </span>
-                <span className="text-sm font-medium">会话 · {angle}</span>
-                <span className="ml-auto flex flex-wrap items-center justify-end gap-x-2 gap-y-0.5 text-xs text-[var(--app-hint)]">
+                <span className="shrink-0 whitespace-nowrap text-sm font-medium">会话 · {angle}</span>
+                <span className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5 text-xs text-[var(--app-hint)]">
                     <span>{toolCount} 次工具调用 · {thinkCount} 次思考</span>
                     {typeof tokens === 'number' && tokens > 0 && <span>{(tokens / 1000).toFixed(1)}k tokens</span>}
                     {elapsed && <span>{elapsed}</span>}
