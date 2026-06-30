@@ -4,7 +4,6 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Settings } from '@/components/Settings'
 import { RenameDialog } from '@/components/RenameDialog'
-import { ScopeDialog } from '@/components/ScopeDialog'
 import { runDisplayName } from '@/lib/runLabel'
 import { useResizable } from '@/hooks/useResizable'
 import { ddaApi } from '@/api/dda'
@@ -149,7 +148,6 @@ export function Sidebar(props: {
     const [search, setSearch] = useState('')
     const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
     const [settingsOpen, setSettingsOpen] = useState(false)
-    const [scopeOpen, setScopeOpen] = useState(false)
     const [dialogOpen, setDialogOpen] = useState(false)
     const [dialogDisease, setDialogDisease] = useState('')
     const [menu, setMenu] = useState<Menu | null>(null)
@@ -211,9 +209,6 @@ export function Sidebar(props: {
                     <span className="ml-1 text-xs text-[var(--app-hint)]">{total} 运行 · {groups.length} 疾病</span>
                 </div>
                 <div className="flex items-center gap-1 text-[var(--app-hint)]">
-                    <button onClick={() => setScopeOpen(true)} title="研究角度拆解 (Scope)" className="rounded p-1 hover:bg-[var(--app-subtle-bg)]">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /><path d="M11 8v6M8 11h6" /></svg>
-                    </button>
                     <button onClick={() => setSettingsOpen(true)} title="设置" className="rounded p-1 hover:bg-[var(--app-subtle-bg)]"><GearIcon /></button>
                     <button onClick={() => openNew('')} title="新建项目" className="rounded p-1 hover:bg-[var(--app-subtle-bg)]"><PlusIcon /></button>
                 </div>
@@ -279,7 +274,6 @@ export function Sidebar(props: {
 
             <Settings open={settingsOpen} onOpenChange={setSettingsOpen} />
             <NewRunDialog open={dialogOpen} onOpenChange={setDialogOpen} initialDisease={dialogDisease} onStart={props.onStartRun} />
-            <ScopeDialog open={scopeOpen} onOpenChange={setScopeOpen} />
             <RenameDialog target={renameTarget} onClose={() => setRenameTarget(null)} onDone={() => props.onMutate()} />
         </aside>
     )
