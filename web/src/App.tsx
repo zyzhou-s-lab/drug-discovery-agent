@@ -92,14 +92,15 @@ const SCORE_LABEL: Record<string, string> = {
 const stageLabel = (name: string) => STAGE_LABEL[name] ?? name
 
 function ScoreBar(props: { label: string; value: number }) {
-    const pct = Math.round(Math.max(0, Math.min(1, props.value)) * 100)
+    const value = typeof props.value === 'number' ? props.value : 0 // defensive: never .toFixed(undefined)
+    const pct = Math.round(Math.max(0, Math.min(1, value)) * 100)
     return (
         <div className="flex items-center gap-2 text-xs">
             <span className="w-20 shrink-0 text-[var(--app-hint)]">{SCORE_LABEL[props.label] ?? props.label}</span>
             <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--app-subtle-bg)]">
                 <div className="h-full rounded-full bg-[var(--app-button)]" style={{ width: `${pct}%` }} />
             </div>
-            <span className="w-8 shrink-0 text-right tabular-nums">{props.value.toFixed(2)}</span>
+            <span className="w-8 shrink-0 text-right tabular-nums">{value.toFixed(2)}</span>
         </div>
     )
 }
@@ -792,7 +793,7 @@ function StageDetail(props: {
                     运行中 —— 实时步骤见下方
                 </div>
             )}
-            {detail.verdict && (
+            {detail.verdict && typeof detail.verdict.score === 'number' && (
                 <Card className="p-4">
                     <div className="mb-2 flex items-center gap-2">
                         <Badge variant={detail.verdict.converged ? 'success' : 'destructive'}>
