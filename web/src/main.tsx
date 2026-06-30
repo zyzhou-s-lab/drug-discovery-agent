@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { RouterProvider } from '@tanstack/react-router'
 import { I18nProvider } from '@/lib/i18n-context'
+import { ToastProvider } from '@/lib/toast-context'
 import { router } from './router'
 import './index.css'
 
@@ -12,7 +13,9 @@ import './index.css'
 createRoot(document.getElementById('root')!).render(
     <StrictMode>
         <I18nProvider>
-            <RouterProvider router={router} />
+            <ToastProvider>
+                <RouterProvider router={router} />
+            </ToastProvider>
         </I18nProvider>
     </StrictMode>
 )

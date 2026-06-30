@@ -16,6 +16,7 @@ import { ddaApi, doiRef } from '@/api/dda'
 import { useTheme } from '@/lib/settings'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useNavigate, useParams } from '@tanstack/react-router'
+import { useToast } from '@/lib/toast-context'
 import { useCampaigns, useCampaignView, useReport, useStageDetail, useStageEvents } from '@/hooks/useDda'
 import type {
     CampaignStage,
@@ -948,6 +949,7 @@ function Bibliography(props: { campaign: string }) {
 export function App() {
     useTheme() // apply persisted theme on load
     const isMobile = useIsMobile() // for the full-screen chat overlay on phones
+    const { addToast } = useToast()
 
     const { campaigns, error: cErr, refetch } = useCampaigns()
     // `campaign` is URL-driven (hapi parity): '/' = index (no run), '/c/$campaign' = detail. Selecting
@@ -1041,8 +1043,9 @@ export function App() {
                 setSelected(null)
                 setCampaign(id)
                 refetch()
+                addToast({ title: '已新建运行', body: disease })
             })
-            .catch(() => {})
+            .catch(() => addToast({ title: '新建运行失败', body: '请稍后重试' }))
     }
 
     return (
