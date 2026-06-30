@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 
-import { CodeBlock } from '@/components/CodeBlock'
+import { FileContentView } from '@/components/files/FileContentView'
 import { ddaApi } from '@/api/dda'
 
 // Pipeline stage labels for file grouping
@@ -179,8 +179,7 @@ export function FilesPage(props: { campaign: string | null; disease: string | nu
                             >
                                 ‹ 返回文件列表
                             </button>
-                            <div className="mb-2 truncate font-mono text-xs text-[var(--app-hint)]">{sel}</div>
-                            <CodeBlock code={content || '…'} language={sel.endsWith('.json') ? 'json' : 'text'} maxHeight={100000} scrollY />
+                            <FileContentView path={sel} content={content || '…'} />
                         </>
                     ) : (
                         <div className="px-2 py-3 text-sm text-[var(--app-hint)]">选择左侧文件查看内容。</div>
