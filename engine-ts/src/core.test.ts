@@ -1,7 +1,7 @@
 // Parity tests — 1:1 mirror of tests/test_deep_research.py (pure-logic). If these pass, the TS
 // core matches the Python core byte-for-behavior. Run: bun test
 import { expect, test } from "bun:test";
-import { Budget, type Claim, dedupResults, normUrl, rankClaims, type SearchResult, type SeenEntry, survives } from "./core";
+import { Budget, type Claim, dedupResults, jaccard, lexicalClusters, normUrl, rankClaims, type SearchResult, type SeenEntry, survives } from "./core";
 
 test("normUrl strips www / scheme / trailing slash", () => {
   expect(normUrl("https://www.Example.com/Foo/")).toBe("example.com/foo");
@@ -113,4 +113,27 @@ test("Budget on empty byPhase does not throw (sum-of-empty = 0)", () => {
   const b = new Budget(100);
   expect(b.spent()).toBe(0);
   expect(b.exhausted()).toBe(false);
+});
+
+test("jaccard: token-set similarity", () => {
+  const t = (s: string) => new Set(s.toLowerCase().split(" "));
+  expect(jaccard(t("alpha beta gamma"), t("alpha beta gamma"))).toBe(1);
+  expect(jaccard(t("alpha beta"), t("gamma delta"))).toBe(0);
+  expect(jaccard(new Set<string>(), new Set<string>())).toBe(1);
+});
+
+test("lexicalClusters: groups near-duplicate claims, keeps distinct ones separate", () => {
+  const texts = [
+    "MONDO 0007027 is a direct subclass of MONDO 0013209",                 // 0
+    "MONDO:0007027 is classified as a direct subclass of MONDO:0013209",   // 1 ≈ 0 (cross-angle dup)
+    "GWAS Catalog returns zero associations for efo id EFO_0009901",        // 2
+    "GWAS Catalog returns zero studies for efo id EFO_0009901",             // 3 ≈ 2
+    "EFHD2 expression is significantly elevated in hepatic macrophages",    // 4 (distinct)
+  ];
+  const groups = lexicalClusters(texts, 0.6)
+    .map((g) => g.sort((a, b) => a - b))
+    .sort((a, b) => (a[0] ?? 0) - (b[0] ?? 0));
+  expect(groups).toContainEqual([0, 1]);
+  expect(groups).toContainEqual([2, 3]);
+  expect(groups).toContainEqual([4]);
 });

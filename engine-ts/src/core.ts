@@ -103,6 +103,50 @@ export interface Claim {
  * (central + primary) so the highest-value claims are never dropped. `limit` is the floor,
  * 80 the safety ceiling on the expensive verify phase.
  */
+/** Normalized token set for lexical dedup: lowercased alnum words of length > 2. */
+function dedupTokens(s: string): Set<string> {
+  return new Set(
+    String(s)
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((w) => w.length > 2),
+  );
+}
+
+/** Token-set Jaccard similarity in [0,1]. */
+export function jaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 && b.size === 0) return 1;
+  let inter = 0;
+  for (const x of a) if (b.has(x)) inter++;
+  const uni = a.size + b.size - inter;
+  return uni === 0 ? 0 : inter / uni;
+}
+
+/** Lexical near-duplicate clusters of `texts` via normalized token Jaccard ≥ sim, grouped with
+ * union-find. Returns groups of input indices (singletons included). Pure (Stage A of pre-verify
+ * claim dedup) — catches restatements that share wording, e.g. the same fact surfacing under two
+ * scope angles. */
+export function lexicalClusters(texts: string[], sim = 0.85): number[][] {
+  const n = texts.length;
+  const toks = texts.map(dedupTokens);
+  const parent = Array.from({ length: n }, (_, i) => i);
+  const find = (x: number): number => (parent[x] === x ? x : (parent[x] = find(parent[x] as number)));
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      if (jaccard(toks[i] as Set<string>, toks[j] as Set<string>) >= sim) parent[find(i)] = find(j);
+    }
+  }
+  const groups = new Map<number, number[]>();
+  for (let i = 0; i < n; i++) {
+    const r = find(i);
+    const g = groups.get(r);
+    if (g) g.push(i);
+    else groups.set(r, [i]);
+  }
+  return [...groups.values()];
+}
+
 export function rankClaims(claims: Claim[], limit = MAX_VERIFY_CLAIMS): Claim[] {
   const ranked = [...claims].sort((a, b) => {
     const ia = IMP_RANK[a.importance ?? ""] ?? 3;
