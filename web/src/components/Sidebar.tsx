@@ -88,7 +88,9 @@ function NewRunDialog(props: {
                 setError(res.reason || '该输入不是可识别的疾病/适应症,请换一个真实疾病名。')
                 return
             }
-            props.onStart(d)
+            // create the run under the canonical (OpenTargets-aligned) disease name, not the raw
+            // user input — so "t2d" / "阿尔兹海默" display as "type 2 diabetes mellitus" etc.
+            props.onStart(res.normalized_en?.trim() || d)
             props.onOpenChange(false)
         } catch {
             setError('疾病名校验失败,请稍后重试。')
