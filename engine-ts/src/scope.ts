@@ -3,7 +3,7 @@
 // See docs/bun-migration-eval.md Phase 3 + deep-research-port-plan §5.
 import { z } from "zod";
 
-import { Budget, type OnMessage, runAgent, Semaphore } from "./orchestrate";
+import { Budget, type CircuitBreaker, type OnMessage, runAgent, Semaphore } from "./orchestrate";
 
 export const SCOPE_PROMPT =
   `Decompose this disease into complementary research angles for a DISEASE-OVERVIEW brief
@@ -46,6 +46,7 @@ export interface ScopeOpts {
   budget?: Budget;
   sem?: Semaphore;
   onMessage?: OnMessage;
+  breaker?: CircuitBreaker; // fed the agent's outcome so a quota/rate-limit outage pauses (not a false empty)
 }
 
 /** Run the Scope phase. Returns {question, angles[], budget} or null if the agent never submitted. */
@@ -56,6 +57,7 @@ export async function scope(disease: string, opts: ScopeOpts = {}): Promise<Reco
   const [result] = await runAgent("scope", prompt, "submit_angles", SCOPE_SCHEMA, {}, budget, sem, {
     maxTurns: 6,
     onMessage: opts.onMessage,
+    breaker: opts.breaker,
   });
   if (result) result.budget = budget.report();
   return result;

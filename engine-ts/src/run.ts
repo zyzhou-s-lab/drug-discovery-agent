@@ -6,7 +6,7 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { writeAsset, writeOverviewAssets } from "./assets";
+import { deriveAssets, writeStepItem } from "./assets";
 import { research as realResearch } from "./deep_research";
 import { emit, emitStream, eventsDir } from "./events";
 import { validateDisease as realValidate } from "./intake";
@@ -138,20 +138,22 @@ export async function runSearch(
         onEvent: (phase, msg) => emit(SEARCH_STAGE, phase, "log", { msg }),
         // one expandable step card per agent (its thinking / tool calls / outcome) — api.py _run_search
         onAgent: (label, msg) => emitStream(SEARCH_STAGE, label, msg, { skipText: true, withOutcome: true }),
-        // incremental per-stage asset checkpoints (#30). A throw here propagates to research's
-        // doPersist, which surfaces it via ev (→ the event stream) and continues — never failing
-        // the run, but no longer silently swallowed.
-        persist: (name, payload) => writeAsset(artifactsRoot, campaign, name, payload),
+        // per-sub-agent record under deepresearch/{step}/ — the single, crash-safe source of truth
+        // (search/fetch/verify/synthesize). assets/ are derived from this after the run
+        // (deriveAssets). A throw here is surfaced via ev (→ the event stream) and continues — never
+        // failing the run, but no longer silently swallowed.
+        persistStep: (step, key, payload) => writeStepItem(artifactsRoot, campaign, step, key, payload),
       }),
     );
     writeJson(reportPath, report);
-    // Sediment the compute-facing assets (sources / database_facts) next to the report so the
-    // downstream analysis steps read a stable contract, not the big report.json. Best-effort —
-    // never fail the run on an asset write (mirrors api.py _run_search).
+    // Derive the compute-facing assets/ contract by reducing the deepresearch/ record (the single
+    // source of truth) — so assets/ can't drift from it and is rebuildable. The bibliography
+    // (report.references) is threaded in (a cross-source, network-enriched projection not held in any
+    // one step file). Best-effort — never fail the run on an asset write.
     try {
-      writeOverviewAssets(report, artifactsRoot, campaign);
+      deriveAssets(artifactsRoot, campaign, report.references ?? []);
     } catch (e) {
-      console.warn(`overview asset write failed for ${campaign}:`, e);
+      console.warn(`asset derivation failed for ${campaign}:`, e);
     }
     // auto-pause takes precedence over "done": a tripped breaker means the report is a degraded
     // salvage (the provider was rate-limited), so surface "paused" + the reason, not a false "done".
@@ -200,14 +202,27 @@ export async function runPipeline(
   const scope = opts.scope ?? realScope;
   const validate = opts.intake ?? realValidate;
   const evDir = join(artifactsRoot, campaign, "events");
+  // single-shot gate breaker: threshold 1, so ONE quota/rate-limit failure (403/429/quota) in intake
+  // or scope trips it — the run then records a clear "paused" state instead of a misleading empty/done.
+  const breaker = new CircuitBreaker(1);
+  const markPaused = () => {
+    const reason = breaker.reason || "provider rate-limited";
+    eventsDir.run(evDir, () => emit(OVERVIEW_STAGE, "scope", "log", { msg: `自动暂停:provider 限流/配额耗尽(${reason})` }));
+    idx.markDone(campaign, OVERVIEW_STAGE, { stage: OVERVIEW_STAGE, summary: `provider 限流/配额耗尽,已暂停: ${reason}`, data: { kind: "paused", reason } }, {});
+  };
 
   // intake gate (real runs without a prior /intake/check) — a rejection records & returns
   if (opts.real !== false && !opts.skipIntake) {
     let intake: { accepted: boolean; reason: string } | null = null;
     try {
-      intake = await validate(disease);
+      intake = await validate(disease, { breaker });
     } catch {
       intake = null; // an intake error shouldn't block the run
+    }
+    if (breaker.tripped) {
+      idx.recordAttempt(campaign, OVERVIEW_STAGE);
+      markPaused(); // provider quota/rate-limit during intake → paused, not a false "not a disease"
+      return;
     }
     if (intake && !intake.accepted) {
       idx.recordAttempt(campaign, OVERVIEW_STAGE);
@@ -221,13 +236,25 @@ export async function runPipeline(
   try {
     const res = await eventsDir.run(evDir, async () => {
       emit(OVERVIEW_STAGE, "scope", "session_start", { prompt: `deep-research scope: ${disease}` });
-      return scope(disease, { onMessage: (m) => emitStream(OVERVIEW_STAGE, "scope", m, { skipText: true }) });
+      return scope(disease, { onMessage: (m) => emitStream(OVERVIEW_STAGE, "scope", m, { skipText: true }), breaker });
     });
+    if (breaker.tripped) {
+      markPaused(); // provider quota/rate-limit during scope → paused, not a false "0 angles / done"
+      return;
+    }
     const angles = ((res as any)?.angles as any[]) ?? [];
     const output = angles.length
       ? { stage: OVERVIEW_STAGE, summary: `Deep-research scope: ${angles.length} 个研究角度`, candidates: [], open_questions: ["scope-only 研究计划;完整检索简报(search→verify→synth)待 M2"], data: { kind: "scope", question: (res as any)?.question ?? disease, angles, budget: (res as any)?.budget } }
       : { stage: OVERVIEW_STAGE, summary: "[deep-research scope] 未能拆解出研究角度", candidates: [], open_questions: ["scope returned no angles"] };
     idx.markDone(campaign, OVERVIEW_STAGE, output, {});
+    // single scope agent → deepresearch/01_scope/scope.json (best-effort; never fails the run)
+    try {
+      writeStepItem(artifactsRoot, campaign, "01_scope", "scope", {
+        question: (res as any)?.question ?? disease, count: angles.length, angles,
+      });
+    } catch (e) {
+      eventsDir.run(evDir, () => emit(OVERVIEW_STAGE, "scope", "log", { msg: `01_scope 落盘失败: ${e instanceof Error ? e.message : String(e)}` }));
+    }
   } catch (e) {
     idx.markDone(campaign, OVERVIEW_STAGE, { stage: OVERVIEW_STAGE, summary: `pipeline failed: ${e instanceof Error ? e.message : String(e)}` }, {});
   }

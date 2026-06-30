@@ -75,7 +75,7 @@ test("listCampaigns includes orphan runs (stage_state but no campaigns row)", ()
 test("writeArtifact is content-addressed + atomic", () => {
   const p = idx.writeArtifact("c", "report", '{"x":1}');
   expect(existsSync(p)).toBe(true);
-  expect(p).toContain(join("c", "01_discovery"));
+  expect(p).toContain(join("c", "deepresearch"));
   expect(idx.writeArtifact("c", "report", '{"x":1}')).toBe(p); // same content → same hash → same path
 });
 

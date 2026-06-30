@@ -13,14 +13,42 @@ const STAGE_LABEL: Record<string, string> = {
     'deep-research': '深度检索',
 }
 
-// Map a file path to its pipeline stage + display name
+// deepresearch/{step}/ folder labels (the per-sub-agent source-of-truth record)
+const STEP_LABEL: Record<string, string> = {
+    '01_scope': '① scope · 拆角度',
+    '02_search': '② search · 检索',
+    '03_fetch': '③ fetch · 抓取',
+    '04_verify': '④ verify · 核查',
+    '05_synthesize': '⑤ synthesize · 合成',
+}
+
+// Group sort rank: deepresearch steps first (source of truth), then derived assets, then event
+// streams, then the report/status root files, then anything else.
+function groupRank(stage: string): number {
+    if (stage.startsWith('dr/')) return 0
+    if (stage === 'assets') return 1
+    if (stage.startsWith('ev/')) return 2
+    if (stage === 'deep-research') return 3
+    return 4
+}
+
+// Map a file path to its display group + label. deepresearch/ and assets/ each group by folder
+// (not one group per file); events/report keep their existing grouping.
 function fileStage(p: string): { stage: string; label: string } {
     const base = p.replace(/\\/g, '/')
+    // deepresearch/{step}/… → one group per workflow step
+    const drMatch = base.match(/^deepresearch\/([^/]+)\//)
+    if (drMatch) {
+        const step = drMatch[1]
+        return { stage: 'dr/' + step, label: 'deepresearch · ' + (STEP_LABEL[step] || step) }
+    }
+    // assets/… → the derived compute-facing contract
+    if (base.startsWith('assets/')) return { stage: 'assets', label: 'assets · 派生契约' }
     // events/{stage}.jsonl
     const evMatch = base.match(/^events\/(.+)\.jsonl$/)
     if (evMatch) {
         const s = evMatch[1]
-        return { stage: s, label: STAGE_LABEL[s] || s }
+        return { stage: 'ev/' + s, label: '事件流 · ' + (STAGE_LABEL[s] || s) }
     }
     // search_status.json / report.json → deep-research stage
     if (base === 'search_status.json' || base === 'report.json') {
@@ -80,7 +108,8 @@ export function FilesPage(props: { campaign: string | null; disease: string | nu
             const fileName = f.path.split('/').pop() || f.path.split('\\').pop() || f.path
             map.get(stage)!.items.push({ ...f, fileName })
         }
-        return [...map.entries()]
+        // order groups: deepresearch steps (01→05) → assets → events → report/status → other
+        return [...map.entries()].sort((a, b) => groupRank(a[0]) - groupRank(b[0]) || a[0].localeCompare(b[0]))
     }, [filtered])
 
     if (!props.campaign) return null

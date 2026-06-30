@@ -24,7 +24,7 @@ const TRANSIENT = [
 // A sustained run of THESE (rate-limit / quota / out-of-balance) means the provider is unusable for
 // the rest of the run — the circuit breaker trips and auto-pauses rather than grinding every agent
 // to a failed call (the t2d incident: ~52 min of all-429 verify calls).
-const RATELIMIT = ["429", "too many requests", "rate limit", "rate_limit", "quota", "usage limit", "402", "insufficient", "out of balance"];
+const RATELIMIT = ["429", "too many requests", "rate limit", "rate_limit", "quota", "usage limit", "402", "403", "permission_error", "insufficient", "out of balance"];
 
 /** Trips after `threshold` CONSECUTIVE rate-limit/quota agent failures (any success resets). Fed by
  * runAgent; research checks `tripped` in its stop predicate so the run pauses instead of burning out. */

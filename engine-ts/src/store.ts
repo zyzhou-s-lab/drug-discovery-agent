@@ -223,7 +223,7 @@ export class Index {
   }
 
   // ---- content-addressed artifact store ----
-  writeArtifact(campaign: string, name: string, data: string, subdir = "01_discovery"): string {
+  writeArtifact(campaign: string, name: string, data: string, subdir = "deepresearch"): string {
     const h = createHash("sha256").update(data).digest("hex").slice(0, 12);
     const d = join(this.artifactsRoot, campaign, subdir);
     mkdirSync(d, { recursive: true });

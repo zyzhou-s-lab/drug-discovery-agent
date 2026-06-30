@@ -19,13 +19,17 @@ const readJson = (p: string) => JSON.parse(readFileSync(p, "utf-8"));
 const J = (r: Response): Promise<any> => r.json() as Promise<any>;
 const ANGLES = [{ label: "g", query: "q" }];
 
-test("runSearch writes running → done + report + overview assets", async () => {
+test("runSearch writes running → done + report; derives assets from deepresearch/", async () => {
   const { art } = setup();
-  const fakeResearch = async () => ({ question: "Q", findings: [{ claim: "c" }], sources: [{ url: "u", quality: "primary" }], databaseFacts: [{ claim: "d" }], stats: { confirmed: 1 } }) as any;
+  // research records its sub-agents under deepresearch/; deriveAssets reduces them into assets/
+  const fakeResearch = async (_d: string, _a: unknown, o: any) => {
+    o.persistStep?.("03_fetch", "00_db", { url: "u", angle: "g", source_type: "database", sourceQuality: "primary", claims: [{ claim: "d", quote: "q", source_type: "database", sourceUrl: "u" }] });
+    return ({ question: "Q", findings: [{ claim: "c" }], references: [], stats: { confirmed: 1 } }) as any;
+  };
   await runSearch(art, "rs-done", "Alzheimer", ANGLES, { research: fakeResearch });
   expect(readJson(join(art, "rs-done", "search_status.json")).state).toBe("done");
   expect(readJson(join(art, "rs-done", "report.json")).findings[0].claim).toBe("c");
-  // end-of-run sediments the compute-facing assets next to the report
+  // end-of-run derives the compute-facing assets from the deepresearch/ source of truth
   expect(readJson(join(art, "rs-done", "assets", "sources.json")).count).toBe(1);
   expect(readJson(join(art, "rs-done", "assets", "database_facts.json")).count).toBe(1);
   expect(isRunning("rs-done")).toBe(false);
@@ -165,16 +169,19 @@ test("POST /search rejects an over-long disease (400)", async () => {
   expect(r.status).toBe(400);
 });
 
-test("runSearch wires persist → incremental assets land via writeAsset", async () => {
+test("runSearch wires persistStep → deepresearch/ files land via writeStepItem", async () => {
   const { art } = setup();
   const fakeResearch = async (_d: string, _a: unknown, o: any) => {
-    o.persist?.("sources", { stage: "disease-overview", count: 1, sources: [{ url: "u" }], references: [] });
-    return { question: "Q", findings: [], sources: [{ url: "u", quality: "primary" }], stats: {} } as any;
+    o.persistStep?.("04_verify", "01_a-claim", { claim: "a claim", survives: true, vote: "3-0" });
+    return { question: "Q", findings: [], references: [], stats: {} } as any;
   };
-  await runSearch(art, "rs-persist", "X", ANGLES, { research: fakeResearch });
-  const a = readJson(join(art, "rs-persist", "assets", "sources.json"));
-  expect(a.campaign).toBe("rs-persist"); // writeAsset stamped the campaign
-  expect(a.count).toBe(1);
+  await runSearch(art, "rs-step", "X", ANGLES, { research: fakeResearch });
+  const v = readJson(join(art, "rs-step", "deepresearch", "04_verify", "01-a-claim.json"));
+  expect(v.campaign).toBe("rs-step"); // writeStepItem stamped the campaign
+  expect(v.step).toBe("04_verify");
+  expect(v.survives).toBe(true);
+  // and assets/ are derived from that record at end of run
+  expect(readJson(join(art, "rs-step", "assets", "verified.json")).confirmed[0].claim).toBe("a claim");
 });
 
 // ── Phase-3c: disease-overview pipeline (scope) + narrative ──
@@ -199,6 +206,27 @@ test("runPipeline: intake rejection records a rejected output (no scope)", async
   const out = idx.output("pl2", OVERVIEW_STAGE) as any;
   expect(out.data.kind).toBe("rejected");
   expect(out.summary).toContain("intake rejected");
+  expect(scoped).toBe(false);
+});
+
+test("runPipeline: a provider quota/rate-limit during scope → paused (not a false empty 'done')", async () => {
+  const { idx, art } = setup();
+  // scope receives the runPipeline breaker; a 403/quota failure trips it (threshold 1)
+  const fakeScope = (async (_d: string, o: any) => { o.breaker.note(true, "403 permission_error: usage limit"); return null; }) as any;
+  await runPipeline(idx, art, "plq", "AMD", { skipIntake: true, scope: fakeScope });
+  const out = idx.output("plq", OVERVIEW_STAGE) as any;
+  expect(out.data.kind).toBe("paused");
+  expect(out.summary).toContain("配额");
+  expect(out.data.reason.toLowerCase()).toContain("permission_error");
+});
+
+test("runPipeline: a provider quota/rate-limit during intake → paused (not a false rejection); scope skipped", async () => {
+  const { idx, art } = setup();
+  let scoped = false;
+  const fakeIntake = (async (_raw: string, deps: any) => { deps.breaker.note(true, "429 quota exceeded"); return { accepted: false, normalized_en: "", efo_id: "", reason: "x" }; }) as any;
+  await runPipeline(idx, art, "plqi", "AMD", { intake: fakeIntake, scope: (async () => { scoped = true; return null; }) as any });
+  const out = idx.output("plqi", OVERVIEW_STAGE) as any;
+  expect(out.data.kind).toBe("paused");
   expect(scoped).toBe(false);
 });
 
