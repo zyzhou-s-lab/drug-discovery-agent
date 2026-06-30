@@ -95,7 +95,7 @@ export function Settings(props: { open: boolean; onOpenChange: (v: boolean) => v
         const c = Number(concurrency)
         const m = Number(maxClaims)
         if (!Number.isInteger(c) || c < 1 || c > 32 || !Number.isInteger(m) || m < 1 || m > 80) {
-            setMsg({ kind: 'err', text: '并发上限 1–32,Verify 数 1–80(整数)' })
+            setMsg({ kind: 'err', text: '并发上限 1–32,核验条数 1–80(整数)' })
             return
         }
         setSaving(true)
@@ -183,7 +183,7 @@ export function Settings(props: { open: boolean; onOpenChange: (v: boolean) => v
                             />
                         </Field>
                         <div className="flex gap-3">
-                            <Field label="并发上限" hint="DD_DR_CONC · 1–32">
+                            <Field label="并发上限" hint="深度研究时同时并行运行的 agent 数(检索/抓取/核验等)。调大更快,但更耗额度、更易触发限流。(DD_DR_CONC · 1–32)">
                                 <input
                                     className={inputCls}
                                     type="number"
@@ -193,7 +193,7 @@ export function Settings(props: { open: boolean; onOpenChange: (v: boolean) => v
                                     onChange={(e) => setConcurrency(e.target.value)}
                                 />
                             </Field>
-                            <Field label="Verify 数" hint="DD_DR_MAX_CLAIMS · 1–80">
+                            <Field label="核验条数" hint="送入「3 票对抗核验」的论断条数上限,按相关性取前 N 条。调大核验更全面,但 LLM 调用更多(每条 ×3 票)。(DD_DR_MAX_CLAIMS · 1–80)">
                                 <input
                                     className={inputCls}
                                     type="number"
