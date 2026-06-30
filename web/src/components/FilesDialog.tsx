@@ -144,7 +144,8 @@ export function FilesPage(props: { campaign: string | null; disease: string | nu
             </div>
 
             <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1">
-                <div className="w-80 shrink-0 overflow-y-auto border-r border-[var(--app-border)]">
+                {/* list pane: full-width on mobile; hidden < lg once a file is open (content takes over) */}
+                <div className={(sel ? 'hidden lg:block' : 'block') + ' w-full shrink-0 overflow-y-auto border-r border-[var(--app-border)] lg:w-80'}>
                     {filtered.length === 0 && <div className="px-4 py-3 text-sm text-[var(--app-hint)]">无文件</div>}
                     {grouped.map(([stage, group]) => (
                         <div key={stage} className="border-b border-[var(--app-border)] last:border-b-0">
@@ -167,9 +168,17 @@ export function FilesPage(props: { campaign: string | null; disease: string | nu
                         </div>
                     ))}
                 </div>
-                <div className="min-w-0 flex-1 overflow-y-auto p-4">
+                {/* content pane: hidden < lg until a file is picked, then full-screen with a back button */}
+                <div className={(sel ? 'flex' : 'hidden lg:flex') + ' min-w-0 flex-1 flex-col overflow-y-auto p-4'}>
                     {sel ? (
                         <>
+                            <button
+                                type="button"
+                                onClick={() => setSel(null)}
+                                className="mb-2 flex items-center gap-1 self-start text-sm text-[var(--app-hint)] hover:text-[var(--app-fg)] lg:hidden"
+                            >
+                                ‹ 返回文件列表
+                            </button>
                             <div className="mb-2 truncate font-mono text-xs text-[var(--app-hint)]">{sel}</div>
                             <CodeBlock code={content || '…'} language={sel.endsWith('.json') ? 'json' : 'text'} maxHeight={100000} scrollY />
                         </>

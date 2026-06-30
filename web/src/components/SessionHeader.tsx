@@ -60,21 +60,21 @@ export function SessionHeader(props: {
     }
 
     return (
-        <header className="sticky top-0 z-10 border-b border-[var(--app-border)] bg-[var(--app-bg)]">
-            <div className="mx-auto flex max-w-content items-center gap-2 px-6 py-3">
+        <header className="sticky top-0 z-10 border-b border-[var(--app-border)] bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
+            <div className="mx-auto flex w-full max-w-content items-center gap-2 p-3">
                 <button type="button" onClick={props.onBack} className={CIRCLE_BTN} title="返回">
                     <BackChevron />
                 </button>
 
                 <div className="min-w-0 flex-1">
                     <div className="truncate font-semibold">{title}</div>
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-[var(--app-hint)]">
-                        <span className="inline-flex items-center gap-1">
+                    {/* single line, no wrap: disease is already in the title; model truncates if long */}
+                    <div className="flex min-w-0 items-center gap-x-3 overflow-hidden text-xs text-[var(--app-hint)]">
+                        <span className="inline-flex shrink-0 items-center gap-1">
                             <span className="inline-flex h-4 items-center rounded bg-[#f59e0b] px-1 text-[9px] font-bold text-white">DD</span>
                             dd-agent
                         </span>
-                        {run.disease && <span>{run.disease}</span>}
-                        {config?.model && <span>model: {config.model}</span>}
+                        {config?.model && <span className="truncate">model: {config.model}</span>}
                     </div>
                 </div>
 

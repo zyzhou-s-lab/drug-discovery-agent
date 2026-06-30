@@ -88,7 +88,9 @@ function NewRunDialog(props: {
                 setError(res.reason || '该输入不是可识别的疾病/适应症,请换一个真实疾病名。')
                 return
             }
-            props.onStart(d)
+            // create the run under the canonical (OpenTargets-aligned) disease name, not the raw
+            // user input — so "t2d" / "阿尔兹海默" display as "type 2 diabetes mellitus" etc.
+            props.onStart(res.normalized_en?.trim() || d)
             props.onOpenChange(false)
         } catch {
             setError('疾病名校验失败,请稍后重试。')
@@ -142,7 +144,8 @@ export function Sidebar(props: {
     onStartRun: (disease: string) => void
     onMutate: (deleted?: string) => void
 }) {
-    const { width, onPointerDown: onResize } = useResizable({ key: 'dd-left-w', def: 320, min: 240, max: 520, side: 'left' })
+    // hapi useSidebarResize params (280/420/600) — faithful replication of upstream
+    const { width, onPointerDown: onResize } = useResizable({ key: 'dd-left-w', def: 420, min: 280, max: 600, side: 'left' })
     const [search, setSearch] = useState('')
     const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
     const [settingsOpen, setSettingsOpen] = useState(false)
@@ -194,8 +197,14 @@ export function Sidebar(props: {
     }
 
     return (
-        <aside style={{ width }} className="relative flex shrink-0 flex-col border-r border-[var(--app-border)]">
-            <div onPointerDown={onResize} className="absolute inset-y-0 -right-0.5 z-20 w-1.5 cursor-col-resize hover:bg-[var(--app-link-muted,rgba(0,0,0,0.12))]" />
+        <aside
+            // hapi mobile mechanism: the list pane is full-width + shown when no run is selected,
+            // and hidden below lg once a run is open (the detail pane takes over). Desktop: resizable
+            // column (width via CSS var so the `w-full` mobile rule and `lg:` desktop rule compose).
+            style={{ ['--dd-sb-w']: `${width}px` } as Record<string, string>}
+            className={`${props.selected ? 'hidden lg:flex' : 'flex'} relative w-full shrink-0 flex-col border-r border-[var(--app-border)] bg-[var(--app-bg)] lg:w-[var(--dd-sb-w)]`}
+        >
+            <div onPointerDown={onResize} className="sidebar-resize-handle absolute inset-y-0 -right-0.5 z-20 hidden w-1.5 cursor-col-resize hover:bg-[var(--app-link-muted,rgba(0,0,0,0.12))] lg:block" />
             <div className="flex items-center justify-between px-3 py-2.5">
                 <div className="text-sm">
                     <span className="font-semibold">药物靶点发现</span>

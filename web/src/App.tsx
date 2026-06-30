@@ -14,6 +14,9 @@ import { FilesPage } from '@/components/FilesDialog'
 
 import { ddaApi, doiRef } from '@/api/dda'
 import { useTheme } from '@/lib/settings'
+import { useIsMobile } from '@/hooks/useIsMobile'
+import { useNavigate, useParams } from '@tanstack/react-router'
+import { useToast } from '@/lib/toast-context'
 import { useCampaigns, useCampaignView, useReport, useStageDetail, useStageEvents } from '@/hooks/useDda'
 import type {
     CampaignStage,
@@ -224,7 +227,7 @@ function ScopeAngles(props: {
                 {props.serverAngles.map((a, i) => (
                     <li key={`s${i}`} className="rounded-lg border border-[var(--app-border)] p-2.5">
                         <div className="text-sm font-medium">{i + 1}. {a.label}</div>
-                        <div className="mt-0.5 break-words font-mono text-xs text-[var(--app-hint)]">{a.query}</div>
+                        <div className="mt-0.5 break-words text-xs text-[var(--app-hint)]">{a.query}</div>
                         {a.rationale && <div className="mt-1 text-xs text-[var(--app-fg)]">{a.rationale}</div>}
                     </li>
                 ))}
@@ -945,21 +948,27 @@ function Bibliography(props: { campaign: string }) {
 
 export function App() {
     useTheme() // apply persisted theme on load
+    const isMobile = useIsMobile() // for the full-screen chat overlay on phones
+    const { addToast } = useToast()
 
     const { campaigns, error: cErr, refetch } = useCampaigns()
-    const [campaign, setCampaign] = useState<string | null>(null)
-    useEffect(() => {
-        if (!campaign && campaigns && campaigns.length > 0) setCampaign(campaigns[0].campaign)
-    }, [campaigns, campaign])
-    // Prune a dangling selection: after a refetch (e.g. a delete) drops the
-    // selected campaign from the list, clear it so its stale UI can't linger.
-    // Without this, the auto-select effect above re-picks the just-deleted run
-    // from the not-yet-refreshed list, leaving it stuck in the center panel.
+    // `campaign` is URL-driven (hapi parity): '/' = index (no run), '/c/$campaign' = detail. Selecting
+    // a run navigates (push), so back/forward, refresh-persist and deep-links work. No auto-open on
+    // index — the list page is the landing, matching hapi's /sessions index.
+    const navigate = useNavigate()
+    const params = useParams({ strict: false }) as { campaign?: string }
+    const campaign = params.campaign ?? null
+    const setCampaign = (c: string | null) => {
+        void (c ? navigate({ to: '/c/$campaign', params: { campaign: c } }) : navigate({ to: '/' }))
+    }
+    // Prune a dangling selection: if the campaign in the URL no longer exists after a refetch
+    // (e.g. a delete), navigate back to the index so stale detail UI can't linger.
     useEffect(() => {
         if (campaign && campaigns && !campaigns.some((c) => c.campaign === campaign)) {
             setSelected(null)
             setCampaign(null)
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [campaigns, campaign])
 
     const { view, error: vErr } = useCampaignView(campaign)
@@ -1034,12 +1043,15 @@ export function App() {
                 setSelected(null)
                 setCampaign(id)
                 refetch()
+                addToast({ title: '已新建运行', body: disease })
             })
-            .catch(() => {})
+            .catch(() => addToast({ title: '新建运行失败', body: '请稍后重试' }))
     }
 
     return (
-        <div className="flex h-screen w-full overflow-hidden" style={{ background: 'var(--app-bg)', color: 'var(--app-fg)' }}>
+        <div className="flex h-dvh w-full overflow-hidden" style={{ background: 'var(--app-bg)', color: 'var(--app-fg)' }}>
+            {/* List pane (hapi mechanism): full-width on mobile when no run; hidden < lg once a run
+                is open. Self-managed inside Sidebar via its `selected` prop. */}
             <Sidebar
                 campaigns={campaigns}
                 apiDown={apiDown}
@@ -1052,7 +1064,8 @@ export function App() {
                 onMutate={handleMutate}
             />
 
-            <main className="flex-1 overflow-y-auto">
+            {/* Detail pane: hidden < lg when no run (the list shows), shown once a run is open. */}
+            <main className={`${campaign ? 'flex' : 'hidden lg:flex'} min-w-0 flex-1 flex-col overflow-y-auto`}>
                 {selectedRun && (
                     <SessionHeader
                         run={selectedRun}
@@ -1066,7 +1079,7 @@ export function App() {
                     />
                 )}
 
-                <div id="dd-main" className="mx-auto flex max-w-content flex-col gap-5 p-6">
+                <div id="dd-main" className="mx-auto flex w-full max-w-content flex-col gap-5 p-4 lg:p-6">
                     {!campaign && (
                         <Card className="p-6 text-sm text-[var(--app-hint)]">
                             从左侧选择一个运行,或点右上 ＋ 新建一个疾病项目并运行。
@@ -1118,15 +1131,18 @@ export function App() {
             </main>
 
             {chatOpen && campaign && (
-                <ChatPanel
-                    key={`${campaign}-${report?.status.run ?? 'scope'}`}
-                    campaign={campaign}
-                    run={report?.status.run}
-                    onClose={() => setChatOpen(false)}
-                    attachments={pendingRefs}
-                    onRemoveAttachment={(i) => setPendingRefs((p) => p.filter((_, j) => j !== i))}
-                    onClearAttachments={() => setPendingRefs([])}
-                />
+                <div className={isMobile ? 'fixed inset-0 z-50 flex bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]' : 'contents'}>
+                    <ChatPanel
+                        mobile={isMobile}
+                        key={`${campaign}-${report?.status.run ?? 'scope'}`}
+                        campaign={campaign}
+                        run={report?.status.run}
+                        onClose={() => setChatOpen(false)}
+                        attachments={pendingRefs}
+                        onRemoveAttachment={(i) => setPendingRefs((p) => p.filter((_, j) => j !== i))}
+                        onClearAttachments={() => setPendingRefs([])}
+                    />
+                </div>
             )}
 
             <SelectionPopup onAdd={addRef} />
