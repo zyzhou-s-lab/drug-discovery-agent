@@ -3,7 +3,7 @@
 // MCP (3b), the pure logic (core: dedupResults/rankClaims/survives), the zod schemas (3b), and
 // paperfetch.citeByDoi (2b). Prompts are verbatim from the Python. research() accepts an injected
 // runAgent for offline orchestration tests. See docs/bun-migration-eval.md Phase 3.
-import { Budget, clampInt, MAX_FETCH, MAX_VERIFY_CLAIMS, CONF_RANK, dedupResults, normUrl, rankClaims, type SearchResult, survives, VOTES_PER_CLAIM, REFUTATIONS_REQUIRED, MAX_DB_RAW } from "./core";
+import { Budget, clampInt, IMP_RANK, lexicalClusters, MAX_FETCH, MAX_VERIFY_CLAIMS, CONF_RANK, dedupResults, normUrl, QUAL_RANK, rankClaims, type SearchResult, survives, VOTES_PER_CLAIM, REFUTATIONS_REQUIRED, MAX_DB_RAW } from "./core";
 import { makeLitMcp } from "./litmcp";
 import { CircuitBreaker, type OnMessage, runAgent as realRunAgent, type RunAgentOpts, Semaphore, type ToolResult } from "./orchestrate";
 import { AngleFindingSchema, ExtractSchema, MergeSchema, SearchSchema, VerdictSubmitSchema } from "./schemas";
@@ -241,6 +241,41 @@ export type RunAgentFn = (
   budget: Budget, sem: Semaphore, opts?: RunAgentOpts,
 ) => Promise<[Record<string, unknown> | null, ToolResult[]]>;
 
+/** Pre-verify claim dedup (Stage A, lexical / lossless): collapse near-duplicate claims (the same
+ * assertion surfacing under different angles/sources) so each fact is verified once instead of N×3.
+ * Representative = the cluster's highest-importance, best-quality member; it carries `mergedRefs`
+ * (every member's source) for provenance. Lossless: the bibliography reads allSources (unchanged)
+ * and db records are preserved separately, so no source/evidence is dropped — only the verify set
+ * shrinks. Toggle DD_DR_DEDUP=off; threshold DD_DR_DEDUP_SIM (default 0.85). */
+function dedupeClaims(claims: any[]): { deduped: any[]; clusters: any[] } {
+  if (process.env.DD_DR_DEDUP === "off" || claims.length < 2) return { deduped: claims, clusters: [] };
+  const simRaw = parseFloat(process.env.DD_DR_DEDUP_SIM ?? "0.85");
+  const sim = Number.isFinite(simRaw) ? simRaw : 0.85;
+  const groups = lexicalClusters(claims.map((c) => String(c?.claim ?? "")), sim);
+  const deduped: any[] = [];
+  const clusters: any[] = [];
+  for (const g of groups) {
+    if (g.length < 2) {
+      deduped.push(claims[g[0] as number]);
+      continue;
+    }
+    // representative: highest importance, then best source quality
+    const ordered = [...g].sort(
+      (a, b) =>
+        (IMP_RANK[claims[a]?.importance ?? ""] ?? 3) - (IMP_RANK[claims[b]?.importance ?? ""] ?? 3) ||
+        (QUAL_RANK[claims[a]?.sourceQuality ?? ""] ?? 5) - (QUAL_RANK[claims[b]?.sourceQuality ?? ""] ?? 5),
+    );
+    const rep = claims[ordered[0] as number];
+    const mergedRefs = ordered.map((i) => ({ source: claims[i]?.sourceUrl, doi: claims[i]?.doi, angle: claims[i]?.angle }));
+    deduped.push({ ...rep, mergedRefs });
+    clusters.push({
+      representative: rep?.claim,
+      members: ordered.map((i) => ({ claim: claims[i]?.claim, source: claims[i]?.sourceUrl, angle: claims[i]?.angle })),
+    });
+  }
+  return { deduped, clusters };
+}
+
 export interface ResearchOpts {
   budget?: Budget;
   sem?: Semaphore;
@@ -389,8 +424,15 @@ export async function research(question: string, angles: Angle[], opts: Research
   const allSources = perAngle.flat();
   const allClaims = allSources.flatMap((s) => s.claims);
   const dbFacts = allClaims.filter((c) => c.source_type === "database");
-  const ranked = rankClaims(allClaims, maxVerifyClaims);
-  ev("fetch", "抓取 " + allSources.length + " 源 → " + allClaims.length + " claims(数据库记录 " + dbFacts.length + ",数据保留)→ 验证前 " + ranked.length);
+  // pre-verify dedup: collapse near-duplicate claims so each fact is verified once (lossless — see
+  // dedupeClaims). Persisted for audit; db records + bibliography are unaffected (use allClaims/allSources).
+  const { deduped, clusters } = dedupeClaims(allClaims);
+  if (clusters.length) {
+    ev("fetch", "去重:" + allClaims.length + " → " + deduped.length + " claims(合并 " + clusters.length + " 簇,每簇仅验一次)");
+    doPersistStep("03b_dedup", "clusters", { before: allClaims.length, after: deduped.length, merged: clusters.length, clusters });
+  }
+  const ranked = rankClaims(deduped, maxVerifyClaims);
+  ev("fetch", "抓取 " + allSources.length + " 源 → " + allClaims.length + " claims(数据库 " + dbFacts.length + " 保留;去重后 " + deduped.length + ")→ 验证前 " + ranked.length);
 
   const statsBase = {
     angles: angles.length, sources: allSources.length, claims: allClaims.length,
