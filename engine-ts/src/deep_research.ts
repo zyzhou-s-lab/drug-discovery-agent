@@ -3,7 +3,7 @@
 // MCP (3b), the pure logic (core: dedupResults/rankClaims/survives), the zod schemas (3b), and
 // paperfetch.citeByDoi (2b). Prompts are verbatim from the Python. research() accepts an injected
 // runAgent for offline orchestration tests. See docs/bun-migration-eval.md Phase 3.
-import { Budget, MAX_FETCH, MAX_VERIFY_CLAIMS, CONF_RANK, dedupResults, normUrl, rankClaims, type SearchResult, survives, VOTES_PER_CLAIM, REFUTATIONS_REQUIRED, MAX_DB_RAW } from "./core";
+import { Budget, clampInt, MAX_FETCH, MAX_VERIFY_CLAIMS, CONF_RANK, dedupResults, normUrl, rankClaims, type SearchResult, survives, VOTES_PER_CLAIM, REFUTATIONS_REQUIRED, MAX_DB_RAW } from "./core";
 import { makeLitMcp } from "./litmcp";
 import { CircuitBreaker, type OnMessage, runAgent as realRunAgent, type RunAgentOpts, Semaphore, type ToolResult } from "./orchestrate";
 import { AngleFindingSchema, ExtractSchema, MergeSchema, SearchSchema, VerdictSubmitSchema } from "./schemas";
@@ -261,8 +261,10 @@ export interface ResearchOpts {
 export async function research(question: string, angles: Angle[], opts: ResearchOpts = {}): Promise<Record<string, any>> {
   const budget = opts.budget ?? new Budget();
   const sem = opts.sem ?? new Semaphore(parseInt(process.env.DD_DR_CONC ?? "6", 10));
-  const fetchBudget = opts.fetchBudget ?? MAX_FETCH;
-  const maxVerifyClaims = opts.maxVerifyClaims ?? MAX_VERIFY_CLAIMS;
+  // read the workload caps live (like DD_DR_CONC above) so the Settings UI / settings.json take
+  // effect on the NEXT run without an engine restart; the core constants are the defaults.
+  const fetchBudget = opts.fetchBudget ?? clampInt(process.env.DD_DR_MAX_FETCH, MAX_FETCH, 1, 100);
+  const maxVerifyClaims = opts.maxVerifyClaims ?? clampInt(process.env.DD_DR_MAX_CLAIMS, MAX_VERIFY_CLAIMS, 1, 80);
   const runAgent: RunAgentFn = opts.runAgent ?? realRunAgent;
   // stop predicate seen by every agent: a user stop OR the circuit breaker tripping (sustained
   // rate-limit) — so a dead provider auto-pauses the run instead of grinding every agent to failure.

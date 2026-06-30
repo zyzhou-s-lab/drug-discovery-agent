@@ -4,10 +4,21 @@
 // Python unit tests (see core.test.ts, mirrors tests/test_deep_research.py). See
 // docs/bun-migration-eval.md Phase 1.
 
-export const VOTES_PER_CLAIM = 3;
-export const REFUTATIONS_REQUIRED = 2;
-export const MAX_FETCH = 15;
-export const MAX_VERIFY_CLAIMS = 25;
+/** Read an int from env, clamped to [lo,hi]; falls back to `def` on missing/garbage. Lets the
+ * deep-research workload knobs be tuned via env / settings.json (DD_DR_*) instead of being hardcoded
+ * — they are the dominant drivers of how many agent sessions a run spawns. */
+export function clampInt(raw: string | undefined, def: number, lo: number, hi: number): number {
+  const n = parseInt(raw ?? "", 10);
+  return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : def;
+}
+
+// Workload knobs (defaults preserve prior behavior). Boot-time (env read at startup);
+// DD_DR_MAX_CLAIMS / DD_DR_MAX_FETCH are ALSO read live inside research() so the Settings UI takes
+// effect on the next run without a restart. DD_DR_VOTES / DD_DR_REFUTE need an engine restart.
+export const VOTES_PER_CLAIM = clampInt(process.env.DD_DR_VOTES, 3, 1, 5);
+export const REFUTATIONS_REQUIRED = clampInt(process.env.DD_DR_REFUTE, Math.ceil(VOTES_PER_CLAIM / 2), 1, VOTES_PER_CLAIM);
+export const MAX_FETCH = clampInt(process.env.DD_DR_MAX_FETCH, 15, 1, 100);
+export const MAX_VERIFY_CLAIMS = clampInt(process.env.DD_DR_MAX_CLAIMS, 25, 1, 80);
 export const MAX_DB_RAW = 80_000;
 
 export const REL_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
