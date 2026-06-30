@@ -12,6 +12,7 @@
     },
     "dependencies": {
         "@radix-ui/react-dialog": "^1.1.15",
+        "@tanstack/react-router": "^1.170.8",
         "@radix-ui/react-slot": "^1.2.4",
         "@shikijs/langs": "^3.20.0",
         "@shikijs/themes": "^3.20.0",

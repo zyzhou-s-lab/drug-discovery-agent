@@ -15,6 +15,7 @@ import { FilesPage } from '@/components/FilesDialog'
 import { ddaApi, doiRef } from '@/api/dda'
 import { useTheme } from '@/lib/settings'
 import { useIsMobile } from '@/hooks/useIsMobile'
+import { useNavigate, useParams } from '@tanstack/react-router'
 import { useCampaigns, useCampaignView, useReport, useStageDetail, useStageEvents } from '@/hooks/useDda'
 import type {
     CampaignStage,
@@ -949,19 +950,23 @@ export function App() {
     const isMobile = useIsMobile() // for the full-screen chat overlay on phones
 
     const { campaigns, error: cErr, refetch } = useCampaigns()
-    const [campaign, setCampaign] = useState<string | null>(null)
-    useEffect(() => {
-        if (!campaign && campaigns && campaigns.length > 0) setCampaign(campaigns[0].campaign)
-    }, [campaigns, campaign])
-    // Prune a dangling selection: after a refetch (e.g. a delete) drops the
-    // selected campaign from the list, clear it so its stale UI can't linger.
-    // Without this, the auto-select effect above re-picks the just-deleted run
-    // from the not-yet-refreshed list, leaving it stuck in the center panel.
+    // `campaign` is URL-driven (hapi parity): '/' = index (no run), '/c/$campaign' = detail. Selecting
+    // a run navigates (push), so back/forward, refresh-persist and deep-links work. No auto-open on
+    // index — the list page is the landing, matching hapi's /sessions index.
+    const navigate = useNavigate()
+    const params = useParams({ strict: false }) as { campaign?: string }
+    const campaign = params.campaign ?? null
+    const setCampaign = (c: string | null) => {
+        void (c ? navigate({ to: '/c/$campaign', params: { campaign: c } }) : navigate({ to: '/' }))
+    }
+    // Prune a dangling selection: if the campaign in the URL no longer exists after a refetch
+    // (e.g. a delete), navigate back to the index so stale detail UI can't linger.
     useEffect(() => {
         if (campaign && campaigns && !campaigns.some((c) => c.campaign === campaign)) {
             setSelected(null)
             setCampaign(null)
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [campaigns, campaign])
 
     const { view, error: vErr } = useCampaignView(campaign)
