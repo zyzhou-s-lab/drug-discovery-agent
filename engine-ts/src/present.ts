@@ -5,9 +5,11 @@ import { completeText } from "./llm";
 
 const PRESENT_SYSTEM =
   "你是资深研究报告编辑。把用户给出的【已通过对抗式验证的结构化深度研究结果】整理、撰写成一份" +
-  "详实、专业、可读性强的中文 Markdown 报告(不是清单,要有充分的叙述展开):\n" +
-  "1) **按研究角度分节**:数据中每个「研究角度」对应报告的一个独立章节(二级标题)。" +
-  "必须按照数据中给出的角度顺序和名称逐一撰写,每个角度一节,不多不少。" +
+  "详实、专业、可读性强的中文 Markdown《研究报告》(不是清单,要有充分的叙述展开):\n" +
+  "1) **正文是对每个研究角度(即前期 Scope 阶段提出的研究问题)的逐个作答**:数据中每个「研究角度」" +
+  "对应报告的一个独立章节,二级标题写成「N. 角度名」(N 从 1 开始按数据顺序递增),必须按数据给出的" +
+  "角度顺序和名称逐一撰写,每个角度一节,不多不少。每节要正面回答该角度的研究问题。" +
+  "**不要写「执行摘要 / 研究概览 / 总述」这类跨角度的开头段落**——直接从第 1 个角度开始逐个回答。" +
   "可表格化的内容(分类/映射/亚型/基因-表型对应等)用 Markdown 表格呈现。" +
   "**表格必须列出数据中出现的每一条目,禁止用省略号(…/...)或'等'省略任何行——宁可表长也要完整。**\n" +
   "2) 每条发现都【展开成完整段落】,充分利用给定的「详细证据」,解释其含义、机制及对药物靶点发现的意义," +
@@ -41,7 +43,9 @@ function cite(f: any, refs: any[]): string {
 export function buildDigest(report: any, angles?: { label: string }[]): string {
   const findings: any[] = report.findings ?? [];
   const refs: any[] = report.references ?? [];
-  const parts: string[] = [`## 执行摘要\n${report.summary ?? ""}`];
+  // #? report format: no cross-angle executive summary — the body is a per-angle Q&A keyed to the
+  // Scope-phase research angles (each angle == a research question, answered in order).
+  const parts: string[] = [];
 
   // group findings by angle (the field if present, else positional fallback to the angles list)
   const angleLabels = (angles ?? []).map((a) => a.label);
@@ -53,8 +57,10 @@ export function buildDigest(report: any, angles?: { label: string }[]): string {
     arr.push(f);
     groups.set(a, arr);
   });
+  let n = 0;
   for (const [angle, fs] of groups) {
-    parts.push(`\n## 研究角度: ${angle}`);
+    n++;
+    parts.push(`\n## [${n}] 研究角度(问题): ${angle}`);
     fs.forEach((f, i) => {
       parts.push(`${i + 1}. [${f.confidence}] ${f.claim}${cite(f, refs)}` + (f.evidence ? `\n   详细证据: ${f.evidence}` : ""));
     });
