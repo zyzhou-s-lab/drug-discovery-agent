@@ -197,7 +197,7 @@ function ScopeAngles(props: {
     serverAngles: ScopeAngle[]
     spentTokens?: number
     onSearch?: (angles: ScopeAngle[]) => void
-    searchState?: 'none' | 'running' | 'stopping' | 'stopped' | 'done' | 'error'
+    searchState?: 'none' | 'running' | 'stopping' | 'stopped' | 'done' | 'paused' | 'error'
 }) {
     const [extra, setExtra] = useState<string[]>([])
     const [draft, setDraft] = useState('')
@@ -296,6 +296,7 @@ function PhasesPanel(props: {
         props.status === 'done' ? '完成'
         : props.status === 'stopped' ? '已停止'
         : props.status === 'stopping' ? '停止中'
+        : props.status === 'paused' ? '已暂停'
         : props.status === 'error' ? '失败'
         : '进行中'
     // #2: auto-open the first phase (检索) so its agent cards show on arrival
@@ -745,7 +746,7 @@ function DeepResearchPage(props: { campaign: string; report: ReportResponse | nu
 function DeepResearchBody(props: { campaign: string; report: ReportResponse | null }) {
     const { events } = useStageEvents(props.campaign, 'deep-research')
     const state = props.report?.status.state ?? 'none'
-    const terminal = state === 'done' || state === 'stopped' || state === 'error'
+    const terminal = state === 'done' || state === 'stopped' || state === 'error' || state === 'paused'
     return (
         <>
             <PhasesPanel events={events} status={state} terminal={terminal} />
@@ -760,6 +761,11 @@ function DeepResearchBody(props: { campaign: string; report: ReportResponse | nu
                     检索失败:{props.report?.status.error}
                 </Card>
             )}
+            {state === 'paused' && (
+                <Card className="p-4 text-sm text-[var(--app-git-unstaged-color,#FF9500)]">
+                    已暂停(provider 限流/配额耗尽,可稍后「重新研究」续跑){props.report?.status.reason ? `:${props.report.status.reason}` : ''}
+                </Card>
+            )}
             {/* report now lives in the Claim tab, not inline under progress */}
             {events.length === 0 && state === 'running' && (
                 <Card className="p-4 text-sm text-[var(--app-hint)]">研究启动中,各 agent 会话稍候出现…</Card>
@@ -771,7 +777,7 @@ function DeepResearchBody(props: { campaign: string; report: ReportResponse | nu
 function StageDetail(props: {
     campaign: string
     stage: string
-    searchState?: 'none' | 'running' | 'stopping' | 'stopped' | 'done' | 'error'
+    searchState?: 'none' | 'running' | 'stopping' | 'stopped' | 'done' | 'paused' | 'error'
     onSearch?: (angles: ScopeAngle[]) => void
 }) {
     const { detail, loading } = useStageDetail(props.campaign, props.stage)
@@ -1103,6 +1109,7 @@ export function App() {
                                               : searchState === 'stopping' ? '停止中'
                                               : searchState === 'stopped' ? '已停止'
                                               : searchState === 'done' ? '完成'
+                                              : searchState === 'paused' ? '已暂停'
                                               : '失败',
                                       }]
                                     : []),
