@@ -406,14 +406,40 @@ function DeepReportView(props: { report: DeepReport }) {
             {/* fallback: the narrative is best-effort and silently yields "" on MiMo 429/overload
                 (api.py _present_report). When it's missing, the structured fields are still computed —
                 render summary / caveats / openQuestions so the report isn't a near-blank page. */}
-            {!r.narrative && (r.summary || r.caveats || (r.openQuestions?.length ?? 0) > 0) && (
+            {!r.narrative && ((r.findings?.length ?? 0) > 0 || r.summary || r.caveats || (r.openQuestions?.length ?? 0) > 0) && (
                 <Card className="flex flex-col gap-3 p-5">
-                    {r.summary && (
+                    {(r.findings?.length ?? 0) > 0 ? (
+                        <div className="flex flex-col gap-3">
+                            <div className="text-sm font-medium">研究报告</div>
+                            {(() => {
+                                // per-angle Q&A: group findings by angle (positional fallback), numbered in order
+                                const groups: { angle: string; items: typeof r.findings }[] = []
+                                r.findings.forEach((f) => {
+                                    const a = f.angle || '未分类'
+                                    const g = groups.find((x) => x.angle === a)
+                                    if (g) g.items.push(f); else groups.push({ angle: a, items: [f] })
+                                })
+                                return groups.map((g, gi) => (
+                                    <div key={gi}>
+                                        <div className="mb-1 text-sm font-medium">{gi + 1}. {g.angle}</div>
+                                        <ul className="flex list-disc flex-col gap-1 pl-5 text-sm">
+                                            {g.items.map((f, i) => (
+                                                <li key={i}>
+                                                    <span className="text-[var(--app-hint)]">[{f.confidence}]</span> {f.claim}
+                                                    {f.evidence ? <span className="text-[var(--app-hint)]"> — {f.evidence}</span> : null}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                ))
+                            })()}
+                        </div>
+                    ) : r.summary ? (
                         <div>
-                            <div className="mb-1 text-sm font-medium">摘要</div>
+                            <div className="mb-1 text-sm font-medium">研究报告</div>
                             <Markdown text={r.summary} />
                         </div>
-                    )}
+                    ) : null}
                     {r.caveats && (
                         <div>
                             <div className="mb-1 text-sm font-medium">注意事项</div>
