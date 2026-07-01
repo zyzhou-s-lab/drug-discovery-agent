@@ -171,9 +171,10 @@ export interface DeepReport {
 export interface ReportResponse {
     campaign: string
     status: {
-        state: 'none' | 'running' | 'stopping' | 'stopped' | 'done' | 'error'
+        state: 'none' | 'running' | 'stopping' | 'stopped' | 'done' | 'paused' | 'error'
         stats?: Record<string, number>
         error?: string
+        reason?: string // why it auto-paused (provider rate-limit / quota)
         run?: number // changes per (re)start so the frontend resets its event view
     }
     report: DeepReport | null
