@@ -242,6 +242,20 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
   const pipelineFn = opts.pipelineFn ?? runPipeline;
   const app = new Hono();
 
+  // BUG-R1: match the FastAPI backend's error shape. Routes here return {error: "..."} but the
+  // web client (web/src/api/dda.ts) reads `.detail` (FastAPI's shape), so backend error messages
+  // silently vanished in the UI when running on this engine. Mirror `error` → `detail` on every
+  // JSON error response so both backends present an identical contract. See error-shape.test.ts.
+  app.use("*", async (c, next) => {
+    await next();
+    const res = c.res;
+    if (res.status < 400 || !res.headers.get("content-type")?.includes("application/json")) return;
+    const body = (await res.clone().json().catch(() => null)) as Record<string, unknown> | null;
+    if (!body || typeof body !== "object" || "detail" in body || !("error" in body)) return;
+    const headers = new Headers(res.headers);
+    c.res = new Response(JSON.stringify({ ...body, detail: body.error }), { status: res.status, headers });
+  });
+
   app.get("/api/health", (c) => c.json({ ok: true })); // don't leak internal db/artifacts paths
 
   app.get("/api/pipeline", (c) => c.json({ stages: PIPELINE }));
