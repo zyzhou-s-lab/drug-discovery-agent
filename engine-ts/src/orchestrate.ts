@@ -177,6 +177,17 @@ export async function runAgent(
   const model = modelOpt ?? process.env.DD_DR_MODEL; // opts.model (e.g. intake) wins over DD_DR_MODEL
   if (model) options.model = model;
   if (envOver) options.env = { ...process.env, ...envOver };
+  // WebFetch's "preflight" is a domain safety/blocklist check that calls back to claude.ai. On a
+  // third-party Anthropic-compatible gateway (e.g. Kimi) that callback can't complete, so the
+  // preflight aborts EVERY WebFetch before it fetches anything ("Unable to verify if domain X is safe
+  // to fetch. This may be due to network restrictions or enterprise security policies blocking
+  // claude.ai."). The host CAN reach those domains directly, so skipping the preflight lets WebFetch
+  // do the real fetch. Inline `settings` applies even under settingSources:[] isolation. Opt out:
+  // DD_SKIP_WEBFETCH_PREFLIGHT=0.
+  if (process.env.DD_SKIP_WEBFETCH_PREFLIGHT !== "0") {
+    const prev = typeof options.settings === "object" && options.settings ? options.settings : {};
+    options.settings = { ...prev, skipWebFetchPreflight: true };
+  }
 
   const maxNudges = parseInt(process.env.DD_DR_NUDGE || "2", 10);
   const nudge = `You did not call \`${submitName}\`. You MUST call \`${submitName}\` to return your answer — the tool input IS your answer, in the required schema. Call it now.`;
