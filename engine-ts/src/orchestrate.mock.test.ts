@@ -6,15 +6,16 @@ import { z } from "zod";
 
 // scenario drives the mocked `query`; the mock invokes the real submit handler (from the in-process
 // MCP server runAgent builds) to simulate the agent calling submit_*.
-const scenario: { mode: "submit" | "transient" | "nontransient" | "nosubmit" | "nudge"; calls: number } = { mode: "submit", calls: 0 };
+const scenario: { mode: "submit" | "transient" | "ratelimit" | "nontransient" | "nosubmit" | "nudge"; calls: number } = { mode: "submit", calls: 0 };
 
 // restore the knobs the tests poke so they don't leak across tests/files
+const KNOBS = ["DD_DR_RETRY", "DD_DR_NUDGE", "DD_DR_RATE_RETRY", "DD_DR_RATE_BACKOFF_MS", "DD_DR_RATE_BACKOFF_CAP_MS"];
 const ORIG: Record<string, string | undefined> = {};
 beforeAll(() => {
-  for (const k of ["DD_DR_RETRY", "DD_DR_NUDGE"]) ORIG[k] = process.env[k];
+  for (const k of KNOBS) ORIG[k] = process.env[k];
 });
 afterEach(() => {
-  for (const k of ["DD_DR_RETRY", "DD_DR_NUDGE"]) {
+  for (const k of KNOBS) {
     if (ORIG[k] === undefined) delete process.env[k];
     else process.env[k] = ORIG[k];
   }
@@ -33,7 +34,9 @@ mock.module("@anthropic-ai/claude-agent-sdk", () => ({
         yield { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "recorded", is_error: false }] } };
         yield { type: "result", is_error: false, usage: { input_tokens: 10, output_tokens: 5 }, total_cost_usd: 0 };
       } else if (scenario.mode === "transient") {
-        throw new Error("HTTP 429 too many requests");
+        throw new Error("HTTP 503 service unavailable"); // transient (5xx) but NOT rate-limit → short backoff
+      } else if (scenario.mode === "ratelimit") {
+        throw new Error("HTTP 429 too many requests"); // rate-limit → longer rate-backoff path
       } else if (scenario.mode === "nontransient") {
         throw new TypeError("bad input"); // no transient marker → must not retry
       } else if (scenario.mode === "nudge") {
@@ -69,14 +72,26 @@ test("runAgent returns the submitted args + accounts budget + captures tool resu
   expect(scenario.calls).toBe(1);
 });
 
-test("runAgent retries transient errors then salvages to [null, []]", async () => {
+test("runAgent retries transient (5xx) errors then salvages to [null, []]", async () => {
   scenario.mode = "transient";
   scenario.calls = 0;
   process.env.DD_DR_RETRY = "2";
   const [res, tools] = await runAgent("test", "p", "submit_result", schema, {}, new Budget(), new Semaphore(1), {});
   expect(res).toBe(null);
   expect(tools).toEqual([]);
-  expect(scenario.calls).toBe(3); // initial + 2 retries
+  expect(scenario.calls).toBe(3); // initial + 2 (short-backoff) retries
+});
+
+test("runAgent retries a rate-limit (429/403 频限) on the longer rate path, then salvages", async () => {
+  scenario.mode = "ratelimit";
+  scenario.calls = 0;
+  process.env.DD_DR_RATE_RETRY = "3";
+  process.env.DD_DR_RATE_BACKOFF_MS = "5"; // tiny backoff so the test is fast
+  process.env.DD_DR_RATE_BACKOFF_CAP_MS = "5";
+  const [res, tools] = await runAgent("test", "p", "submit_result", schema, {}, new Budget(), new Semaphore(1), {});
+  expect(res).toBe(null);
+  expect(tools).toEqual([]);
+  expect(scenario.calls).toBe(4); // initial + 3 rate retries (independent of DD_DR_RETRY)
 });
 
 test("runAgent does NOT retry a non-transient error (logs + salvages once)", async () => {

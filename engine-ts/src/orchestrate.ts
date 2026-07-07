@@ -192,6 +192,16 @@ export async function runAgent(
   const maxNudges = parseInt(process.env.DD_DR_NUDGE || "2", 10);
   const nudge = `You did not call \`${submitName}\`. You MUST call \`${submitName}\` to return your answer — the tool input IS your answer, in the required schema. Call it now.`;
   const maxRetries = parseInt(process.env.DD_DR_RETRY || "2", 10);
+  // Rate-limit (429 / 403 频限 / quota) gets its OWN, longer backoff + more attempts than a generic
+  // transient error (5xx/socket): on a shared Anthropic-compatible gateway (e.g. Kimi) a frequency
+  // limit is a ROLLING WINDOW that recovers in minutes, so the 1-4s transient backoff can't ride it
+  // out — the run would trip the breaker mid-flight and abstain a swath of votes. Backing off tens of
+  // seconds lets the agent wait the window out and SUCCEED; the breaker then only trips on a TRULY
+  // sustained limit (all rate retries spent). Tunable via DD_DR_RATE_*.
+  const rateRetries = parseInt(process.env.DD_DR_RATE_RETRY || "4", 10);
+  const rateBackoffBase = parseInt(process.env.DD_DR_RATE_BACKOFF_MS || "15000", 10);
+  const rateBackoffCap = parseInt(process.env.DD_DR_RATE_BACKOFF_CAP_MS || "60000", 10);
+  const lastAttempt = Math.max(maxRetries, rateRetries); // loop far enough for the slower rate path
 
   const toolUses = new Map<string, string>();
   let toolResults: ToolResult[] = [];
@@ -199,8 +209,9 @@ export async function runAgent(
   await sem.acquire();
   try {
     onMessage?.({ __dd_prompt__: prompt });
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    for (let attempt = 0; attempt <= lastAttempt; attempt++) {
       let transient = false;
+      let rateLimited = false; // this attempt hit a 429/403/quota (rolling-window) limit → long backoff
       toolUses.clear();
       toolResults = [];
       const input = new InputStream();
@@ -224,7 +235,7 @@ export async function runAgent(
               lastErrMsg = String(msg.result ?? "");
               const low = lastErrMsg.toLowerCase();
               if (TRANSIENT.some((m) => low.includes(m))) transient = true;
-              if (RATELIMIT.some((m) => low.includes(m))) rateLimitMsg = lastErrMsg;
+              if (RATELIMIT.some((m) => low.includes(m))) { rateLimitMsg = lastErrMsg; rateLimited = true; }
             }
             // turn boundary: submitted → done; else nudge (bounded) or close
             if (cap.v != null) { input.close(); break; }
@@ -239,12 +250,22 @@ export async function runAgent(
         // instead of looping maxRetries times in silence. Not rethrown (would crash the run vs salvage).
         const m = String(err instanceof Error ? err.message : err).toLowerCase();
         lastErrMsg = m;
-        if (RATELIMIT.some((x) => m.includes(x))) rateLimitMsg = m;
+        if (RATELIMIT.some((x) => m.includes(x))) { rateLimitMsg = m; rateLimited = true; }
         transient = TRANSIENT.some((x) => m.includes(x));
         if (!transient) console.warn(`[runAgent ${phase}] non-transient error: ${m.slice(0, 200)}`);
       }
       if (cap.v != null) return [cap.v, toolResults];
-      if (attempt < maxRetries && transient && !(shouldStop && shouldStop()) && !budget.exhausted()) {
+      const stop = (shouldStop && shouldStop()) || budget.exhausted();
+      // rate-limit takes precedence (429 is in BOTH lists): long escalating backoff, more attempts —
+      // ride out the gateway's rolling frequency window so the agent succeeds instead of abstaining.
+      if (rateLimited && attempt < rateRetries && !stop) {
+        const wait = Math.min(rateBackoffBase * 2 ** attempt, rateBackoffCap) + Math.random() * Math.min(rateBackoffBase, 2000);
+        console.warn(`[runAgent ${phase}] rate-limited (attempt ${attempt + 1}/${rateRetries + 1}) — backing off ${Math.round(wait / 1000)}s`);
+        await new Promise((r) => setTimeout(r, wait));
+        continue;
+      }
+      // generic transient (5xx/socket): short backoff, few attempts
+      if (transient && attempt < maxRetries && !stop) {
         await new Promise((r) => setTimeout(r, (2 ** attempt) * 1000 + Math.random() * 1000));
         continue;
       }
