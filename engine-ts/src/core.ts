@@ -154,9 +154,12 @@ export function rankClaims(claims: Claim[], limit = MAX_VERIFY_CLAIMS): Claim[] 
     if (ia !== ib) return ia - ib;
     return (QUAL_RANK[a.sourceQuality ?? ""] ?? 5) - (QUAL_RANK[b.sourceQuality ?? ""] ?? 5);
   });
-  const nCp = claims.filter((c) => c.importance === "central" && c.sourceQuality === "primary").length;
-  const cap = Math.min(Math.max(nCp, limit), 80);
-  return ranked.slice(0, cap);
+  // `limit` (DD_DR_MAX_CLAIMS / the "核验条数" setting) is a hard CEILING on how many claims go to
+  // verify: keep the top-ranked (most central + primary) and DROP the tail. It was a floor
+  // (max(nCp, limit)) — so a corpus with many central/primary claims always verified up to 80 no matter
+  // the knob, and each claim costs VOTES_PER_CLAIM agent calls. Capping here is the main lever to fit a
+  // run under a metered gateway's request-window budget. 80 = absolute safety max.
+  return ranked.slice(0, Math.min(limit, 80));
 }
 
 export interface Verdict {

@@ -75,11 +75,12 @@ test("rankClaims importance then quality", () => {
   expect(rankClaims(claims).map((c) => c.claim)).toEqual(["c3", "c2", "c1"]);
 });
 
-test("rankClaims caps at the 80 ceiling", () => {
+test("rankClaims: limit is a hard ceiling (top-ranked kept, tail dropped); 80 is the safety max", () => {
   const claims: Claim[] = Array.from({ length: 90 }, (_, i) => ({
     claim: `c${i}`, importance: "central", sourceQuality: "primary",
   }));
-  expect(rankClaims(claims).length).toBe(80);
+  expect(rankClaims(claims, 12).length).toBe(12); // ceiling — NOT a floor of 90 central/primary
+  expect(rankClaims(claims, 200).length).toBe(80); // absolute safety max still applies
 });
 
 test("survives needs quorum and few refutes", () => {
