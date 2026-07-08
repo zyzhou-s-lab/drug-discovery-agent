@@ -1,6 +1,7 @@
 import ReactMarkdown from 'react-markdown'
 import rehypeRaw from 'rehype-raw'
 import remarkGfm from 'remark-gfm'
+import type { ReactNode } from 'react'
 
 // Lightweight markdown for chat answers (headers / bold / lists / code / links / tables).
 // Styled via Tailwind arbitrary selectors (no typography plugin needed).
@@ -22,7 +23,27 @@ const MD_CLASS =
     // citation superscripts (<sup>n</sup>): larger + colored so they read as references, not tiny glyphs
     '[&_sup]:text-[0.8em] [&_sup]:font-semibold [&_sup]:text-[var(--app-link)] [&_sup]:ml-0.5'
 
-export function Markdown(props: { text: string }) {
+// Render <sup>1,2</sup> citation numbers as anchors to the report bibliography (#dd-ref-N).
+// N matches DeepReport.references[].n (engine present.ts cite()). Only used when linkCitations is set.
+function LinkedSup(props: { children?: ReactNode }) {
+    const raw = String(Array.isArray(props.children) ? props.children.join('') : props.children ?? '')
+    const parts = raw.split(/([,\s]+)/) // keep separators between numbers
+    return (
+        <sup>
+            {parts.map((p, i) =>
+                /^\d+$/.test(p.trim()) ? (
+                    <a key={i} href={`#dd-ref-${p.trim()}`} className="no-underline hover:underline">
+                        {p}
+                    </a>
+                ) : (
+                    <span key={i}>{p}</span>
+                ),
+            )}
+        </sup>
+    )
+}
+
+export function Markdown(props: { text: string; linkCitations?: boolean }) {
     return (
         <div className={MD_CLASS}>
             <ReactMarkdown
@@ -31,6 +52,9 @@ export function Markdown(props: { text: string }) {
                 components={{
                     // open links in a new tab
                     a: ({ node: _node, ...p }) => <a {...p} target="_blank" rel="noreferrer" />,
+                    ...(props.linkCitations
+                        ? { sup: ({ children }: { children?: ReactNode }) => <LinkedSup>{children}</LinkedSup> }
+                        : {}),
                 }}
             >
                 {props.text}
