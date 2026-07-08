@@ -473,6 +473,11 @@ function parseRawBlocks(raw?: string): { tool: string; rows: Record<string, unkn
     }
     return out
 }
+// strip HTML tags + collapse whitespace (scraped quotes sometimes carry raw <h1>/<div> markup)
+const stripHtml = (s: unknown) => String(s ?? '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim()
+// structured-tool block names — a record carrying one of these is a first-class API result; its source
+// host's other (web-scraped) records are redundant once a tool covers it.
+const DB_TOOL_BLOCKS = new Set(['get_opentarget_targets', 'get_cellxgene_datasets', 'get_hca_projects', 'mcp__lit__ontology_lookup'])
 const DB_SKIP_COLS = new Set(['raw', 'content', 'data', 'type', 'text', 'is_error', 'tool_use_id', 'abstract', 'citation_count', 'authors', 'iri'])
 const DB_PREFER_COLS = ['id', 'label', 'name', 'definition', 'dataset_id', 'title', 'disease', 'organism', 'tissue', 'assay', 'year', 'venue', 'ontology']
 function dbColumns(rows: Record<string, unknown>[]): string[] {
@@ -486,7 +491,15 @@ function dbCell(v: unknown) {
     if (typeof v === 'object') return JSON.stringify(v)
     const s = String(v)
     if (/^https?:\/\//.test(s)) return <a href={s} target="_blank" rel="noreferrer" className="text-[var(--app-link,#2563eb)] hover:underline">{s}</a>
-    return s
+    return stripHtml(s)
+}
+/** Drop web-scraped database records whose source host is already covered by a first-class API tool
+ * (redundant); keep tool records + any host without a tool. */
+function pruneDbFacts(facts: NonNullable<DeepReport['databaseFacts']>): NonNullable<DeepReport['databaseFacts']> {
+    const host = (s?: string) => { try { return new URL(s || '').hostname.replace(/^www\./, '') } catch { return '' } }
+    const isTool = (raw?: string) => parseRawBlocks(raw).some(b => DB_TOOL_BLOCKS.has(b.tool))
+    const toolHosts = new Set(facts.filter(d => isTool(d.raw)).map(d => host(d.source)))
+    return facts.filter(d => isTool(d.raw) || !toolHosts.has(host(d.source)))
 }
 
 function fmtRaw(raw: string): string {
@@ -714,13 +727,13 @@ function DeepReportView(props: { report: DeepReport; onJumpToAngle?: (angle: str
                 )
             })()}
             {/* database records: structured fields (claim/quote/source/doi/quality/status); raw behind a toggle */}
-            {(r.databaseFacts?.length ?? 0) > 0 && (
+            {(() => { const dbFacts = pruneDbFacts(r.databaseFacts ?? []); return dbFacts.length > 0 && (
                 <Card className="p-4">
                     <div className="mb-3 text-sm font-medium">
-                        数据库数据 <span className="text-xs font-normal text-[var(--app-hint)]">({r.databaseFacts!.length} 条记录)</span>
+                        数据库数据 <span className="text-xs font-normal text-[var(--app-hint)]">({dbFacts.length} 条记录)</span>
                     </div>
                     <div className="flex flex-col gap-2">
-                        {r.databaseFacts!.map((d, i) => {
+                        {dbFacts.map((d, i) => {
                             const bt = dbBioType(d.source, d.claim)
                             return (
                                 <div key={i} className="rounded-lg border border-[var(--app-border)] p-3">
@@ -787,8 +800,8 @@ function DeepReportView(props: { report: DeepReport; onJumpToAngle?: (angle: str
                                         // prose record (no structured JSON) → clean quote + claim, no cramped labels
                                         return (
                                             <>
-                                                {d.quote && <div className="text-sm leading-relaxed">"{d.quote}"</div>}
-                                                {d.claim && <div className="mt-1.5 border-l-2 border-[var(--app-border)] pl-2 text-xs text-[var(--app-hint)]">{d.claim}</div>}
+                                                {d.quote && <div className="text-sm leading-relaxed">"{stripHtml(d.quote)}"</div>}
+                                                {d.claim && <div className="mt-1.5 border-l-2 border-[var(--app-border)] pl-2 text-xs text-[var(--app-hint)]">{stripHtml(d.claim)}</div>}
                                             </>
                                         )
                                     })()}
@@ -803,7 +816,7 @@ function DeepReportView(props: { report: DeepReport; onJumpToAngle?: (angle: str
                         })}
                     </div>
                 </Card>
-            )}
+            )})()}
             {/* claim section: confirmed findings (expandable evidence chain) + refuted claims */}
             {((r.findings?.length ?? 0) > 0 || (r.refuted?.length ?? 0) > 0) && (
                 <Card className="p-4">
