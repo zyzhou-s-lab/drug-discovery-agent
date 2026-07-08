@@ -2,12 +2,13 @@
 // module mocking: just pass fake tool fns and assert the slim/NOT_FOUND/[] formatting + never-throw.
 import { expect, test } from "bun:test";
 
-import { getPaperText, type LitDeps, makeLitMcp, ontologyText, searchLiteratureText } from "./litmcp";
+import { getPaperText, type LitDeps, makeLitMcp, ontologyText, openTargetsText, searchLiteratureText } from "./litmcp";
 
 const deps = (over: Partial<LitDeps>): LitDeps => ({
   searchLiteratureMulti: async () => [] as any,
   abstractByDoi: async () => null,
   ontologyLookup: async () => [],
+  openTargetTargets: async () => [],
   ...over,
 });
 
@@ -31,6 +32,13 @@ test("searchLiteratureText slims rows + drops untitled", async () => {
 test("searchLiteratureText returns [] on error (never throws)", async () => {
   const t = await searchLiteratureText("q", deps({ searchLiteratureMulti: async () => { throw new Error("boom"); } }));
   expect(t).toBe("[]");
+});
+
+test("openTargetsText → JSON rows, or [] when empty / on error (never throws)", async () => {
+  const rows = [{ symbol: "PNPLA3", name: "patatin…", ensemblId: "ENSG…", score: 0.44, evidence: { genetic_association: 0.69 } }];
+  expect(await openTargetsText("MASH", deps({ openTargetTargets: async () => rows as any }))).toBe(JSON.stringify(rows));
+  expect(await openTargetsText("MASH", deps({ openTargetTargets: async () => [] }))).toBe("[]");
+  expect(await openTargetsText("MASH", deps({ openTargetTargets: async () => { throw new Error("boom"); } }))).toBe("[]");
 });
 
 test("getPaperText → NOT_FOUND when unresolved, else the record", async () => {

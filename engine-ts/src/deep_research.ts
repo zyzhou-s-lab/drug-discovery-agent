@@ -76,6 +76,9 @@ export function FETCH_PROMPT(question: string, source: FetchSource, angle: strin
     retrieve =
       "## Task\n1. Read this database / ontology record and extract its CONCRETE fields. For ontology\n" +
       "   terms (MONDO/EFO/HP/GO) PREFER the `ontology_lookup` tool (returns structured records);\n" +
+      "   for DRUG-TARGET–disease associations (Open Targets — target lists, association scores,\n" +
+      "   evidence types) PREFER the `get_opentarget_targets` tool (pass the disease name or MONDO/EFO id;\n" +
+      "   returns ranked structured targets) — do NOT WebFetch the Open Targets site (JS-only, returns nothing);\n" +
       "   otherwise WebFetch the API / record URL:\n" +
       "   **URL:** " + (source.url ?? "") + "\n" +
       "   Treat it as a PRIMARY source; capture the EXACT record fields/values (IDs, gene-subtype\n" +
