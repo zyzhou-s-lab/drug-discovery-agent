@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -20,6 +20,7 @@ import { useToast } from '@/lib/toast-context'
 import { useCampaigns, useCampaignView, useReport, useStageDetail, useStageEvents } from '@/hooks/useDda'
 import type {
     CampaignStage,
+    DeepFinding,
     DeepReport,
     Evidence,
     Reference,
@@ -360,10 +361,168 @@ function fmtDur(s?: number): string {
     return m ? `${m}m${s % 60}s` : `${s}s`
 }
 
-function DeepReportView(props: { report: DeepReport }) {
+// resolve a source string (doi/url) to its numbered reference — mirrors engine present.ts cite()
+function refNFor(source: string, references?: DeepReport['references']): number | undefined {
+    if (!references) return undefined
+    const s = String(source).toLowerCase()
+    for (const r of references) {
+        if (r.doi && s.includes(String(r.doi).toLowerCase())) return r.n
+        if (r.url && (s.includes(r.url) || String(r.url).includes(s))) return r.n
+    }
+    return undefined
+}
+
+const confVariant = (c?: string) =>
+    (c === 'high' ? 'success' : c === 'medium' ? 'warning' : 'default') as 'success' | 'warning' | 'default'
+
+// a [N] citation chip linking to the bibliography entry; falls back to a raw link when unresolved
+function CitationChip(props: { source: string; references?: DeepReport['references'] }) {
+    const n = refNFor(props.source, props.references)
+    if (n != null)
+        return (
+            <a
+                href={`#dd-ref-${n}`}
+                className="inline-flex items-center rounded bg-[var(--app-subtle-bg)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--app-link,#2563eb)] no-underline hover:underline"
+            >
+                [{n}]
+            </a>
+        )
+    return (
+        <a
+            href={props.source}
+            target="_blank"
+            rel="noreferrer"
+            className="break-all font-mono text-[10px] text-[var(--app-link,#2563eb)] hover:underline"
+        >
+            {props.source}
+        </a>
+    )
+}
+
+// canonical numbered bibliography from report.references, with #dd-ref-N anchors + verify status
+function ReportBibliography(props: { report: DeepReport }) {
+    const refs = props.report.references ?? []
+    if (refs.length === 0) return null
+    const status = new Map<number, 'confirmed' | 'refuted'>()
+    for (const f of props.report.findings ?? [])
+        for (const s of f.sources ?? []) {
+            const n = refNFor(s, refs)
+            if (n != null && !status.has(n)) status.set(n, 'confirmed')
+        }
+    for (const c of props.report.refuted ?? []) {
+        const n = refNFor(c.source, refs)
+        if (n != null && !status.has(n)) status.set(n, 'refuted')
+    }
+    return (
+        <Card className="p-4">
+            <div className="mb-2 text-sm font-medium">
+                参考文献 <span className="text-xs font-normal text-[var(--app-hint)]">({refs.length})</span>
+            </div>
+            <ol className="flex flex-col gap-1.5">
+                {refs.map((r) => {
+                    const stt = status.get(r.n)
+                    const badge = stt ? (
+                        <Badge variant={stt === 'confirmed' ? 'success' : 'warning'} className="mr-1.5 shrink-0 text-[10px]">
+                            {stt === 'confirmed' ? '已确认' : '已否决'}
+                        </Badge>
+                    ) : null
+                    return <UnifiedRefItem key={r.n} r={r} anchorId={`dd-ref-${r.n}`} badge={badge} />
+                })}
+            </ol>
+        </Card>
+    )
+}
+
+// pretty-print the raw multi-tool record dump for the "原始记录" toggle (best-effort)
+function fmtRaw(raw: string): string {
+    try {
+        return JSON.stringify(JSON.parse(raw), null, 2)
+    } catch {
+        return raw
+    }
+}
+
+// one confirmed finding → header + citation chips + expandable evidence chain (quote/source/verdict)
+function FindingCard(props: { finding: DeepFinding; report: DeepReport; onJumpToAngle?: (angle: string) => void }) {
+    const { finding: f, report: r } = props
+    const facts = (r.databaseFacts ?? []).filter((d) => {
+        const keys = [d.doi, d.source].filter(Boolean).map((x) => String(x).toLowerCase())
+        return (f.sources ?? []).some((s) => {
+            const sl = s.toLowerCase()
+            return keys.some((k) => sl.includes(k) || k.includes(sl))
+        })
+    })
+    return (
+        <li className="rounded-lg border border-[var(--app-border)] p-2.5">
+            <div className="flex flex-wrap items-start gap-2">
+                <Badge variant="success" className="shrink-0">
+                    确认
+                </Badge>
+                <Badge variant={confVariant(f.confidence)} className="shrink-0">
+                    {f.confidence}
+                </Badge>
+                {f.angle && (
+                    <button type="button" className="shrink-0" title="查看研究过程" onClick={() => props.onJumpToAngle?.(f.angle!)}>
+                        <Badge variant="default" className="cursor-pointer hover:opacity-80">
+                            {f.angle} →
+                        </Badge>
+                    </button>
+                )}
+                <span className="text-sm font-medium">{f.claim}</span>
+            </div>
+            {f.evidence && <div className="mt-1 text-xs text-[var(--app-hint)]">{f.evidence}</div>}
+            {(f.sources?.length ?? 0) > 0 && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    <span className="text-[10px] text-[var(--app-hint)]">来源</span>
+                    {f.sources.map((s, j) => (
+                        <CitationChip key={j} source={s} references={r.references} />
+                    ))}
+                    {f.vote && <span className="text-[10px] text-[var(--app-hint)]">· 票 {f.vote}</span>}
+                </div>
+            )}
+            {facts.length > 0 && (
+                <details className="mt-1.5">
+                    <summary className="cursor-pointer text-[11px] text-[var(--app-hint)] hover:text-[var(--app-fg)]">
+                        证据链 ({facts.length})
+                    </summary>
+                    <div className="mt-1.5 flex flex-col gap-1.5">
+                        {facts.map((d, k) => (
+                            <div key={k} className="rounded border border-[var(--app-border)] p-2 text-xs">
+                                <div className="mb-1 flex items-center gap-1.5">
+                                    <Badge
+                                        variant={d.status === 'confirmed' ? 'success' : d.status === 'refuted' ? 'warning' : 'default'}
+                                        className="text-[10px]"
+                                    >
+                                        {d.status === 'confirmed' ? '已确认' : d.status === 'refuted' ? '已否决' : '未核验'}
+                                    </Badge>
+                                    {d.quality && (
+                                        <span className="rounded-full bg-[var(--app-subtle-bg)] px-1.5 py-0.5 text-[10px] text-[var(--app-hint)]">
+                                            {d.quality}
+                                        </span>
+                                    )}
+                                    {d.doi && (
+                                        <a
+                                            href={`https://doi.org/${d.doi}`}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="truncate text-[var(--app-link,#2563eb)] hover:underline"
+                                        >
+                                            doi:{d.doi}
+                                        </a>
+                                    )}
+                                </div>
+                                {d.quote && <div className="leading-relaxed">"{d.quote}"</div>}
+                            </div>
+                        ))}
+                    </div>
+                </details>
+            )}
+        </li>
+    )
+}
+
+function DeepReportView(props: { report: DeepReport; onJumpToAngle?: (angle: string) => void }) {
     const r = props.report
-    const confVariant = (c: string) => (c === 'high' ? 'success' : c === 'medium' ? 'warning' : 'default') as
-        'success' | 'warning' | 'default'
     const st = r.stats
     const metaItems: [string, string | number | undefined][] = st
         ? [
@@ -397,31 +556,31 @@ function DeepReportView(props: { report: DeepReport }) {
                     </div>
                 </Card>
             )}
-            {/* presentation layer: polished Chinese narrative (api._present_report), shown first */}
+            {/* presentation layer: polished Chinese narrative — <sup> citations link to the bibliography */}
             {r.narrative && (
                 <Card className="p-5">
-                    <Markdown text={r.narrative} />
+                    <Markdown text={r.narrative} linkCitations />
                 </Card>
             )}
-            {/* fallback: the narrative is best-effort and silently yields "" on MiMo 429/overload
-                (api.py _present_report). When it's missing, the structured fields are still computed —
-                render summary / caveats / openQuestions so the report isn't a near-blank page. */}
+            {/* fallback: narrative is best-effort ("" on MiMo 429/overload) — render structured fields */}
             {!r.narrative && ((r.findings?.length ?? 0) > 0 || r.summary || r.caveats || (r.openQuestions?.length ?? 0) > 0) && (
                 <Card className="flex flex-col gap-3 p-5">
                     {(r.findings?.length ?? 0) > 0 ? (
                         <div className="flex flex-col gap-3">
                             <div className="text-sm font-medium">研究报告</div>
                             {(() => {
-                                // per-angle Q&A: group findings by angle (positional fallback), numbered in order
                                 const groups: { angle: string; items: typeof r.findings }[] = []
                                 r.findings.forEach((f) => {
                                     const a = f.angle || '未分类'
                                     const g = groups.find((x) => x.angle === a)
-                                    if (g) g.items.push(f); else groups.push({ angle: a, items: [f] })
+                                    if (g) g.items.push(f)
+                                    else groups.push({ angle: a, items: [f] })
                                 })
                                 return groups.map((g, gi) => (
                                     <div key={gi}>
-                                        <div className="mb-1 text-sm font-medium">{gi + 1}. {g.angle}</div>
+                                        <div className="mb-1 text-sm font-medium">
+                                            {gi + 1}. {g.angle}
+                                        </div>
                                         <ul className="flex list-disc flex-col gap-1 pl-5 text-sm">
                                             {g.items.map((f, i) => (
                                                 <li key={i}>
@@ -450,280 +609,108 @@ function DeepReportView(props: { report: DeepReport }) {
                         <div>
                             <div className="mb-1 text-sm font-medium">开放问题</div>
                             <ul className="flex list-disc flex-col gap-1 pl-5 text-sm">
-                                {r.openQuestions!.map((q, i) => <li key={i}>{q}</li>)}
+                                {r.openQuestions!.map((q, i) => (
+                                    <li key={i}>{q}</li>
+                                ))}
                             </ul>
                         </div>
                     )}
                 </Card>
             )}
-            {/* raw database records: per-card structured data + APA7 references */}
-            {r.databaseFacts && r.databaseFacts.length > 0 && (() => {
-                const SKIP_TOOLS = new Set(['Bash', 'WebFetch', 'WebSearch', 'Read', 'Write', 'Edit', 'Glob', 'Grep'])
-                const parseRawAll = (raw: string): { tool: string; data: unknown }[] => {
-                    const blocks = raw.split(/\n---\n/)
-                    const result: { tool: string; data: unknown }[] = []
-                    for (const blk of blocks) {
-                        const m = blk.match(/^\[([^\]]+)\]\s*([\s\S]*)$/)
-                        if (!m) continue
-                        try {
-                            const parsed = JSON.parse(m[2])
-                            const data = Array.isArray(parsed) ? parsed : [parsed]
-                            const isEmpty = data.length === 0
-                            if (!isEmpty) result.push({ tool: m[1], data })
-                        } catch { /* not json */ }
-                    }
-                    return result
-                }
-                const SKIP2 = new Set(['content', 'data', 'bash', 'type', 'text', 'is_error', 'tool_use_id', 'abstract', 'citation_count', 'authors'])
-                const ontologyWebUrl = (obj: Record<string, unknown>): string => {
-                    const ont = String(obj.ontology || obj.ontology_name || '').toLowerCase()
-                    const rawId = String(obj.obo_id || obj.id || obj.short_form || '')
-                    if (ont && rawId) return `https://www.ebi.ac.uk/ols4/ontologies/${ont}/terms?obo_id=${encodeURIComponent(rawId)}`
-                    if (obj.iri) return String(obj.iri)
-                    return ''
-                }
-                // DOI → verification status map from findings and refuted
-                const doiStatus = new Map<string, { status: string; confidence: string }>()
-                for (const f of (r.findings ?? [])) {
-                    for (const s of (f.sources ?? [])) {
-                        const doi = s.replace(/^https?:\/\/doi\.org\//, '')
-                        if (doi) doiStatus.set(doi.toLowerCase(), { status: 'confirmed', confidence: f.confidence })
-                    }
-                }
-                for (const c of (r.refuted ?? [])) {
-                    const doi = (c.source || '').replace(/^https?:\/\/doi\.org\//, '')
-                    if (doi) doiStatus.set(doi.toLowerCase(), { status: 'refuted', confidence: '' })
-                }
-                // Format author: "Deke Jiang" → "Jiang, D."
-                const fmtAuthor = (name: string): string => {
-                    const parts = name.trim().split(/\s+/)
-                    if (parts.length < 2) return name
-                    const last = parts[parts.length - 1]
-                    const initials = parts.slice(0, -1).map(p =>
-                        p.length <= 2 || /\./.test(p) ? p.charAt(0).toUpperCase() + '.' : p.charAt(0).toUpperCase() + '.'
-                    )
-                    return `${last}, ${initials.join(' ')}`
-                }
-                // APA7 formatter: all authors (year). Title. Venue. DOI
-                const fmtApa7 = (ref: Record<string, unknown>): string => {
-                    const authors = ref.authors as string[] | undefined
-                    const year = String(ref.year || 'n.d.')
-                    const title = String(ref.title || '')
-                    const venue = String(ref.venue || '')
-                    const doi = String(ref.doi || '')
-                    let authStr = ''
-                    if (authors && authors.length > 0) {
-                        const formatted = authors.map(fmtAuthor)
-                        if (formatted.length > 20) {
-                            authStr = formatted.slice(0, 19).join(', ') + ', ... ' + formatted[formatted.length - 1]
-                        } else {
-                            authStr = formatted.length <= 2
-                                ? formatted.join(' & ')
-                                : formatted.slice(0, -1).join(', ') + ' & ' + formatted[formatted.length - 1]
-                        }
-                    }
-                    let s = ''
-                    if (authStr) s += authStr + ' '
-                    s += `(${year}). ${title}.`
-                    if (venue) s += ` ${venue}.`
-                    if (doi) s += ` https://doi.org/${doi}`
-                    return s
-                }
-                // collect all literature refs across all facts for the global references card
-                const allRefs: { doi: string; apa7: string; status: string; confidence: string }[] = []
-                {
-                    const refMap = new Map<string, { doi: string; apa7: string; status: string; confidence: string; hasAuthors: boolean }>()
-                    for (const d of r.databaseFacts!) {
-                        const blocks = d.raw ? parseRawAll(d.raw as string) : []
-                        for (const b of blocks) {
-                            if (!/search_literature|get_paper/.test(b.tool)) continue
-                            const arr = Array.isArray(b.data) ? b.data as Record<string, unknown>[] : [b.data as Record<string, unknown>]
-                            for (const item of arr) {
-                                if (!item || typeof item !== 'object') continue
-                                const doi = String((item as Record<string, unknown>).doi || '')
-                                if (!doi) continue
-                                const key = doi.toLowerCase()
-                                const hasAuthors = ((item as Record<string, unknown>).authors as unknown[])?.length > 0
-                                const existing = refMap.get(key)
-                                // prefer entry with authors
-                                if (existing && existing.hasAuthors && !hasAuthors) continue
-                                const st = doiStatus.get(key)
-                                refMap.set(key, {
-                                    doi,
-                                    apa7: fmtApa7(item as Record<string, unknown>),
-                                    status: st?.status || 'unverified',
-                                    confidence: st?.confidence || '',
-                                    hasAuthors,
-                                })
-                            }
-                        }
-                    }
-                    allRefs.push(...refMap.values())
-                }
-                return (
-                    <>
-                    {allRefs.length > 0 && (
-                        <Card className="p-4">
-                            <div className="mb-2 text-sm font-medium">参考文献 <span className="text-xs font-normal text-[var(--app-hint)]">({allRefs.length})</span></div>
-                            <ol className="list-decimal pl-5 flex flex-col gap-1.5">
-                                {allRefs.map((ref, ri) => {
-                                    const stLabel = ref.status === 'confirmed' ? '已确认' : ref.status === 'refuted' ? '已否决' : '未核验'
-                                    const stVariant = ref.status === 'confirmed' ? 'success' : ref.status === 'refuted' ? 'warning' : 'default'
-                                    return (
-                                        <li key={ri} className="text-xs leading-relaxed">
-                                            <Badge variant={stVariant as 'success' | 'warning' | 'default'} className="mr-1.5 text-[10px]">{stLabel}</Badge>
-                                            <span>{ref.apa7}</span>
-                                            {ref.confidence && <span className="ml-1 text-[var(--app-hint)]">({ref.confidence})</span>}
-                                        </li>
-                                    )
-                                })}
-                            </ol>
-                        </Card>
-                    )}
-                    <Card className="p-4">
-                        <div className="mb-3 text-sm font-medium">数据库数据 <span className="text-xs font-normal text-[var(--app-hint)]">({r.databaseFacts.length} 条原始记录)</span></div>
-                        <div className="flex flex-col gap-2">
-                            {r.databaseFacts.map((d, i) => {
-                                const sv = d.status === 'confirmed' ? 'success' : d.status === 'refuted' ? 'warning' : 'default'
-                                const sl = d.status === 'confirmed' ? '已确认' : d.status === 'refuted' ? '已否决' : '未核验'
-                                const src = d.source || ''
-                                const allBlocks = d.raw ? parseRawAll(d.raw as string) : []
-                                // find which blocks this fact's quote matches
-                                const matchedBlocks = (() => {
-                                    if (allBlocks.length === 0) return []
-                                    const qText = (d.quote || d.claim || '').toLowerCase()
-                                    const qTokens = qText.split(/[\s,;:]+/).filter((t: string) => t.length > 3)
-                                    if (qTokens.length === 0) return allBlocks.filter(b => !SKIP_TOOLS.has(b.tool))
-                                    // find blocks that match the quote
-                                    const result: { tool: string; data: unknown }[] = []
-                                    for (const b of allBlocks) {
-                                        const content = JSON.stringify(b.data).toLowerCase()
-                                        const blockScore = qTokens.filter((t: string) => content.includes(t)).length
-                                        if (blockScore < 2) continue
-                                        // filter records within the block to only those matching the quote
-                                        const arr = Array.isArray(b.data) ? b.data as Record<string, unknown>[] : [b.data as Record<string, unknown>]
-                                        const filtered = arr.filter(obj => {
-                                            const objStr = JSON.stringify(obj).toLowerCase()
-                                            return qTokens.filter((t: string) => objStr.includes(t)).length >= 1
-                                        })
-                                        result.push({ ...b, data: filtered.length > 0 ? filtered : arr })
-                                    }
-                                    return result.length > 0 ? result : allBlocks.filter(b => !SKIP_TOOLS.has(b.tool))
-                                })()
-                                const blocks = matchedBlocks.filter(b => !SKIP_TOOLS.has(b.tool) && !/search_literature|get_paper|submit_claims/.test(b.tool))
-                                return (
-                                    <div key={i} className="rounded-lg border border-[var(--app-border)] overflow-hidden">
-                                        {/* Section 1: 搜索描述 */}
-                                        <div className="p-3">
-                                            <div className="mb-1.5 flex items-center justify-between gap-2">
-                                                <div className="flex items-center gap-2">
-                                                    <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-[var(--app-subtle-bg)] text-[10px] font-medium text-[var(--app-hint)]">{i + 1}</span>
-                                                    <Badge variant={sv as 'success' | 'warning' | 'default'} className="text-[10px]">{sl}</Badge>
-                                                    {d.quality && <span className="rounded-full bg-[var(--app-subtle-bg)] px-1.5 py-0.5 text-[10px] text-[var(--app-hint)]">{d.quality}</span>}
-                                                </div>
-                                                <div className="flex items-center gap-2 truncate text-[11px]">
-                                                    {d.doi && <a href={`https://doi.org/${d.doi}`} target="_blank" rel="noreferrer" className="truncate text-[var(--app-link,#2563eb)] hover:underline">doi:{d.doi}</a>}
-                                                </div>
-                                            </div>
-                                            {d.quote && <><div className="mb-1 text-[10px] font-medium text-[var(--app-hint)]">原文引用</div><div className="mb-2 text-sm leading-relaxed">"{d.quote}"</div></>}
+            {/* database records: structured fields (claim/quote/source/doi/quality/status); raw behind a toggle */}
+            {(r.databaseFacts?.length ?? 0) > 0 && (
+                <Card className="p-4">
+                    <div className="mb-3 text-sm font-medium">
+                        数据库数据 <span className="text-xs font-normal text-[var(--app-hint)]">({r.databaseFacts!.length} 条记录)</span>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                        {r.databaseFacts!.map((d, i) => {
+                            const sv = d.status === 'confirmed' ? 'success' : d.status === 'refuted' ? 'warning' : 'default'
+                            const sl = d.status === 'confirmed' ? '已确认' : d.status === 'refuted' ? '已否决' : '未核验'
+                            return (
+                                <div key={i} className="rounded-lg border border-[var(--app-border)] p-3">
+                                    <div className="mb-1.5 flex items-center justify-between gap-2">
+                                        <div className="flex items-center gap-2">
+                                            <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-[var(--app-subtle-bg)] text-[10px] font-medium text-[var(--app-hint)]">
+                                                {i + 1}
+                                            </span>
+                                            <Badge variant={sv as 'success' | 'warning' | 'default'} className="text-[10px]">
+                                                {sl}
+                                            </Badge>
+                                            {d.quality && (
+                                                <span className="rounded-full bg-[var(--app-subtle-bg)] px-1.5 py-0.5 text-[10px] text-[var(--app-hint)]">
+                                                    {d.quality}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="flex items-center gap-2 truncate text-[11px]">
+                                            {d.doi ? (
+                                                <a href={`https://doi.org/${d.doi}`} target="_blank" rel="noreferrer" className="truncate text-[var(--app-link,#2563eb)] hover:underline">
+                                                    doi:{d.doi}
+                                                </a>
+                                            ) : d.source ? (
+                                                <a href={d.source} target="_blank" rel="noreferrer" className="truncate text-[var(--app-link,#2563eb)] hover:underline">
+                                                    {d.source}
+                                                </a>
+                                            ) : null}
+                                        </div>
+                                    </div>
+                                    {d.quote && (
+                                        <>
+                                            <div className="mb-1 text-[10px] font-medium text-[var(--app-hint)]">原文引用</div>
+                                            <div className="mb-2 text-sm leading-relaxed">"{d.quote}"</div>
+                                        </>
+                                    )}
+                                    {d.claim && (
+                                        <>
                                             <div className="mb-1 text-[10px] font-medium text-[var(--app-hint)]">提取摘要</div>
                                             <div className="border-l-2 border-[var(--app-border)] pl-2 text-xs text-[var(--app-hint)]">{d.claim}</div>
-                                        </div>
-                                        {/* Section 2: 格式化输出 */}
-                                        {blocks.length > 0 && (
-                                            <div className="border-t border-[var(--app-border)] bg-[var(--app-subtle-bg)] p-3">
-                                                {blocks.map((b, bi) => {
-                                                    const arr = Array.isArray(b.data) ? b.data as Record<string, unknown>[] : [b.data as Record<string, unknown>]
-                                                    const valid = arr.filter(o => o && typeof o === 'object' && Object.keys(o).length > 0)
-                                                    if (valid.length === 0) return null
-                                                    const prefer = ['id', 'label', 'ontology', 'definition', 'doi', 'title', 'year', 'venue', 'iri', 'obo_id', 'short_form', 'ontology_name', 'tldr']
-                                                    const allCols = new Set<string>()
-                                                    for (const obj of valid) {
-                                                        for (const k of Object.keys(obj)) {
-                                                            if (!SKIP2.has(k) && obj[k] != null && obj[k] !== '' && obj[k] !== false) allCols.add(k)
-                                                        }
-                                                    }
-                                                    const cols = [...prefer.filter(c => allCols.has(c)), ...[...allCols].filter(c => !prefer.includes(c))]
-                                                    if (cols.length === 0) return null
-                                                    const renderCell = (obj: Record<string, unknown>, k: string) => {
-                                                        const v = obj[k]
-                                                        if (v == null) return ''
-                                                        const display = Array.isArray(v) ? v.map(x => typeof x === 'object' ? JSON.stringify(x) : String(x)).join(', ') : typeof v === 'object' ? JSON.stringify(v) : String(v)
-                                                        if (k === 'doi') return <a href={`https://doi.org/${display}`} target="_blank" rel="noreferrer" className="text-[var(--app-link,#2563eb)] hover:underline">{display}</a>
-                                                        if (k === 'iri') return <a href={display} target="_blank" rel="noreferrer" className="text-[var(--app-link,#2563eb)] hover:underline">{display}</a>
-                                                        const ols = ontologyWebUrl(obj)
-                                                        if (k === 'id' && ols && ols !== String(obj.iri || '')) return <a href={ols} target="_blank" rel="noreferrer" className="text-[var(--app-link,#2563eb)] hover:underline">{display}</a>
-                                                        return display
-                                                    }
-                                                    return (
-                                                        <div key={bi} className={bi > 0 ? 'mt-2.5 pt-2.5 border-t border-[var(--app-border)]' : ''}>
-                                                            <div className="overflow-x-auto">
-                                                                <table className="w-full text-xs">
-                                                                    <thead>
-                                                                        <tr className="border-b border-[var(--app-border)] text-left text-[var(--app-hint)]">
-                                                                            {cols.map(c => <th key={c} className="px-1.5 py-1 font-medium whitespace-nowrap">{c}</th>)}
-                                                                        </tr>
-                                                                    </thead>
-                                                                    <tbody>
-                                                                        {valid.map((obj, oi) => (
-                                                                            <tr key={oi} className="border-b border-dashed border-[var(--app-border)] last:border-solid align-top">
-                                                                                {cols.map(c => <td key={c} className="max-w-[200px] px-1.5 py-1 break-words">{renderCell(obj as Record<string, unknown>, c)}</td>)}
-                                                                            </tr>
-                                                                        ))}
-                                                                    </tbody>
-                                                                </table>
-                                                            </div>
-                                                        </div>
-                                                    )
-                                                })}
-                                            </div>
-                                        )}
-                                    </div>
-                                )
-                            })}
-                        </div>
-                    </Card>
-                    </>
-                )
-            })()}
-            {/* unified Claim section: confirmed findings + refuted claims */}
+                                        </>
+                                    )}
+                                    {d.raw && (
+                                        <details className="mt-2">
+                                            <summary className="cursor-pointer text-[11px] text-[var(--app-hint)] hover:text-[var(--app-fg)]">原始记录</summary>
+                                            <pre className="mt-1.5 max-h-80 overflow-auto rounded bg-[var(--app-code-bg)] p-2 text-[11px] leading-relaxed">{fmtRaw(d.raw)}</pre>
+                                        </details>
+                                    )}
+                                </div>
+                            )
+                        })}
+                    </div>
+                </Card>
+            )}
+            {/* claim section: confirmed findings (expandable evidence chain) + refuted claims */}
             {((r.findings?.length ?? 0) > 0 || (r.refuted?.length ?? 0) > 0) && (
                 <Card className="p-4">
-                    <div className="mb-2 text-sm font-medium">Claim <span className="text-xs font-normal text-[var(--app-hint)]">
-                        (确认 {(r.findings?.length ?? 0)}, 否决 {(r.refuted?.length ?? 0)})
-                    </span></div>
+                    <div className="mb-2 text-sm font-medium">
+                        Claim{' '}
+                        <span className="text-xs font-normal text-[var(--app-hint)]">
+                            (确认 {r.findings?.length ?? 0}, 否决 {r.refuted?.length ?? 0})
+                        </span>
+                    </div>
                     <ul className="flex flex-col gap-2">
                         {(r.findings ?? []).map((f, i) => (
-                            <li key={`c${i}`} className="rounded-lg border border-[var(--app-border)] p-2.5">
-                                <div className="flex items-start gap-2">
-                                    <Badge variant="success" className="shrink-0">确认</Badge>
-                                    <Badge variant={confVariant(f.confidence)} className="shrink-0">{f.confidence}</Badge>
-                                    {f.angle && <Badge variant="default" className="shrink-0">{f.angle}</Badge>}
-                                    <span className="text-sm font-medium">{f.claim}</span>
-                                </div>
-                                {f.evidence && <div className="mt-1 text-xs text-[var(--app-hint)]">{f.evidence}</div>}
-                                {f.sources?.length > 0 && (
-                                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
-                                        {f.sources.map((s, j) => (
-                                            <a key={j} href={s} target="_blank" rel="noreferrer"
-                                               className="break-all font-mono text-[10px] text-[var(--app-link,#2563eb)] hover:underline">{s}</a>
-                                        ))}
-                                    </div>
-                                )}
-                            </li>
+                            <FindingCard key={`c${i}`} finding={f} report={r} onJumpToAngle={props.onJumpToAngle} />
                         ))}
                         {(r.refuted ?? []).map((c, i) => (
                             <li key={`r${i}`} className="rounded-lg border border-[var(--app-border)] p-2.5 opacity-70">
                                 <div className="flex items-start gap-2">
-                                    <Badge variant="warning" className="shrink-0">否决</Badge>
+                                    <Badge variant="warning" className="shrink-0">
+                                        否决
+                                    </Badge>
                                     <span className="text-sm">{c.claim}</span>
                                 </div>
-                                <div className="mt-1 text-xs text-[var(--app-hint)]">票: {c.vote}</div>
+                                <div className="mt-1 flex items-center gap-1.5 text-xs text-[var(--app-hint)]">
+                                    <span>票 {c.vote}</span>
+                                    {c.source && <CitationChip source={c.source} references={r.references} />}
+                                </div>
                             </li>
                         ))}
                     </ul>
                 </Card>
             )}
+            {/* single canonical bibliography (report.references) with #dd-ref-N anchors */}
+            <ReportBibliography report={r} />
         </div>
     )
 }
@@ -903,13 +890,14 @@ function ApaText(props: { s: string }) {
     )
 }
 
-function ReferenceItem(props: { r: Reference }) {
+function ReferenceItem(props: { r: Reference; anchorId?: string; badge?: ReactNode }) {
     const { r } = props
     const url = `https://doi.org/${r.doi}`
     const cut = r.apa7.lastIndexOf(url)
     const head = cut >= 0 ? r.apa7.slice(0, cut) : r.apa7
     return (
-        <li className="flex gap-2 text-sm leading-relaxed">
+        <li id={props.anchorId} className="flex scroll-mt-20 gap-2 text-sm leading-relaxed">
+            {props.badge}
             <span className="shrink-0 text-[var(--app-hint)]">{r.n}.</span>
             <span>
                 <ApaText s={head} />
@@ -929,11 +917,12 @@ function ReferenceItem(props: { r: Reference }) {
 }
 
 // one entry of the unified reference list: paper → APA7 (ReferenceItem); database/web → title + link
-function UnifiedRefItem(props: { r: { n: number; doi?: string; apa7?: string; title?: string; url?: string } }) {
+function UnifiedRefItem(props: { r: { n: number; doi?: string; apa7?: string; title?: string; url?: string }; anchorId?: string; badge?: ReactNode }) {
     const { r } = props
-    if (r.apa7) return <ReferenceItem r={{ n: r.n, doi: r.doi ?? '', apa7: r.apa7 }} />
+    if (r.apa7) return <ReferenceItem r={{ n: r.n, doi: r.doi ?? '', apa7: r.apa7 }} anchorId={props.anchorId} badge={props.badge} />
     return (
-        <li className="flex gap-2 text-sm leading-relaxed">
+        <li id={props.anchorId} className="flex scroll-mt-20 gap-2 text-sm leading-relaxed">
+            {props.badge}
             <span className="shrink-0 text-[var(--app-hint)]">{r.n}.</span>
             <span>
                 {r.title ? r.title + ' ' : ''}
@@ -1028,6 +1017,19 @@ export function App() {
                 refreshReport()
             })
             .catch(() => {})
+    }
+    const onJumpToAngle = (angle: string) => {
+        setSelected(SEARCH_TAB)
+        window.setTimeout(() => {
+            const key = angle.slice(0, 28)
+            const el =
+                document.getElementById(`dd-session-search · ${key}`) ??
+                (Array.from(document.querySelectorAll('[id^="dd-session-"]')).find((e) => e.id.includes(angle.slice(0, 18))) as
+                    | HTMLElement
+                    | undefined) ??
+                null
+            el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        }, 120)
     }
     const [chatOpen, setChatOpen] = useState(true)
     const [filesOpen, setFilesOpen] = useState<string | null>(null)
@@ -1149,7 +1151,7 @@ export function App() {
                         <DeepResearchPage campaign={campaign} report={report} />
                     )}
                     {campaign && selected === REPORT_TAB && report?.report && (
-                        <DeepReportView report={report.report} />
+                        <DeepReportView report={report.report} onJumpToAngle={onJumpToAngle} />
                     )}
                     {campaign && selected && selected !== SEARCH_TAB && selected !== REPORT_TAB && (
                         <StageDetail
@@ -1160,7 +1162,7 @@ export function App() {
                         />
                     )}
 
-                    {campaign && <Bibliography campaign={campaign} />}
+                    {campaign && !report?.report && <Bibliography campaign={campaign} />}
                 </div>
             </main>
 
