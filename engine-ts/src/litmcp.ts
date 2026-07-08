@@ -9,15 +9,17 @@ import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 
 import { emit } from "./events";
-import { abstractByDoi, ontologyLookup, openTargetTargets, searchLiteratureMulti } from "./tools/paperfetch";
+import { abstractByDoi, cellxgeneDatasets, hcaProjects, ontologyLookup, openTargetTargets, searchLiteratureMulti } from "./tools/paperfetch";
 
 export interface LitDeps {
   searchLiteratureMulti: typeof searchLiteratureMulti;
   abstractByDoi: typeof abstractByDoi;
   ontologyLookup: typeof ontologyLookup;
   openTargetTargets: typeof openTargetTargets;
+  cellxgeneDatasets: typeof cellxgeneDatasets;
+  hcaProjects: typeof hcaProjects;
 }
-const DEFAULT_DEPS: LitDeps = { searchLiteratureMulti, abstractByDoi, ontologyLookup, openTargetTargets };
+const DEFAULT_DEPS: LitDeps = { searchLiteratureMulti, abstractByDoi, ontologyLookup, openTargetTargets, cellxgeneDatasets, hcaProjects };
 
 // Tuned constants (verbatim from deep_research.py _lit_server). LIT_SEARCH_SIZE is intentionally
 // below searchLiteratureMulti's default 10: these results carry abstracts + tldr, so a smaller set
@@ -93,6 +95,30 @@ export async function openTargetsText(disease: string, deps: LitDeps = DEFAULT_D
   return rows.length ? JSON.stringify(rows) : "[]";
 }
 
+/** get_cellxgene_datasets body → dataset JSON, or "[]" when empty/error (never throws). */
+export async function cellxgeneText(query: string, deps: LitDeps = DEFAULT_DEPS): Promise<string> {
+  let rows: unknown[] = [];
+  try {
+    rows = await deps.cellxgeneDatasets(query, OT_TARGETS_SIZE);
+  } catch (e) {
+    toolError("get_cellxgene_datasets", e, query);
+    rows = [];
+  }
+  return rows.length ? JSON.stringify(rows) : "[]";
+}
+
+/** get_hca_projects body → project JSON, or "[]" when empty/error (never throws). */
+export async function hcaText(organ: string, deps: LitDeps = DEFAULT_DEPS): Promise<string> {
+  let rows: unknown[] = [];
+  try {
+    rows = await deps.hcaProjects(organ, 15);
+  } catch (e) {
+    toolError("get_hca_projects", e, organ);
+    rows = [];
+  }
+  return rows.length ? JSON.stringify(rows) : "[]";
+}
+
 const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
 
 /** Build the literature MCP server dict to spread into runAgent's extraMcp. */
@@ -129,5 +155,23 @@ export function makeLitMcp(deps: LitDeps = DEFAULT_DEPS): Record<string, unknown
     { disease: z.string() },
     async (args: { disease: string }) => text(await openTargetsText(args.disease ?? "", deps)),
   );
-  return { lit: createSdkMcpServer({ name: "lit", version: "1.0.0", tools: [searchLit, getPaper, ontology, otTargets] }) };
+  const cellxgene = tool(
+    "get_cellxgene_datasets",
+    "Find single-cell & spatial-transcriptomics DATASETS for a disease/tissue from the CZI CELLxGENE " +
+      "Discover index (keyless). Pass a disease name or tissue (e.g. 'metabolic dysfunction-associated " +
+      "steatohepatitis' or 'liver'). Returns STRUCTURED rows [{title,disease,tissue,assay,organism," +
+      "cell_count,spatial,link}] (spatial=true for Visium/Slide-seq/etc.). Use this instead of " +
+      "WebFetch-ing the CELLxGENE website for the single-cell / spatial part of an angle.",
+    { query: z.string() },
+    async (args: { query: string }) => text(await cellxgeneText(args.query ?? "", deps)),
+  );
+  const hca = tool(
+    "get_hca_projects",
+    "Find Human Cell Atlas projects for an ORGAN/tissue (Azul facet, e.g. 'liver', 'brain', 'lung'; " +
+      "keyless). Returns STRUCTURED rows [{title,organ,cell_count,lab,doi,link}]. Pass the organ, not a " +
+      "disease name. Complements get_cellxgene_datasets for single-cell data availability.",
+    { organ: z.string() },
+    async (args: { organ: string }) => text(await hcaText(args.organ ?? "", deps)),
+  );
+  return { lit: createSdkMcpServer({ name: "lit", version: "1.0.0", tools: [searchLit, getPaper, ontology, otTargets, cellxgene, hca] }) };
 }

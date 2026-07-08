@@ -228,6 +228,80 @@ export async function ontologyLookup(query: string, ontology = "mondo,efo,hp,go"
   }
 }
 
+// Distinctive query tokens (≥4 chars, minus a few generic disease words) for label matching.
+const QUERY_STOP = new Set(["disease", "diseases", "syndrome", "disorder", "chronic", "acute", "human", "with", "associated", "related"]);
+function queryTokens(q: string): string[] {
+  return String(q ?? "").toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length >= 4 && !QUERY_STOP.has(t));
+}
+const SPATIAL_RE = /visium|slide-?seq|spatial|merfish|xenium|cosmx|stereo-?seq|geomx|dbit-?seq/i;
+
+// ── CELLxGENE Discover (single-cell + spatial dataset index), keyless public REST ──
+const CELLXGENE_API = "https://api.cellxgene.cziscience.com/curation/v1/datasets";
+
+/** Single-cell / spatial datasets from CZI CELLxGENE Discover, filtered to a disease/tissue query.
+ * Returns structured rows (title/disease/tissue/assay/organism/cell_count/spatial/link) ranked by how
+ * many query tokens hit + cell count. Keyless; [] on any failure (never throws). */
+export async function cellxgeneDatasets(query: string, size = 20): Promise<Record<string, unknown>[]> {
+  try {
+    const tokens = queryTokens(query);
+    if (!tokens.length) return [];
+    const all = await httpJson(CELLXGENE_API);
+    if (!Array.isArray(all)) return [];
+    const labels = (arr: unknown): string[] => (Array.isArray(arr) ? arr : []).map((x: any) => String(x?.label ?? "")).filter(Boolean);
+    const scored = all
+      .map((d: any) => {
+        const dis = labels(d.disease), tis = labels(d.tissue), asy = labels(d.assay);
+        const hay = (dis.join(" ") + " " + tis.join(" ") + " " + String(d.title ?? "")).toLowerCase();
+        return { d, dis, tis, asy, score: tokens.filter((t) => hay.includes(t)).length };
+      })
+      .filter((x) => x.score > 0);
+    scored.sort((a, b) => b.score - a.score || (b.d.cell_count ?? 0) - (a.d.cell_count ?? 0));
+    return scored.slice(0, Math.max(1, Math.min(size, 50))).map(({ d, dis, tis, asy }) => ({
+      title: clean(d.title),
+      disease: dis.join(", "),
+      tissue: tis.join(", "),
+      assay: asy.join(", "),
+      organism: labels(d.organism).join(", "),
+      cell_count: d.cell_count ?? null,
+      spatial: asy.some((a) => SPATIAL_RE.test(a)),
+      link: d.explorer_url ?? "",
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// ── Human Cell Atlas (Azul Data Portal), keyless public REST — projects by organ facet ──
+const HCA_API = "https://service.azul.data.humancellatlas.org/index/projects";
+
+/** Human Cell Atlas projects for an ORGAN/tissue (Azul's controlled facet, e.g. "liver", "brain").
+ * Returns structured rows (title/organ/cell_count/lab/link). Keyless; [] on any failure. */
+export async function hcaProjects(organ: string, size = 15): Promise<Record<string, unknown>[]> {
+  try {
+    const o = String(organ ?? "").toLowerCase().trim();
+    if (!o) return [];
+    const filters = encodeURIComponent(JSON.stringify({ organ: { is: [o] } }));
+    const data = await httpJson(`${HCA_API}?size=${Math.max(1, Math.min(size, 30))}&filters=${filters}`);
+    const hits = data?.hits ?? [];
+    return hits
+      .map((h: any) => {
+        const p = h.projects?.[0] ?? {};
+        const organs = [...new Set((h.samples ?? []).flatMap((s: any) => s.organ ?? []).map(String))].filter(Boolean);
+        return {
+          title: clean(p.projectTitle),
+          organ: organs.join(", ") || o,
+          cell_count: p.estimatedCellCount ?? null,
+          lab: (p.laboratory ?? []).slice(0, 1).join(", "),
+          doi: (p.publications ?? [])[0]?.doi ?? "",
+          link: p.projectId ? `https://data.humancellatlas.org/explore/projects/${p.projectId}` : "",
+        };
+      })
+      .filter((r: any) => r.title);
+  } catch {
+    return [];
+  }
+}
+
 // ── Open Targets Platform (drug-target–disease associations), keyless public GraphQL ──
 const OT_API = "https://api.platform.opentargets.org/api/v4/graphql";
 
