@@ -228,6 +228,61 @@ export async function ontologyLookup(query: string, ontology = "mondo,efo,hp,go"
   }
 }
 
+// ── Open Targets Platform (drug-target–disease associations), keyless public GraphQL ──
+const OT_API = "https://api.platform.opentargets.org/api/v4/graphql";
+
+export interface OTTarget {
+  symbol: string | null;
+  name: string | null;
+  ensemblId: string | null;
+  score: number; // overall association score (0–1)
+  evidence: Record<string, number>; // datatype → score (genetic_association, literature, clinical, …)
+}
+
+async function otGraphql(query: string, variables: Record<string, unknown>): Promise<any> {
+  const resp = await fetch(OT_API, {
+    method: "POST",
+    headers: { "content-type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ query, variables }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!resp.ok) throw new Error(`OT HTTP ${resp.status}`);
+  return resp.json();
+}
+
+/** Ranked drug-target–disease associations for a disease from Open Targets. Accepts a disease NAME
+ * (resolved via OT search) or an ontology id (MONDO/EFO/HP/Orphanet). Returns targets ranked by
+ * overall association score, each with per-datatype evidence scores. Keyless; [] on any failure. */
+export async function openTargetTargets(disease: string, size = 25): Promise<OTTarget[]> {
+  try {
+    const q = String(disease ?? "").trim();
+    if (!q) return [];
+    // an ontology id (MONDO:0007027 / MONDO_0007027) is used directly (OT's efoId accepts them);
+    // otherwise resolve the free-text name to a disease id via OT search.
+    let id = /^(EFO|MONDO|HP|Orphanet|DOID)[_:]\w+/i.test(q) ? q.replace(/:/g, "_") : "";
+    if (!id) {
+      const s = await otGraphql(`query($q:String!){ search(queryString:$q, entityNames:["disease"]){ hits{ id } } }`, { q });
+      id = s?.data?.search?.hits?.[0]?.id ?? "";
+      if (!id) return [];
+    }
+    const n = Math.max(1, Math.min(size, 50));
+    const a = await otGraphql(
+      "query($id:String!,$size:Int!){ disease(efoId:$id){ id name associatedTargets(page:{index:0,size:$size}){ count rows{ target{ id approvedSymbol approvedName } score datatypeScores{ id score } } } } }",
+      { id, size: n },
+    );
+    const rows = a?.data?.disease?.associatedTargets?.rows ?? [];
+    return rows.map((r: any) => ({
+      symbol: r.target?.approvedSymbol ?? null,
+      name: r.target?.approvedName ?? null,
+      ensemblId: r.target?.id ?? null,
+      score: Math.round((r.score ?? 0) * 1000) / 1000,
+      evidence: Object.fromEntries((r.datatypeScores ?? []).filter((d: any) => (d.score ?? 0) > 0.01).map((d: any) => [d.id, Math.round(d.score * 100) / 100])),
+    }));
+  } catch {
+    return [];
+  }
+}
+
 /** Backend-only raw GET → JSON verbatim / HTML stripped to text. '' on failure. (Not an agent tool.) */
 export async function fetchText(url: string, maxChars = 2500): Promise<string> {
   if (!/^https?:\/\//.test(url || "")) return "";

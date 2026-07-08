@@ -9,14 +9,15 @@ import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 
 import { emit } from "./events";
-import { abstractByDoi, ontologyLookup, searchLiteratureMulti } from "./tools/paperfetch";
+import { abstractByDoi, ontologyLookup, openTargetTargets, searchLiteratureMulti } from "./tools/paperfetch";
 
 export interface LitDeps {
   searchLiteratureMulti: typeof searchLiteratureMulti;
   abstractByDoi: typeof abstractByDoi;
   ontologyLookup: typeof ontologyLookup;
+  openTargetTargets: typeof openTargetTargets;
 }
-const DEFAULT_DEPS: LitDeps = { searchLiteratureMulti, abstractByDoi, ontologyLookup };
+const DEFAULT_DEPS: LitDeps = { searchLiteratureMulti, abstractByDoi, ontologyLookup, openTargetTargets };
 
 // Tuned constants (verbatim from deep_research.py _lit_server). LIT_SEARCH_SIZE is intentionally
 // below searchLiteratureMulti's default 10: these results carry abstracts + tldr, so a smaller set
@@ -24,6 +25,7 @@ const DEFAULT_DEPS: LitDeps = { searchLiteratureMulti, abstractByDoi, ontologyLo
 const LIT_SEARCH_SIZE = 8;
 const ONTOLOGY_LIST = "mondo,efo,hp,go";
 const ONTOLOGY_SIZE = 12;
+const OT_TARGETS_SIZE = 25;
 
 function toolError(name: string, err: unknown, argSummary: string): void {
   try {
@@ -79,6 +81,18 @@ export async function ontologyText(query: string, deps: LitDeps = DEFAULT_DEPS):
   return rows.length ? JSON.stringify(rows) : "[]";
 }
 
+/** get_opentarget_targets body → ranked target JSON, or "[]" when empty/error (never throws). */
+export async function openTargetsText(disease: string, deps: LitDeps = DEFAULT_DEPS): Promise<string> {
+  let rows: unknown[] = [];
+  try {
+    rows = await deps.openTargetTargets(disease, OT_TARGETS_SIZE);
+  } catch (e) {
+    toolError("get_opentarget_targets", e, disease);
+    rows = [];
+  }
+  return rows.length ? JSON.stringify(rows) : "[]";
+}
+
 const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
 
 /** Build the literature MCP server dict to spread into runAgent's extraMcp. */
@@ -104,5 +118,16 @@ export function makeLitMcp(deps: LitDeps = DEFAULT_DEPS): Record<string, unknown
     { query: z.string() },
     async (args: { query: string }) => text(await ontologyText(args.query ?? "", deps)),
   );
-  return { lit: createSdkMcpServer({ name: "lit", version: "1.0.0", tools: [searchLit, getPaper, ontology] }) };
+  const otTargets = tool(
+    "get_opentarget_targets",
+    "Get RANKED drug-target–disease associations from the Open Targets Platform (keyless GraphQL). " +
+      "Accepts a disease NAME (e.g. 'metabolic dysfunction-associated steatohepatitis') OR an ontology " +
+      "id (MONDO/EFO/HP). Returns STRUCTURED rows [{symbol,name,ensemblId,score,evidence:{genetic_" +
+      "association,literature,clinical,...}}] ranked by overall association score. Use this for the " +
+      "target-discovery / druggable-target part of an angle instead of WebFetch-ing the Open Targets " +
+      "website (which needs JS and returns nothing).",
+    { disease: z.string() },
+    async (args: { disease: string }) => text(await openTargetsText(args.disease ?? "", deps)),
+  );
+  return { lit: createSdkMcpServer({ name: "lit", version: "1.0.0", tools: [searchLit, getPaper, ontology, otTargets] }) };
 }
