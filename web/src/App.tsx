@@ -434,6 +434,27 @@ function ReportBibliography(props: { report: DeepReport }) {
 }
 
 // pretty-print the raw multi-tool record dump for the "原始记录" toggle (best-effort)
+// Classify a database record by the KIND of biological evidence its source provides — the data types
+// used in drug-target identification/validation (Open Targets evidence framework + omics). Deterministic
+// by source host (+ claim text fallback). Colors are light-theme accent pairs.
+const DB_BIO_TYPES: { test: RegExp; label: string; bg: string; fg: string }[] = [
+    { test: /clinicaltrials\.gov|chembl|drugbank|clinicaltrialsregister/i, label: '药物/临床', bg: '#dbeafe', fg: '#1d4ed8' },
+    { test: /opentargets/i, label: '靶点关联', bg: '#f3e8ff', fg: '#7e22ce' },
+    { test: /cellxgene|single-?cell|scrna|sc-rna/i, label: '表达·单细胞', bg: '#dcfce7', fg: '#15803d' },
+    { test: /spatial|genomics\.cn|hmsma|stomics|stereo-?seq/i, label: '表达·空间组学', bg: '#d1fae5', fg: '#047857' },
+    { test: /cellatlas|livercellatlas|tabula|humancellatlas|\batlas\b/i, label: '表达·细胞图谱', bg: '#ccfbf1', fg: '#0f766e' },
+    { test: /genome\.jp|kegg|reactome|wikipathways|pathway/i, label: '通路/网络', bg: '#fef3c7', fg: '#b45309' },
+    { test: /uniprot|rcsb|\bpdb\b|alphafold/i, label: '蛋白/结构', bg: '#cffafe', fg: '#0e7490' },
+    { test: /gwas|gnomad/i, label: '遗传/关联', bg: '#e0e7ff', fg: '#4338ca' },
+    { test: /gtex|expression.?atlas/i, label: '表达', bg: '#dcfce7', fg: '#15803d' },
+    { test: /ebi\.ac\.uk|\bols\b|ols4|ontology|obolibrary|mondo|\befo\b|\bhp\b/i, label: '本体/注释', bg: '#f1f5f9', fg: '#475569' },
+]
+function dbBioType(source?: string, claim?: string): { label: string; bg: string; fg: string } {
+    const s = `${source ?? ''} ${claim ?? ''}`
+    for (const t of DB_BIO_TYPES) if (t.test.test(s)) return t
+    return { label: '数据库记录', bg: '#f1f5f9', fg: '#64748b' }
+}
+
 function fmtRaw(raw: string): string {
     try {
         return JSON.stringify(JSON.parse(raw), null, 2)
@@ -666,8 +687,7 @@ function DeepReportView(props: { report: DeepReport; onJumpToAngle?: (angle: str
                     </div>
                     <div className="flex flex-col gap-2">
                         {r.databaseFacts!.map((d, i) => {
-                            const sv = d.status === 'confirmed' ? 'success' : d.status === 'refuted' ? 'warning' : 'default'
-                            const sl = d.status === 'confirmed' ? '已确认' : d.status === 'refuted' ? '已否决' : '未核验'
+                            const bt = dbBioType(d.source, d.claim)
                             return (
                                 <div key={i} className="rounded-lg border border-[var(--app-border)] p-3">
                                     <div className="mb-1.5 flex items-center justify-between gap-2">
@@ -675,9 +695,9 @@ function DeepReportView(props: { report: DeepReport; onJumpToAngle?: (angle: str
                                             <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-[var(--app-subtle-bg)] text-[10px] font-medium text-[var(--app-hint)]">
                                                 {i + 1}
                                             </span>
-                                            <Badge variant={sv as 'success' | 'warning' | 'default'} className="text-[10px]">
-                                                {sl}
-                                            </Badge>
+                                            <span style={{ background: bt.bg, color: bt.fg }} className="rounded-full px-2 py-0.5 text-[10px] font-medium">
+                                                {bt.label}
+                                            </span>
                                             {d.quality && (
                                                 <span className="rounded-full bg-[var(--app-subtle-bg)] px-1.5 py-0.5 text-[10px] text-[var(--app-hint)]">
                                                     {d.quality}
