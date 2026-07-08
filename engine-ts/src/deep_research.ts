@@ -7,7 +7,7 @@ import { Budget, clampInt, IMP_RANK, lexicalClusters, MAX_FETCH, MAX_VERIFY_CLAI
 import { makeLitMcp } from "./litmcp";
 import { CircuitBreaker, type OnMessage, runAgent as realRunAgent, type RunAgentOpts, Semaphore, type ToolResult } from "./orchestrate";
 import { AngleFindingSchema, ExtractSchema, MergeSchema, SearchSchema, VerdictSubmitSchema } from "./schemas";
-import { citeByDoi } from "./tools/paperfetch";
+import { abstractByDoi, citeByDoi, normDoi } from "./tools/paperfetch";
 
 const END = (toolName: string) =>
   `\n\nYour ONLY completion action is to call \`${toolName}\` exactly once with the structured ` +
@@ -240,6 +240,52 @@ export type RunAgentFn = (
   phase: string, prompt: string, submitName: string, schema: any, extraMcp: Record<string, unknown>,
   budget: Budget, sem: Semaphore, opts?: RunAgentOpts,
 ) => Promise<[Record<string, unknown> | null, ToolResult[]]>;
+
+/** Read model for the frontend's literature-card list: one card per paper source (deduped by DOI),
+ * enriched with structured metadata (title/authors/venue/year via OpenAlex) and tagged with our OWN
+ * verify status — confirmed / refuted / uncited (retrieved but not used). The card's "summary" is the
+ * extracted claim we actually used (empty for uncited). Sorted confirmed → refuted → uncited. Network
+ * only (no LLM); best-effort per paper (a DOI that won't resolve keeps the source's own title). */
+export async function buildLiterature(confirmed: any[], killed: any[], allSources: any[], allClaims: any[]): Promise<any[]> {
+  const voteStr = (c: any) => c?.vote ?? (c?.verdicts ? c.verdicts.length - (c.refutedVotes ?? 0) + "-" + (c.refutedVotes ?? 0) : undefined);
+  const byDoi = (arr: any[]) => {
+    const m = new Map<string, any>();
+    for (const c of arr) { const k = normDoi(c.doi ?? ""); if (k && !m.has(k)) m.set(k, c); }
+    return m;
+  };
+  const confByDoi = byDoi(confirmed), killedByDoi = byDoi(killed), claimByDoi = byDoi(allClaims);
+  const seen = new Set<string>();
+  const papers: { doi: string; title: string; angle?: string }[] = [];
+  for (const s of allSources) {
+    if (s.source_type !== "paper" || !s.doi) continue;
+    const k = normDoi(s.doi);
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    papers.push({ doi: s.doi, title: s.title, angle: s.angle });
+  }
+  const out: any[] = [];
+  for (const p of papers) { // serial (like bibliography) — avoids bursting OpenAlex
+    const k = normDoi(p.doi);
+    const c = confByDoi.get(k), kc = killedByDoi.get(k);
+    const status = c ? "confirmed" : kc ? "refuted" : "uncited";
+    const src = c ?? kc;
+    const meta = await abstractByDoi(p.doi).catch(() => null);
+    out.push({
+      doi: p.doi,
+      title: meta?.title || p.title || "",
+      authors: meta?.authors ?? [],
+      venue: meta?.venue ?? "",
+      year: meta?.year ?? null,
+      status,
+      vote: voteStr(src),
+      claim: status === "uncited" ? "" : (src?.claim ?? claimByDoi.get(k)?.claim ?? ""),
+      angle: src?.angle ?? p.angle,
+    });
+  }
+  const order: Record<string, number> = { confirmed: 0, refuted: 1, uncited: 2 };
+  out.sort((a, b) => (order[a.status] ?? 3) - (order[b.status] ?? 3));
+  return out;
+}
 
 /** Pre-verify claim dedup (Stage A, lexical / lossless): collapse near-duplicate claims (the same
  * assertion surfacing under different angles/sources) so each fact is verified once instead of N×3.
@@ -479,6 +525,13 @@ export async function research(question: string, angles: Angle[], opts: Research
   ev("verify", "验证完成:" + voted.length + " → 确认 " + confirmed.length + ",否决 " + killed.length);
 
   const refutedOut = killed.map((c) => ({ claim: c.claim, vote: c.verdicts.length - c.refutedVotes + "-" + c.refutedVotes, source: c.sourceUrl }));
+  // literature read-model (paper cards + our verify status) — network-only, never fails the run
+  let literature: any[] = [];
+  try {
+    literature = await buildLiterature(confirmed, killed, allSources, allClaims);
+  } catch (e) {
+    console.warn("buildLiterature failed:", e instanceof Error ? e.message : e);
+  }
 
   // raw database data — ALWAYS preserved, annotated with its verify status
   const ok = new Set(confirmed.map((c) => c.claim + "|" + c.sourceUrl));
@@ -493,7 +546,7 @@ export async function research(question: string, angles: Angle[], opts: Research
     return {
       question,
       summary: "All " + voted.length + " claims refuted by adversarial verification. Research inconclusive — sources may be low-quality or claims overstated.",
-      findings: [], refuted: refutedOut, databaseFacts: dbOut,
+      findings: [], refuted: refutedOut, databaseFacts: dbOut, literature,
       sources: allSources.map((s) => ({ url: s.url, quality: s.sourceQuality, claimCount: s.claims.length })),
       stats: { ...statsBase, verified: voted.length, confirmed: 0, killed: killed.length },
       budget: budget.report(),
@@ -569,6 +622,7 @@ export async function research(question: string, angles: Angle[], opts: Research
     refuted: refutedOut,
     sources: sourcesOut,
     references,
+    literature,
     databaseFacts: dbOut,
     stats,
     budget: budget.report(),
