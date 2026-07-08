@@ -751,12 +751,16 @@ function DeepReportView(props: { report: DeepReport; onJumpToAngle?: (angle: str
                                         </div>
                                     </div>
                                     {(() => {
+                                        // only blocks that actually yield columns are renderable as tables; a block whose
+                                        // fields are all skipped (e.g. a [Bash] HTML dump under a `data` key) yields none →
+                                        // fall through to the quote/claim prose so the card is never blank.
                                         const blocks = parseRawBlocks(d.raw)
+                                            .map(b => ({ ...b, cols: dbColumns(b.rows) }))
+                                            .filter(b => b.cols.length > 0)
                                         if (blocks.length > 0) {
                                             // structured record → render each data block as a table (Open Targets style)
                                             return blocks.map((b, bi) => {
-                                                const cols = dbColumns(b.rows)
-                                                if (!cols.length) return null
+                                                const cols = b.cols
                                                 return (
                                                     <div key={bi} className={bi > 0 ? 'mt-2' : ''}>
                                                         <div className="overflow-x-auto rounded-md border border-[var(--app-border)]">
