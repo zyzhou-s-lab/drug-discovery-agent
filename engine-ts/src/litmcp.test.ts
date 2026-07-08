@@ -2,13 +2,15 @@
 // module mocking: just pass fake tool fns and assert the slim/NOT_FOUND/[] formatting + never-throw.
 import { expect, test } from "bun:test";
 
-import { getPaperText, type LitDeps, makeLitMcp, ontologyText, openTargetsText, searchLiteratureText } from "./litmcp";
+import { cellxgeneText, getPaperText, hcaText, type LitDeps, makeLitMcp, ontologyText, openTargetsText, searchLiteratureText } from "./litmcp";
 
 const deps = (over: Partial<LitDeps>): LitDeps => ({
   searchLiteratureMulti: async () => [] as any,
   abstractByDoi: async () => null,
   ontologyLookup: async () => [],
   openTargetTargets: async () => [],
+  cellxgeneDatasets: async () => [],
+  hcaProjects: async () => [],
   ...over,
 });
 
@@ -39,6 +41,16 @@ test("openTargetsText → JSON rows, or [] when empty / on error (never throws)"
   expect(await openTargetsText("MASH", deps({ openTargetTargets: async () => rows as any }))).toBe(JSON.stringify(rows));
   expect(await openTargetsText("MASH", deps({ openTargetTargets: async () => [] }))).toBe("[]");
   expect(await openTargetsText("MASH", deps({ openTargetTargets: async () => { throw new Error("boom"); } }))).toBe("[]");
+});
+
+test("cellxgeneText / hcaText → JSON rows, or [] when empty / on error (never throws)", async () => {
+  const cx = [{ title: "liver atlas", disease: "MASH", tissue: "liver", assay: "10x", cell_count: 5000, spatial: false }];
+  expect(await cellxgeneText("MASH", deps({ cellxgeneDatasets: async () => cx as any }))).toBe(JSON.stringify(cx));
+  expect(await cellxgeneText("MASH", deps({ cellxgeneDatasets: async () => [] }))).toBe("[]");
+  expect(await cellxgeneText("MASH", deps({ cellxgeneDatasets: async () => { throw new Error("boom"); } }))).toBe("[]");
+  const hc = [{ title: "Liver project", organ: "liver", cell_count: 12000 }];
+  expect(await hcaText("liver", deps({ hcaProjects: async () => hc as any }))).toBe(JSON.stringify(hc));
+  expect(await hcaText("liver", deps({ hcaProjects: async () => { throw new Error("boom"); } }))).toBe("[]");
 });
 
 test("getPaperText → NOT_FOUND when unresolved, else the record", async () => {

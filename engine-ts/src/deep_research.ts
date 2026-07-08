@@ -79,6 +79,8 @@ export function FETCH_PROMPT(question: string, source: FetchSource, angle: strin
       "   for DRUG-TARGET–disease associations (Open Targets — target lists, association scores,\n" +
       "   evidence types) PREFER the `get_opentarget_targets` tool (pass the disease name or MONDO/EFO id;\n" +
       "   returns ranked structured targets) — do NOT WebFetch the Open Targets site (JS-only, returns nothing);\n" +
+      "   for SINGLE-CELL / SPATIAL datasets PREFER `get_cellxgene_datasets` (disease or tissue) and\n" +
+      "   `get_hca_projects` (organ, e.g. 'liver') — both return structured dataset rows;\n" +
       "   otherwise WebFetch the API / record URL:\n" +
       "   **URL:** " + (source.url ?? "") + "\n" +
       "   Treat it as a PRIMARY source; capture the EXACT record fields/values (IDs, gene-subtype\n" +
