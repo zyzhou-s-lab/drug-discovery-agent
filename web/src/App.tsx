@@ -455,6 +455,40 @@ function dbBioType(source?: string, claim?: string): { label: string; bg: string
     return { label: '数据库记录', bg: '#f1f5f9', fg: '#64748b' }
 }
 
+// Parse a database record's raw blob (`[tool] {json}` blocks joined by \n---\n) into structured rows,
+// dropping GraphQL-error payloads and non-objects — i.e. the tabulatable data (ontology terms, dataset
+// listings…). Records whose raw is prose/errors yield [] → the card falls back to quote/claim text.
+function parseRawBlocks(raw?: string): { tool: string; rows: Record<string, unknown>[] }[] {
+    if (!raw) return []
+    const out: { tool: string; rows: Record<string, unknown>[] }[] = []
+    for (const blk of raw.split(/\n---\n/)) {
+        const m = blk.match(/^\[([^\]]+)\]\s*([\s\S]*)$/)
+        if (!m) continue
+        try {
+            const p = JSON.parse(m[2])
+            const arr = Array.isArray(p) ? p : [p]
+            const rows = arr.filter((o): o is Record<string, unknown> => !!o && typeof o === 'object' && !Array.isArray(o) && !('errors' in (o as object)))
+            if (rows.length) out.push({ tool: m[1], rows })
+        } catch { /* prose, not json */ }
+    }
+    return out
+}
+const DB_SKIP_COLS = new Set(['raw', 'content', 'data', 'type', 'text', 'is_error', 'tool_use_id', 'abstract', 'citation_count', 'authors', 'iri'])
+const DB_PREFER_COLS = ['id', 'label', 'name', 'definition', 'dataset_id', 'title', 'disease', 'organism', 'tissue', 'assay', 'year', 'venue', 'ontology']
+function dbColumns(rows: Record<string, unknown>[]): string[] {
+    const all = new Set<string>()
+    for (const o of rows) for (const k of Object.keys(o)) if (!DB_SKIP_COLS.has(k) && o[k] != null && o[k] !== '' && o[k] !== false) all.add(k)
+    return [...DB_PREFER_COLS.filter(c => all.has(c)), ...[...all].filter(c => !DB_PREFER_COLS.includes(c))]
+}
+function dbCell(v: unknown) {
+    if (v == null) return ''
+    if (Array.isArray(v)) return v.map(x => x && typeof x === 'object' ? String((x as Record<string, unknown>).label ?? (x as Record<string, unknown>).name ?? JSON.stringify(x)) : String(x)).join(', ')
+    if (typeof v === 'object') return JSON.stringify(v)
+    const s = String(v)
+    if (/^https?:\/\//.test(s)) return <a href={s} target="_blank" rel="noreferrer" className="text-[var(--app-link,#2563eb)] hover:underline">{s}</a>
+    return s
+}
+
 function fmtRaw(raw: string): string {
     try {
         return JSON.stringify(JSON.parse(raw), null, 2)
@@ -716,18 +750,44 @@ function DeepReportView(props: { report: DeepReport; onJumpToAngle?: (angle: str
                                             ) : null}
                                         </div>
                                     </div>
-                                    {d.quote && (
-                                        <>
-                                            <div className="mb-1 text-[10px] font-medium text-[var(--app-hint)]">原文引用</div>
-                                            <div className="mb-2 text-sm leading-relaxed">"{d.quote}"</div>
-                                        </>
-                                    )}
-                                    {d.claim && (
-                                        <>
-                                            <div className="mb-1 text-[10px] font-medium text-[var(--app-hint)]">提取摘要</div>
-                                            <div className="border-l-2 border-[var(--app-border)] pl-2 text-xs text-[var(--app-hint)]">{d.claim}</div>
-                                        </>
-                                    )}
+                                    {(() => {
+                                        const blocks = parseRawBlocks(d.raw)
+                                        if (blocks.length > 0) {
+                                            // structured record → render each data block as a table (Open Targets style)
+                                            return blocks.map((b, bi) => {
+                                                const cols = dbColumns(b.rows)
+                                                if (!cols.length) return null
+                                                return (
+                                                    <div key={bi} className={bi > 0 ? 'mt-2' : ''}>
+                                                        <div className="overflow-x-auto rounded-md border border-[var(--app-border)]">
+                                                            <table className="w-full text-xs">
+                                                                <thead>
+                                                                    <tr className="border-b border-[var(--app-border)] bg-[var(--app-subtle-bg)] text-left text-[var(--app-hint)]">
+                                                                        {cols.map(c => <th key={c} className="whitespace-nowrap px-2 py-1 font-medium">{c}</th>)}
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody>
+                                                                    {b.rows.slice(0, 30).map((o, ri) => (
+                                                                        <tr key={ri} className="border-b border-[var(--app-border)] align-top last:border-0">
+                                                                            {cols.map(c => <td key={c} className="px-2 py-1">{dbCell(o[c])}</td>)}
+                                                                        </tr>
+                                                                    ))}
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                        {b.rows.length > 30 && <div className="mt-1 text-[10px] text-[var(--app-hint)]">…共 {b.rows.length} 行,仅显示前 30</div>}
+                                                    </div>
+                                                )
+                                            })
+                                        }
+                                        // prose record (no structured JSON) → clean quote + claim, no cramped labels
+                                        return (
+                                            <>
+                                                {d.quote && <div className="text-sm leading-relaxed">"{d.quote}"</div>}
+                                                {d.claim && <div className="mt-1.5 border-l-2 border-[var(--app-border)] pl-2 text-xs text-[var(--app-hint)]">{d.claim}</div>}
+                                            </>
+                                        )
+                                    })()}
                                     {d.raw && (
                                         <details className="mt-2">
                                             <summary className="cursor-pointer text-[11px] text-[var(--app-hint)] hover:text-[var(--app-fg)]">原始记录</summary>
