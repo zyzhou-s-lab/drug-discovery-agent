@@ -245,14 +245,21 @@ export async function cellxgeneDatasets(query: string, size = 20): Promise<Recor
   try {
     const tokens = queryTokens(query);
     if (!tokens.length) return [];
-    const all = await httpJson(CELLXGENE_API);
+    // the full index is ~several MB and takes ~15-20s — httpJson's 15s cap is too tight, so fetch
+    // directly with a longer budget.
+    const resp = await fetch(CELLXGENE_API, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(40_000) });
+    if (!resp.ok) return [];
+    const all = await resp.json();
     if (!Array.isArray(all)) return [];
     const labels = (arr: unknown): string[] => (Array.isArray(arr) ? arr : []).map((x: any) => String(x?.label ?? "")).filter(Boolean);
     const scored = all
       .map((d: any) => {
         const dis = labels(d.disease), tis = labels(d.tissue), asy = labels(d.assay);
-        const hay = (dis.join(" ") + " " + tis.join(" ") + " " + String(d.title ?? "")).toLowerCase();
-        return { d, dis, tis, asy, score: tokens.filter((t) => hay.includes(t)).length };
+        const disHay = dis.join(" ").toLowerCase(), tisHay = tis.join(" ").toLowerCase();
+        // weight DISEASE matches 2× (a specific disease query should beat a pan-tissue atlas that
+        // merely includes the tissue); tissue-only matches still count.
+        const score = tokens.filter((t) => disHay.includes(t)).length * 2 + tokens.filter((t) => tisHay.includes(t)).length;
+        return { d, dis, tis, asy, score };
       })
       .filter((x) => x.score > 0);
     scored.sort((a, b) => b.score - a.score || (b.d.cell_count ?? 0) - (a.d.cell_count ?? 0));
