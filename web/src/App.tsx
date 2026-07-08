@@ -402,7 +402,10 @@ function CitationChip(props: { source: string; references?: DeepReport['referenc
 // canonical numbered bibliography from report.references, with #dd-ref-N anchors + verify status
 function ReportBibliography(props: { report: DeepReport }) {
     const refs = props.report.references ?? []
-    if (refs.length === 0) return null
+    // This numbered bibliography only exists to back the narrative's <sup>N</sup> footnotes. Without a
+    // narrative there are no superscripts referring to it → it's a redundant subset of the 文献 card, so
+    // hide it. (When present() produced a narrative, keep it so the footnote anchors resolve.)
+    if (refs.length === 0 || !props.report.narrative) return null
     const status = new Map<number, 'confirmed' | 'refuted'>()
     for (const f of props.report.findings ?? [])
         for (const s of f.sources ?? []) {
