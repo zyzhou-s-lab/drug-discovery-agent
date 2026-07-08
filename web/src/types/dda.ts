@@ -160,6 +160,8 @@ export interface DeepReport {
     sources?: { url: string; quality: string; angle?: string; claimCount?: number }[]
     // unified numbered bibliography over ALL cited sources (paper→apa7 / database+web→title+url)
     references?: { n: number; kind?: string; doi?: string; apa7?: string; title?: string; url?: string }[]
+    // literature-card read model: one paper per card + our verify status (deep_research.buildLiterature)
+    literature?: { doi: string; title: string; authors: string[]; venue: string; year: number | null; status: 'confirmed' | 'refuted' | 'uncited'; vote?: string; claim?: string; angle?: string }[]
     webSources?: { title?: string; url: string }[]
     dbSources?: { title?: string; url: string }[]
     // raw database records — always preserved & shown; status = its verify outcome (confirmed/refuted/unverified)

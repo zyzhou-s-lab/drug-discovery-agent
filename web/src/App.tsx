@@ -617,6 +617,7 @@ function DeepReportView(props: { report: DeepReport; onJumpToAngle?: (angle: str
                     )}
                 </Card>
             )}
+<<<<<<< Updated upstream
             {/* database records: structured fields (claim/quote/source/doi/quality/status); raw behind a toggle */}
             {(r.databaseFacts?.length ?? 0) > 0 && (
                 <Card className="p-4">
@@ -663,6 +664,220 @@ function DeepReportView(props: { report: DeepReport; onJumpToAngle?: (angle: str
                                     )}
                                     {d.claim && (
                                         <>
+=======
+            {/* literature cards: one paper per card + our verify status (confirmed → refuted → uncited) */}
+            {r.literature && r.literature.length > 0 && (() => {
+                const order: Record<string, number> = { confirmed: 0, refuted: 1, uncited: 2 }
+                const lit = [...r.literature].sort((a, b) => (order[a.status] ?? 3) - (order[b.status] ?? 3))
+                const nC = lit.filter(l => l.status === 'confirmed').length
+                const nR = lit.filter(l => l.status === 'refuted').length
+                const nU = lit.filter(l => l.status === 'uncited').length
+                const surname = (n: string) => n.trim().split(/\s+/).slice(-1)[0] || n
+                const byline = (l: typeof lit[number]) => [
+                    l.authors?.length ? l.authors.slice(0, 2).map(surname).join(', ') + (l.authors.length > 2 ? ', et al.' : '') : '',
+                    l.venue, l.year || '',
+                ].filter(Boolean).join(' · ')
+                const meta = (s: string): ['success' | 'warning' | 'default', string] =>
+                    s === 'confirmed' ? ['success', '已确认'] : s === 'refuted' ? ['warning', '已否决'] : ['default', '未引用']
+                return (
+                    <Card className="p-4">
+                        <div className="mb-3 text-sm font-medium">文献 <span className="text-xs font-normal text-[var(--app-hint)]">({lit.length} · {nC} 已确认 · {nR} 已否决 · {nU} 未引用)</span></div>
+                        <div className="flex flex-col gap-2">
+                            {lit.map((l, i) => {
+                                const [variant, label] = meta(l.status)
+                                return (
+                                    <div key={i} className="rounded-lg border border-[var(--app-border)] p-3">
+                                        <div className="mb-1 flex items-start justify-between gap-2">
+                                            <a href={`https://doi.org/${l.doi}`} target="_blank" rel="noreferrer" className="text-[15px] font-semibold leading-snug text-[var(--app-link,#2563eb)] hover:underline">{l.title}</a>
+                                            <Badge variant={variant} className="shrink-0 text-[10px]">{label}{l.vote ? ` ${l.vote}` : ''}</Badge>
+                                        </div>
+                                        <div className="mb-2 text-xs text-[var(--app-hint)]">{byline(l)}</div>
+                                        {l.claim
+                                            ? <div className="rounded-md bg-[var(--app-subtle-bg)] px-3 py-2 text-sm leading-relaxed">"{l.claim}"</div>
+                                            : <div className="rounded-md bg-[var(--app-subtle-bg)] px-3 py-2 text-sm italic text-[var(--app-hint)]">检索到但未被报告引用(候选证据)</div>}
+                                        <div className="mt-2 text-[11px] text-[var(--app-hint)]">
+                                            <a href={`https://doi.org/${l.doi}`} target="_blank" rel="noreferrer" className="text-[var(--app-link,#2563eb)] hover:underline">doi:{l.doi}</a>
+                                            {l.angle && <span> · 报告角度:{l.angle}</span>}
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    </Card>
+                )
+            })()}
+            {/* raw database records: per-card structured data + APA7 references */}
+            {r.databaseFacts && r.databaseFacts.length > 0 && (() => {
+                const SKIP_TOOLS = new Set(['Bash', 'WebFetch', 'WebSearch', 'Read', 'Write', 'Edit', 'Glob', 'Grep'])
+                const parseRawAll = (raw: string): { tool: string; data: unknown }[] => {
+                    const blocks = raw.split(/\n---\n/)
+                    const result: { tool: string; data: unknown }[] = []
+                    for (const blk of blocks) {
+                        const m = blk.match(/^\[([^\]]+)\]\s*([\s\S]*)$/)
+                        if (!m) continue
+                        try {
+                            const parsed = JSON.parse(m[2])
+                            const data = Array.isArray(parsed) ? parsed : [parsed]
+                            const isEmpty = data.length === 0
+                            if (!isEmpty) result.push({ tool: m[1], data })
+                        } catch { /* not json */ }
+                    }
+                    return result
+                }
+                const SKIP2 = new Set(['content', 'data', 'bash', 'type', 'text', 'is_error', 'tool_use_id', 'abstract', 'citation_count', 'authors'])
+                const ontologyWebUrl = (obj: Record<string, unknown>): string => {
+                    const ont = String(obj.ontology || obj.ontology_name || '').toLowerCase()
+                    const rawId = String(obj.obo_id || obj.id || obj.short_form || '')
+                    if (ont && rawId) return `https://www.ebi.ac.uk/ols4/ontologies/${ont}/terms?obo_id=${encodeURIComponent(rawId)}`
+                    if (obj.iri) return String(obj.iri)
+                    return ''
+                }
+                // DOI → verification status map from findings and refuted
+                const doiStatus = new Map<string, { status: string; confidence: string }>()
+                for (const f of (r.findings ?? [])) {
+                    for (const s of (f.sources ?? [])) {
+                        const doi = s.replace(/^https?:\/\/doi\.org\//, '')
+                        if (doi) doiStatus.set(doi.toLowerCase(), { status: 'confirmed', confidence: f.confidence })
+                    }
+                }
+                for (const c of (r.refuted ?? [])) {
+                    const doi = (c.source || '').replace(/^https?:\/\/doi\.org\//, '')
+                    if (doi) doiStatus.set(doi.toLowerCase(), { status: 'refuted', confidence: '' })
+                }
+                // Format author: "Deke Jiang" → "Jiang, D."
+                const fmtAuthor = (name: string): string => {
+                    const parts = name.trim().split(/\s+/)
+                    if (parts.length < 2) return name
+                    const last = parts[parts.length - 1]
+                    const initials = parts.slice(0, -1).map(p =>
+                        p.length <= 2 || /\./.test(p) ? p.charAt(0).toUpperCase() + '.' : p.charAt(0).toUpperCase() + '.'
+                    )
+                    return `${last}, ${initials.join(' ')}`
+                }
+                // APA7 formatter: all authors (year). Title. Venue. DOI
+                const fmtApa7 = (ref: Record<string, unknown>): string => {
+                    const authors = ref.authors as string[] | undefined
+                    const year = String(ref.year || 'n.d.')
+                    const title = String(ref.title || '')
+                    const venue = String(ref.venue || '')
+                    const doi = String(ref.doi || '')
+                    let authStr = ''
+                    if (authors && authors.length > 0) {
+                        const formatted = authors.map(fmtAuthor)
+                        if (formatted.length > 20) {
+                            authStr = formatted.slice(0, 19).join(', ') + ', ... ' + formatted[formatted.length - 1]
+                        } else {
+                            authStr = formatted.length <= 2
+                                ? formatted.join(' & ')
+                                : formatted.slice(0, -1).join(', ') + ' & ' + formatted[formatted.length - 1]
+                        }
+                    }
+                    let s = ''
+                    if (authStr) s += authStr + ' '
+                    s += `(${year}). ${title}.`
+                    if (venue) s += ` ${venue}.`
+                    if (doi) s += ` https://doi.org/${doi}`
+                    return s
+                }
+                // collect all literature refs across all facts for the global references card
+                const allRefs: { doi: string; apa7: string; status: string; confidence: string }[] = []
+                {
+                    const refMap = new Map<string, { doi: string; apa7: string; status: string; confidence: string; hasAuthors: boolean }>()
+                    for (const d of r.databaseFacts!) {
+                        const blocks = d.raw ? parseRawAll(d.raw as string) : []
+                        for (const b of blocks) {
+                            if (!/search_literature|get_paper/.test(b.tool)) continue
+                            const arr = Array.isArray(b.data) ? b.data as Record<string, unknown>[] : [b.data as Record<string, unknown>]
+                            for (const item of arr) {
+                                if (!item || typeof item !== 'object') continue
+                                const doi = String((item as Record<string, unknown>).doi || '')
+                                if (!doi) continue
+                                const key = doi.toLowerCase()
+                                const hasAuthors = ((item as Record<string, unknown>).authors as unknown[])?.length > 0
+                                const existing = refMap.get(key)
+                                // prefer entry with authors
+                                if (existing && existing.hasAuthors && !hasAuthors) continue
+                                const st = doiStatus.get(key)
+                                refMap.set(key, {
+                                    doi,
+                                    apa7: fmtApa7(item as Record<string, unknown>),
+                                    status: st?.status || 'unverified',
+                                    confidence: st?.confidence || '',
+                                    hasAuthors,
+                                })
+                            }
+                        }
+                    }
+                    allRefs.push(...refMap.values())
+                }
+                return (
+                    <>
+                    {/* legacy APA7 references card — fallback only for older reports that lack r.literature */}
+                    {!r.literature?.length && allRefs.length > 0 && (
+                        <Card className="p-4">
+                            <div className="mb-2 text-sm font-medium">参考文献 <span className="text-xs font-normal text-[var(--app-hint)]">({allRefs.length})</span></div>
+                            <ol className="list-decimal pl-5 flex flex-col gap-1.5">
+                                {allRefs.map((ref, ri) => {
+                                    const stLabel = ref.status === 'confirmed' ? '已确认' : ref.status === 'refuted' ? '已否决' : '未核验'
+                                    const stVariant = ref.status === 'confirmed' ? 'success' : ref.status === 'refuted' ? 'warning' : 'default'
+                                    return (
+                                        <li key={ri} className="text-xs leading-relaxed">
+                                            <Badge variant={stVariant as 'success' | 'warning' | 'default'} className="mr-1.5 text-[10px]">{stLabel}</Badge>
+                                            <span>{ref.apa7}</span>
+                                            {ref.confidence && <span className="ml-1 text-[var(--app-hint)]">({ref.confidence})</span>}
+                                        </li>
+                                    )
+                                })}
+                            </ol>
+                        </Card>
+                    )}
+                    <Card className="p-4">
+                        <div className="mb-3 text-sm font-medium">数据库数据 <span className="text-xs font-normal text-[var(--app-hint)]">({r.databaseFacts.length} 条原始记录)</span></div>
+                        <div className="flex flex-col gap-2">
+                            {r.databaseFacts.map((d, i) => {
+                                const sv = d.status === 'confirmed' ? 'success' : d.status === 'refuted' ? 'warning' : 'default'
+                                const sl = d.status === 'confirmed' ? '已确认' : d.status === 'refuted' ? '已否决' : '未核验'
+                                const src = d.source || ''
+                                const allBlocks = d.raw ? parseRawAll(d.raw as string) : []
+                                // find which blocks this fact's quote matches
+                                const matchedBlocks = (() => {
+                                    if (allBlocks.length === 0) return []
+                                    const qText = (d.quote || d.claim || '').toLowerCase()
+                                    const qTokens = qText.split(/[\s,;:]+/).filter((t: string) => t.length > 3)
+                                    if (qTokens.length === 0) return allBlocks.filter(b => !SKIP_TOOLS.has(b.tool))
+                                    // find blocks that match the quote
+                                    const result: { tool: string; data: unknown }[] = []
+                                    for (const b of allBlocks) {
+                                        const content = JSON.stringify(b.data).toLowerCase()
+                                        const blockScore = qTokens.filter((t: string) => content.includes(t)).length
+                                        if (blockScore < 2) continue
+                                        // filter records within the block to only those matching the quote
+                                        const arr = Array.isArray(b.data) ? b.data as Record<string, unknown>[] : [b.data as Record<string, unknown>]
+                                        const filtered = arr.filter(obj => {
+                                            const objStr = JSON.stringify(obj).toLowerCase()
+                                            return qTokens.filter((t: string) => objStr.includes(t)).length >= 1
+                                        })
+                                        result.push({ ...b, data: filtered.length > 0 ? filtered : arr })
+                                    }
+                                    return result.length > 0 ? result : allBlocks.filter(b => !SKIP_TOOLS.has(b.tool))
+                                })()
+                                const blocks = matchedBlocks.filter(b => !SKIP_TOOLS.has(b.tool) && !/search_literature|get_paper|submit_claims/.test(b.tool))
+                                return (
+                                    <div key={i} className="rounded-lg border border-[var(--app-border)] overflow-hidden">
+                                        {/* Section 1: 搜索描述 */}
+                                        <div className="p-3">
+                                            <div className="mb-1.5 flex items-center justify-between gap-2">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-[var(--app-subtle-bg)] text-[10px] font-medium text-[var(--app-hint)]">{i + 1}</span>
+                                                    <Badge variant={sv as 'success' | 'warning' | 'default'} className="text-[10px]">{sl}</Badge>
+                                                    {d.quality && <span className="rounded-full bg-[var(--app-subtle-bg)] px-1.5 py-0.5 text-[10px] text-[var(--app-hint)]">{d.quality}</span>}
+                                                </div>
+                                                <div className="flex items-center gap-2 truncate text-[11px]">
+                                                    {d.doi && <a href={`https://doi.org/${d.doi}`} target="_blank" rel="noreferrer" className="truncate text-[var(--app-link,#2563eb)] hover:underline">doi:{d.doi}</a>}
+                                                </div>
+                                            </div>
+                                            {d.quote && <><div className="mb-1 text-[10px] font-medium text-[var(--app-hint)]">原文引用</div><div className="mb-2 text-sm leading-relaxed">"{d.quote}"</div></>}
+>>>>>>> Stashed changes
                                             <div className="mb-1 text-[10px] font-medium text-[var(--app-hint)]">提取摘要</div>
                                             <div className="border-l-2 border-[var(--app-border)] pl-2 text-xs text-[var(--app-hint)]">{d.claim}</div>
                                         </>
