@@ -5,7 +5,7 @@ import { ddaApi } from '@/api/dda'
 
 // Pipeline stage labels for file grouping
 const STAGE_LABEL: Record<string, string> = {
-    'disease-overview': '0 · 研究角度拆解',
+    'disease-overview': '研究内容',
     'target-hypothesis': '1 · 靶点假设',
     'literature-evidence': '2 · 文献证据',
     'target-selection': '3 · 靶点选定',

@@ -39,7 +39,7 @@ export function ScopeDialog(props: {
         <Dialog open={props.open} onOpenChange={(v) => !loading && props.onOpenChange(v)}>
             <DialogContent className="max-w-2xl">
                 <DialogHeader>
-                    <DialogTitle>研究角度拆解 (Scope)</DialogTitle>
+                    <DialogTitle>研究内容 (Scope)</DialogTitle>
                 </DialogHeader>
                 <div className="flex flex-col gap-3">
                     <p className="text-xs text-[var(--app-hint)]">

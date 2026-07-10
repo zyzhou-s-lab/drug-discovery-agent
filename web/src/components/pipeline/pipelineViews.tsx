@@ -14,14 +14,23 @@ import { CandidateCard } from '@/components/report/reportView'
 import { useStageDetail, useStageEvents } from '@/hooks/useDda'
 import type { CampaignStage, ReportResponse, ScopeAngle } from '@/types/dda'
 
+// Map a live-progress status label (进行中 / 已暂停 / 完成 / 失败 …) to a Badge variant.
+function extraBadgeVariant(label: string): 'default' | 'success' | 'warning' | 'destructive' {
+    if (label === '完成') return 'success'
+    if (label === '失败') return 'destructive'
+    if (label.includes('中')) return 'warning' // 进行中 / 停止中
+    return 'default' // 已暂停 / 已停止
+}
+
 export function StageRail(props: {
     stages: CampaignStage[]
     selected: string | null
     onSelect: (name: string) => void
     extra?: { id: string; label: string; badge?: string }[]
 }) {
+    // equal-sized buttons (fixed h/w); status badge sits inline to the right of the label
     const cls = (active: boolean) =>
-        'flex flex-col items-start gap-1 rounded-lg border px-3 py-2 text-left transition-colors ' +
+        'flex h-11 w-40 items-center justify-between gap-2 rounded-lg border px-3 text-left transition-colors ' +
         (active
             ? 'border-[var(--app-button)] bg-[var(--app-subtle-bg)]'
             : 'border-[var(--app-border)] hover:bg-[var(--app-subtle-bg)]')
@@ -29,17 +38,14 @@ export function StageRail(props: {
         <div className="flex flex-wrap gap-2">
             {props.stages.map((s) => (
                 <button key={s.name} onClick={() => props.onSelect(s.name)} className={cls(s.name === props.selected)}>
-                    <span className="text-sm font-medium">{stageLabel(s.name)}</span>
-                    <span className="flex items-center gap-1.5">
-                        <Badge variant={STATUS_VARIANT[s.status]}>{STATUS_LABEL[s.status]}</Badge>
-                        {s.scatter && <span className="text-[10px] text-[var(--app-hint)]">并行 ×{s.angles.length}</span>}
-                    </span>
+                    <span className="truncate text-sm font-medium">{stageLabel(s.name)}</span>
+                    <Badge variant={STATUS_VARIANT[s.status]}>{STATUS_LABEL[s.status]}</Badge>
                 </button>
             ))}
             {(props.extra || []).map((e) => (
                 <button key={e.id} onClick={() => props.onSelect(e.id)} className={cls(e.id === props.selected)}>
-                    <span className="text-sm font-medium">{e.label}</span>
-                    {e.badge && <span className="text-[10px] text-[var(--app-hint)]">{e.badge}</span>}
+                    <span className="truncate text-sm font-medium">{e.label}</span>
+                    {e.badge && <Badge variant={extraBadgeVariant(e.badge)}>{e.badge}</Badge>}
                 </button>
             ))}
         </div>

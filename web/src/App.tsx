@@ -210,8 +210,8 @@ export function App() {
                                               : '失败',
                                       }]
                                     : []),
-                                // 检索简报 = narrative + db data + claims
-                                ...(report?.report ? [{ id: REPORT_TAB, label: '检索简报' }] : []),
+                                // 研究报告 = narrative + db data + claims
+                                ...(report?.report ? [{ id: REPORT_TAB, label: '研究报告' }] : []),
                             ]}
                         />
                     )}
