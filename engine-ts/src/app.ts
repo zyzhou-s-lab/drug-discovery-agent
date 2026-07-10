@@ -12,6 +12,7 @@ import { stream, streamSSE } from "hono/streaming";
 
 import { getCapabilities } from "./capabilities";
 import { applySettings, ConfigUpdateSchema, getConfig, NUM_BOUNDS, saveSettings, trustedOrigin } from "./config";
+import { setToolEnabled } from "./toolgate";
 import { type ChatMessage, defaultChat } from "./llm";
 import { research as realResearch } from "./deep_research";
 import { readStageEvents } from "./events";
@@ -248,6 +249,19 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
   app.get("/api/pipeline", (c) => c.json({ stages: PIPELINE }));
 
   app.get("/api/capabilities", (c) => c.json(getCapabilities())); // skills + tool/MCP inventory (settings page)
+
+  // Toggle one tool on/off (persisted; applied on the next run). CSRF-guarded like config writes;
+  // core tools (required) can't be gated.
+  app.post("/api/tools/gate", async (c) => {
+    if (!trustedOrigin(c.req.header("origin"))) return c.json({ error: "cross-origin write blocked" }, 403);
+    const body = (await c.req.json().catch(() => ({}))) as { tool?: unknown; enabled?: unknown };
+    const tool = String(body.tool ?? "");
+    if (!tool) return c.json({ error: "tool required" }, 400);
+    const isCore = getCapabilities().toolGroups.some((g) => g.tools.some((t) => t.name === tool && t.required));
+    if (isCore) return c.json({ error: "core tool cannot be disabled" }, 400);
+    setToolEnabled(tool, Boolean(body.enabled));
+    return c.json(getCapabilities());
+  });
 
   // ── settings page (model endpoint + deep-research knobs), persisted in settings.json ──
   // GET returns the key for the form to prefill — gated by the same CSRF guard as writes.

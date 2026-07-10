@@ -122,7 +122,7 @@ export async function hcaText(organ: string, deps: LitDeps = DEFAULT_DEPS): Prom
 const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
 
 /** Build the literature MCP server dict to spread into runAgent's extraMcp. */
-export function makeLitMcp(deps: LitDeps = DEFAULT_DEPS): Record<string, unknown> {
+export function makeLitMcp(deps: LitDeps = DEFAULT_DEPS, disabled: Set<string> = new Set()): Record<string, unknown> {
   const searchLit = tool(
     "search_literature",
     "Search peer-reviewed literature (OpenAlex + Semantic Scholar). Returns papers with " +
@@ -173,5 +173,9 @@ export function makeLitMcp(deps: LitDeps = DEFAULT_DEPS): Record<string, unknown
     { organ: z.string() },
     async (args: { organ: string }) => text(await hcaText(args.organ ?? "", deps)),
   );
-  return { lit: createSdkMcpServer({ name: "lit", version: "1.0.0", tools: [searchLit, getPaper, ontology, otTargets, cellxgene, hca] }) };
+  // filter out user-disabled tools (settings 工具 toggles) — applied at build time = takes effect next run
+  const allTools = [searchLit, getPaper, ontology, otTargets, cellxgene, hca];
+  const allNames = ["search_literature", "get_paper", "ontology_lookup", "get_opentarget_targets", "get_cellxgene_datasets", "get_hca_projects"];
+  const tools = allTools.filter((_, i) => !disabled.has(allNames[i]!));
+  return { lit: createSdkMcpServer({ name: "lit", version: "1.0.0", tools }) };
 }

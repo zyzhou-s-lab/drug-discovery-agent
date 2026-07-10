@@ -5,6 +5,7 @@
 // runAgent for offline orchestration tests. See docs/bun-migration-eval.md Phase 3.
 import { Budget, clampInt, IMP_RANK, lexicalClusters, MAX_FETCH, MAX_VERIFY_CLAIMS, CONF_RANK, dedupResults, normUrl, QUAL_RANK, rankClaims, type SearchResult, survives, VOTES_PER_CLAIM, REFUTATIONS_REQUIRED, MAX_DB_RAW } from "./core";
 import { makeLitMcp } from "./litmcp";
+import { getDisabledTools } from "./toolgate";
 import { CircuitBreaker, type OnMessage, runAgent as realRunAgent, type RunAgentOpts, Semaphore, type ToolResult } from "./orchestrate";
 import { AngleFindingSchema, ExtractSchema, MergeSchema, SearchSchema, VerdictSubmitSchema } from "./schemas";
 import { abstractByDoi, citeByDoi, normDoi } from "./tools/paperfetch";
@@ -358,7 +359,7 @@ export async function research(question: string, angles: Angle[], opts: Research
   let lit = opts.lit;
   if (lit === undefined) {
     try {
-      lit = makeLitMcp();
+      lit = makeLitMcp(undefined, getDisabledTools());
     } catch {
       lit = {};
     }

@@ -85,9 +85,17 @@ export interface DdaConfig {
 }
 
 // Capability inventory (GET /capabilities) — surfaced in the settings page (技能 + 工具/MCP).
+export interface ToolParam {
+    name: string
+    type: string
+    required: boolean
+}
 export interface ToolInfo {
     name: string
     desc: string
+    params: ToolParam[]
+    required: boolean // core tool — toggle locked
+    enabled: boolean
 }
 export interface ToolGroup {
     server: string

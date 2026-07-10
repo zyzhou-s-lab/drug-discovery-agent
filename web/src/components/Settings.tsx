@@ -61,6 +61,29 @@ function Field(props: { label: string; hint?: string; children: ReactNode }) {
     )
 }
 
+function Toggle(props: { checked: boolean; disabled?: boolean; onChange: (v: boolean) => void }) {
+    return (
+        <button
+            role="switch"
+            aria-checked={props.checked}
+            disabled={props.disabled}
+            onClick={() => !props.disabled && props.onChange(!props.checked)}
+            className={
+                'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ' +
+                (props.checked ? 'bg-[var(--app-button)]' : 'bg-[var(--app-border)]') +
+                (props.disabled ? ' cursor-not-allowed opacity-50' : '')
+            }
+        >
+            <span
+                className={
+                    'inline-block h-4 w-4 transform rounded-full bg-white transition-transform ' +
+                    (props.checked ? 'translate-x-4' : 'translate-x-0.5')
+                }
+            />
+        </button>
+    )
+}
+
 type SettingsTab = 'general' | 'model' | 'run' | 'skills' | 'tools' | 'about'
 const SETTINGS_NAV: { id: SettingsTab; label: string }[] = [
     { id: 'general', label: '通用' },
@@ -76,7 +99,22 @@ export function Settings(props: { open: boolean; onOpenChange: (v: boolean) => v
     const { locale, setLocale } = useTranslation()
     const [config, setConfig] = useState<DdaConfig | null>(null)
     const [caps, setCaps] = useState<Capabilities | null>(null)
+    const [expanded, setExpanded] = useState<Record<string, boolean>>({})
     const [tab, setTab] = useState<SettingsTab>('general')
+
+    // toggle a tool: optimistic update, then persist (re-fetch on failure to resync)
+    const toggleTool = (name: string, enabled: boolean) => {
+        setCaps((c) =>
+            c && {
+                ...c,
+                toolGroups: c.toolGroups.map((g) => ({
+                    ...g,
+                    tools: g.tools.map((t) => (t.name === name ? { ...t, enabled } : t)),
+                })),
+            },
+        )
+        ddaApi.gateTool(name, enabled).then(setCaps).catch(() => ddaApi.capabilities().then(setCaps).catch(() => {}))
+    }
 
     // editable form state (model endpoint + deep-research knobs)
     const [model, setModel] = useState('')
@@ -272,12 +310,62 @@ export function Settings(props: { open: boolean; onOpenChange: (v: boolean) => v
                                             </span>
                                         </div>
                                         <div className="divide-y divide-[var(--app-divider)] overflow-hidden rounded-md border border-[var(--app-border)]">
-                                            {g.tools.map((t) => (
-                                                <div key={t.name} className="px-3 py-2">
-                                                    <div className="font-mono text-xs text-[var(--app-fg)]">{t.name}</div>
-                                                    <div className="mt-0.5 text-xs text-[var(--app-hint)]">{t.desc}</div>
-                                                </div>
-                                            ))}
+                                            {g.tools.map((t) => {
+                                                const open = !!expanded[t.name]
+                                                return (
+                                                    <div key={t.name}>
+                                                        <div className="flex items-center gap-2 px-3 py-2">
+                                                            <button
+                                                                onClick={() => setExpanded((e) => ({ ...e, [t.name]: !open }))}
+                                                                className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                                                            >
+                                                                <span
+                                                                    className={
+                                                                        'text-[9px] text-[var(--app-hint)] transition-transform ' +
+                                                                        (open ? 'rotate-90' : '')
+                                                                    }
+                                                                >
+                                                                    ▶
+                                                                </span>
+                                                                <span className="min-w-0">
+                                                                    <span className={'font-mono text-xs ' + (t.enabled ? 'text-[var(--app-fg)]' : 'text-[var(--app-hint)] line-through')}>
+                                                                        {t.name}
+                                                                    </span>
+                                                                    <span className="mt-0.5 block truncate text-xs text-[var(--app-hint)]">{t.desc}</span>
+                                                                </span>
+                                                            </button>
+                                                            <Toggle
+                                                                checked={t.enabled}
+                                                                disabled={t.required}
+                                                                onChange={(v) => toggleTool(t.name, v)}
+                                                            />
+                                                        </div>
+                                                        {open && (
+                                                            <div className="border-t border-[var(--app-divider)] bg-[var(--app-subtle-bg)] px-3 py-2">
+                                                                <div className="mb-1 text-[11px] font-medium text-[var(--app-hint)]">参数</div>
+                                                                {t.params.length ? (
+                                                                    <div className="flex flex-col gap-0.5">
+                                                                        {t.params.map((p) => (
+                                                                            <div key={p.name} className="font-mono text-[11px] text-[var(--app-fg)]">
+                                                                                {p.name}:{' '}
+                                                                                <span className="text-[var(--app-hint)]">
+                                                                                    {p.type}
+                                                                                    {p.required ? ' · 必填' : ''}
+                                                                                </span>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="text-[11px] text-[var(--app-hint)]">无参数</div>
+                                                                )}
+                                                                {t.required && (
+                                                                    <div className="mt-1 text-[11px] text-[var(--app-hint)]">核心工具,不可禁用</div>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )
+                                            })}
                                         </div>
                                     </div>
                                 ))}
@@ -322,7 +410,7 @@ export function Settings(props: { open: boolean; onOpenChange: (v: boolean) => v
                             : tab === 'general'
                               ? '外观 / 语言即时生效'
                               : tab === 'tools'
-                                ? '工具由内置 MCP 提供 · 只读'
+                                ? '工具开关 · 下次运行生效'
                                 : ''}
                     </span>
                 </div>

@@ -27,6 +27,15 @@ async function getJson<T>(path: string): Promise<T> {
 export const ddaApi = {
     pipeline: () => getJson<{ stages: PipelineStage[] }>('/pipeline'),
     capabilities: () => getJson<Capabilities>('/capabilities'),
+    gateTool: (tool: string, enabled: boolean): Promise<Capabilities> =>
+        fetch(`${BASE}/tools/gate`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ tool, enabled }),
+        }).then(async (r) => {
+            if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `${r.status}`)
+            return r.json() as Promise<Capabilities>
+        }),
     config: () => getJson<DdaConfig>('/config'),
     saveConfig: (body: ConfigUpdate): Promise<DdaConfig> =>
         fetch(`${BASE}/config`, {
