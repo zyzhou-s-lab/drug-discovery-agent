@@ -101,11 +101,10 @@ function NewRunDialog(props: {
         <Dialog open={props.open} onOpenChange={(v) => !checking && props.onOpenChange(v)}>
             <DialogContent className="max-w-md">
                 <DialogHeader>
-                    <DialogTitle>新建项目 / 运行</DialogTitle>
+                    <DialogTitle>新建项目</DialogTitle>
                 </DialogHeader>
                 <div className="flex flex-col gap-3">
                     <label className="flex flex-col gap-1 text-sm">
-                        <span className="text-[var(--app-hint)]">疾病(= 项目)</span>
                         <input
                             autoFocus
                             value={disease}
@@ -114,7 +113,7 @@ function NewRunDialog(props: {
                                 if (error) setError(null)
                             }}
                             onKeyDown={(e) => e.key === 'Enter' && submit()}
-                            placeholder="例如 dry AMD"
+                            placeholder="输入疾病名"
                             disabled={checking}
                             className="rounded-md border border-[var(--app-border)] bg-transparent px-2 py-1.5 text-sm outline-none focus:border-[var(--app-button)] disabled:opacity-60"
                         />
@@ -125,7 +124,7 @@ function NewRunDialog(props: {
                     <div className="flex items-center justify-end gap-2">
                         {checking && <span className="text-xs text-[var(--app-hint)]">正在校验疾病名…</span>}
                         <Button variant="outline" size="sm" onClick={() => props.onOpenChange(false)} disabled={checking}>取消</Button>
-                        <Button size="sm" onClick={submit} disabled={checking}>{checking ? '校验中…' : '创建并运行'}</Button>
+                        <Button size="sm" onClick={submit} disabled={checking}>{checking ? '校验中…' : '确认'}</Button>
                     </div>
                 </div>
             </DialogContent>
