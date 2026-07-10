@@ -130,9 +130,7 @@ export function Settings(props: { open: boolean; onOpenChange: (v: boolean) => v
     return (
         <Dialog open={props.open} onOpenChange={props.onOpenChange}>
             <DialogContent className="max-w-2xl">
-                <DialogHeader>
-                    <DialogTitle>设置</DialogTitle>
-                </DialogHeader>
+                <DialogTitle className="sr-only">设置</DialogTitle>
 
                 <div className="flex min-h-[340px] gap-5">
                     {/* left category nav (codex-style directory) */}
