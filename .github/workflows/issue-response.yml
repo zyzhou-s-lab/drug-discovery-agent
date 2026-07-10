@@ -1,0 +1,70 @@
+name: Issue Auto Response
+
+on:
+  issues:
+    types: [opened, labeled]
+
+concurrency:
+  group: issue-response-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  auto-response:
+    if: |
+      !endsWith(github.actor, '[bot]') &&
+      !contains(github.event.issue.labels.*.name, 'duplicate') &&
+      !contains(github.event.issue.labels.*.name, 'spam') &&
+      !contains(github.event.issue.labels.*.name, 'bot-skip')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Check for existing bot response
+        id: check_bot
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = "*Drug Discovery Bot*";
+            const allowedLogins = (process.env.BOT_LOGINS || "github-actions[bot]")
+              .split(",").map(v => v.trim()).filter(Boolean);
+            const comments = await github.paginate(
+              github.rest.issues.listComments,
+              { owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, per_page: 100 }
+            );
+            const hasBot = comments.some(comment => {
+              if (!(comment?.body || "").includes(marker)) return false;
+              const user = comment.user;
+              return user?.type === "Bot" && allowedLogins.includes(user.login);
+            });
+            core.setOutput("has_bot", hasBot ? "true" : "false");
+            if (hasBot) core.info("Existing bot response found; skipping.");
+        env:
+          BOT_LOGINS: ${{ vars.BOT_LOGINS }}
+
+      - name: Checkout
+        if: steps.check_bot.outputs.has_bot != 'true'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run issue-response agent
+        if: steps.check_bot.outputs.has_bot != 'true'
+        uses: anthropics/claude-code-base-action@v0.0.63
+        env:
+          ANTHROPIC_BASE_URL: ${{ vars.LLM_BASE_URL }}
+          ANTHROPIC_DEFAULT_OPUS_MODEL: ${{ vars.LLM_MODEL }}
+          ANTHROPIC_DEFAULT_SONNET_MODEL: ${{ vars.LLM_MODEL }}
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: ${{ vars.LLM_MODEL }}
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          anthropic_api_key: ${{ secrets.LLM_API_KEY }}
+          prompt_file: .github/prompts/issue-response.md
+          model: ${{ vars.LLM_MODEL }}
+          max_turns: "40"
+          timeout_minutes: "10"
+          # Write lets the agent stage a long reply body in /tmp for `gh issue
+          # comment --body-file`; the prompt forbids any code changes.
+          allowed_tools: "Bash,Read,Grep,Glob,Write"
