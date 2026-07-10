@@ -10,6 +10,7 @@ import { join, relative, sep } from "node:path";
 import { Hono } from "hono";
 import { stream, streamSSE } from "hono/streaming";
 
+import { getCapabilities } from "./capabilities";
 import { applySettings, ConfigUpdateSchema, getConfig, NUM_BOUNDS, saveSettings, trustedOrigin } from "./config";
 import { type ChatMessage, defaultChat } from "./llm";
 import { research as realResearch } from "./deep_research";
@@ -245,6 +246,8 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
   app.get("/api/health", (c) => c.json({ ok: true })); // don't leak internal db/artifacts paths
 
   app.get("/api/pipeline", (c) => c.json({ stages: PIPELINE }));
+
+  app.get("/api/capabilities", (c) => c.json(getCapabilities())); // skills + tool/MCP inventory (settings page)
 
   // ── settings page (model endpoint + deep-research knobs), persisted in settings.json ──
   // GET returns the key for the form to prefill — gated by the same CSRF guard as writes.

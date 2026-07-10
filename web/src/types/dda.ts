@@ -84,6 +84,22 @@ export interface DdaConfig {
     real_available: boolean
 }
 
+// Capability inventory (GET /capabilities) — surfaced in the settings page (技能 + 工具/MCP).
+export interface ToolInfo {
+    name: string
+    desc: string
+}
+export interface ToolGroup {
+    server: string
+    kind: 'mcp' | 'builtin'
+    label: string
+    tools: ToolInfo[]
+}
+export interface Capabilities {
+    skills: { name: string; desc: string }[]
+    toolGroups: ToolGroup[]
+}
+
 // Full settings sent to POST /config (wholesale overwrite — the body IS the new settings.json).
 // Every field is required (an incomplete body is a 422); a blank string clears that override.
 export interface ConfigUpdate {

@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { useTheme, type Theme } from '@/lib/settings'
 import { useTranslation } from '@/lib/use-translation'
 import { ddaApi } from '@/api/dda'
-import type { DdaConfig } from '@/types/dda'
+import type { Capabilities, DdaConfig } from '@/types/dda'
 
 function Segment<T extends string | boolean>(props: {
     value: T
@@ -61,11 +61,13 @@ function Field(props: { label: string; hint?: string; children: ReactNode }) {
     )
 }
 
-type SettingsTab = 'general' | 'model' | 'run' | 'about'
+type SettingsTab = 'general' | 'model' | 'run' | 'skills' | 'tools' | 'about'
 const SETTINGS_NAV: { id: SettingsTab; label: string }[] = [
     { id: 'general', label: '通用' },
     { id: 'model', label: '模型' },
     { id: 'run', label: '运行' },
+    { id: 'skills', label: '技能' },
+    { id: 'tools', label: '工具' },
     { id: 'about', label: '关于' },
 ]
 
@@ -73,6 +75,7 @@ export function Settings(props: { open: boolean; onOpenChange: (v: boolean) => v
     const [theme, setTheme] = useTheme()
     const { locale, setLocale } = useTranslation()
     const [config, setConfig] = useState<DdaConfig | null>(null)
+    const [caps, setCaps] = useState<Capabilities | null>(null)
     const [tab, setTab] = useState<SettingsTab>('general')
 
     // editable form state (model endpoint + deep-research knobs)
@@ -97,6 +100,7 @@ export function Settings(props: { open: boolean; onOpenChange: (v: boolean) => v
         if (props.open) {
             setMsg(null)
             ddaApi.config().then(hydrate).catch(() => setConfig(null))
+            ddaApi.capabilities().then(setCaps).catch(() => setCaps(null))
         }
     }, [props.open])
 
@@ -240,6 +244,47 @@ export function Settings(props: { open: boolean; onOpenChange: (v: boolean) => v
                             </div>
                         )}
 
+                        {tab === 'skills' && (
+                            caps?.skills?.length ? (
+                                <div className="flex flex-col gap-2">
+                                    {caps.skills.map((s) => (
+                                        <div key={s.name} className="rounded-md border border-[var(--app-border)] px-3 py-2">
+                                            <div className="text-sm font-medium">{s.name}</div>
+                                            <div className="mt-0.5 text-xs text-[var(--app-hint)]">{s.desc}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="py-2 text-sm text-[var(--app-hint)]">
+                                    暂无技能。该流水线目前以固定阶段(scope → search → fetch → verify → synthesize)编排下方「工具」里的 MCP 工具,尚未引入模型自主调用的 skill。
+                                </div>
+                            )
+                        )}
+
+                        {tab === 'tools' && (
+                            <div className="flex flex-col gap-4">
+                                {(caps?.toolGroups ?? []).map((g) => (
+                                    <div key={g.server}>
+                                        <div className="mb-1.5 flex items-center gap-2">
+                                            <span className="text-sm font-semibold">{g.label}</span>
+                                            <span className="rounded bg-[var(--app-subtle-bg)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--app-hint)]">
+                                                {g.kind.toUpperCase()}
+                                            </span>
+                                        </div>
+                                        <div className="divide-y divide-[var(--app-divider)] overflow-hidden rounded-md border border-[var(--app-border)]">
+                                            {g.tools.map((t) => (
+                                                <div key={t.name} className="px-3 py-2">
+                                                    <div className="font-mono text-xs text-[var(--app-fg)]">{t.name}</div>
+                                                    <div className="mt-0.5 text-xs text-[var(--app-hint)]">{t.desc}</div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
+                                {!caps && <div className="py-2 text-sm text-[var(--app-hint)]">加载中…</div>}
+                            </div>
+                        )}
+
                         {tab === 'about' && (
                             <div className="rounded-md bg-[var(--app-subtle-bg)] p-3 text-xs text-[var(--app-hint)]">
                                 <div className="mb-1 font-medium text-[var(--app-fg)]">连接 / 关于</div>
@@ -255,20 +300,30 @@ export function Settings(props: { open: boolean; onOpenChange: (v: boolean) => v
 
                 {/* footer: save applies to 模型 + 运行 (外观/语言 即时生效) */}
                 <div className="mt-4 flex items-center gap-3 border-t border-[var(--app-divider)] pt-3">
-                    <Button onClick={save} disabled={saving || !config}>
-                        {saving ? '保存中…' : '保存'}
-                    </Button>
-                    {msg && (
-                        <span
-                            className={
-                                'text-xs ' + (msg.kind === 'ok' ? 'text-[var(--app-hint)]' : 'text-red-500')
-                            }
-                        >
-                            {msg.text}
-                        </span>
+                    {persistTab && (
+                        <>
+                            <Button onClick={save} disabled={saving || !config}>
+                                {saving ? '保存中…' : '保存'}
+                            </Button>
+                            {msg && (
+                                <span
+                                    className={
+                                        'text-xs ' + (msg.kind === 'ok' ? 'text-[var(--app-hint)]' : 'text-red-500')
+                                    }
+                                >
+                                    {msg.text}
+                                </span>
+                            )}
+                        </>
                     )}
                     <span className="ml-auto text-xs text-[var(--app-hint)]">
-                        {persistTab ? '改完点保存 · 下次运行生效' : '外观 / 语言即时生效'}
+                        {persistTab
+                            ? '改完点保存 · 下次运行生效'
+                            : tab === 'general'
+                              ? '外观 / 语言即时生效'
+                              : tab === 'tools'
+                                ? '工具由内置 MCP 提供 · 只读'
+                                : ''}
                     </span>
                 </div>
             </DialogContent>

@@ -1,6 +1,7 @@
 // Thin client for the dd_agent read API. Base path is /api, proxied by Vite
 // (vite.config.ts) to the uvicorn backend so there are no CORS/host concerns in dev.
 import type {
+    Capabilities,
     CampaignSummary,
     CampaignView,
     ConfigUpdate,
@@ -25,6 +26,7 @@ async function getJson<T>(path: string): Promise<T> {
 
 export const ddaApi = {
     pipeline: () => getJson<{ stages: PipelineStage[] }>('/pipeline'),
+    capabilities: () => getJson<Capabilities>('/capabilities'),
     config: () => getJson<DdaConfig>('/config'),
     saveConfig: (body: ConfigUpdate): Promise<DdaConfig> =>
         fetch(`${BASE}/config`, {
