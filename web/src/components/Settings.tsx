@@ -61,10 +61,19 @@ function Field(props: { label: string; hint?: string; children: ReactNode }) {
     )
 }
 
+type SettingsTab = 'general' | 'model' | 'run' | 'about'
+const SETTINGS_NAV: { id: SettingsTab; label: string }[] = [
+    { id: 'general', label: '通用' },
+    { id: 'model', label: '模型' },
+    { id: 'run', label: '运行' },
+    { id: 'about', label: '关于' },
+]
+
 export function Settings(props: { open: boolean; onOpenChange: (v: boolean) => void }) {
     const [theme, setTheme] = useTheme()
     const { locale, setLocale } = useTranslation()
     const [config, setConfig] = useState<DdaConfig | null>(null)
+    const [tab, setTab] = useState<SettingsTab>('general')
 
     // editable form state (model endpoint + deep-research knobs)
     const [model, setModel] = useState('')
@@ -116,119 +125,153 @@ export function Settings(props: { open: boolean; onOpenChange: (v: boolean) => v
             .finally(() => setSaving(false))
     }
 
+    // sections show/hide by the left-nav selection; save persists model+run knobs together.
+    const persistTab = tab === 'model' || tab === 'run'
     return (
         <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-            <DialogContent className="max-w-md">
+            <DialogContent className="max-w-2xl">
                 <DialogHeader>
                     <DialogTitle>设置</DialogTitle>
                 </DialogHeader>
 
-                <div className="max-h-[70vh] overflow-y-auto pr-1">
-                    <div className="divide-y divide-[var(--app-divider)]">
-                        <Row label="外观">
-                            <Segment<Theme>
-                                value={theme}
-                                onChange={setTheme}
-                                options={[
-                                    { value: 'light', label: '浅色' },
-                                    { value: 'dark', label: '深色' },
-                                ]}
-                            />
-                        </Row>
-                        <Row label="语言 / Language">
-                            <Segment
-                                value={locale}
-                                onChange={(v) => setLocale(v as 'zh-CN' | 'en')}
-                                options={[
-                                    { value: 'zh-CN', label: '中文' },
-                                    { value: 'en', label: 'English' },
-                                ]}
-                            />
-                        </Row>
-                    </div>
+                <div className="flex min-h-[340px] gap-5">
+                    {/* left category nav (codex-style directory) */}
+                    <nav className="flex w-28 shrink-0 flex-col gap-0.5 border-r border-[var(--app-divider)] pr-2">
+                        {SETTINGS_NAV.map((n) => (
+                            <button
+                                key={n.id}
+                                onClick={() => setTab(n.id)}
+                                className={
+                                    'rounded-md px-2.5 py-1.5 text-left text-sm transition-colors ' +
+                                    (tab === n.id
+                                        ? 'bg-[var(--app-subtle-bg)] font-medium text-[var(--app-fg)]'
+                                        : 'text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)]')
+                                }
+                            >
+                                {n.label}
+                            </button>
+                        ))}
+                    </nav>
 
-                    {/* Model endpoint + deep-research knobs (persisted server-side, applied to env) */}
-                    <div className="mt-3 border-t border-[var(--app-divider)] pt-2">
-                        <div className="py-1 text-sm font-semibold">模型 / 运行参数</div>
-                        <Field label="模型 Model" hint="如 deepseek-chat · mimo-v2.5-pro · claude-opus-4-8">
-                            <input
-                                className={inputCls}
-                                value={model}
-                                onChange={(e) => setModel(e.target.value)}
-                                placeholder="(默认)"
-                                spellCheck={false}
-                            />
-                        </Field>
-                        <Field label="Base URL" hint="Anthropic 兼容端点;留空 = 官方 Anthropic">
-                            <input
-                                className={inputCls}
-                                value={baseUrl}
-                                onChange={(e) => setBaseUrl(e.target.value)}
-                                placeholder="https://api.deepseek.com/anthropic"
-                                spellCheck={false}
-                            />
-                        </Field>
-                        <Field
-                            label="API Key"
-                            hint={config?.api_key_set ? '已设置 · 清空并保存即移除' : '未设置'}
-                        >
-                            <input
-                                className={inputCls}
-                                type="password"
-                                value={apiKey}
-                                onChange={(e) => setApiKey(e.target.value)}
-                                placeholder="sk-…"
-                                autoComplete="off"
-                                spellCheck={false}
-                            />
-                        </Field>
-                        <div className="flex gap-3">
-                            <Field label="并发上限" hint="深度研究时同时并行运行的 agent 数(检索/抓取/核验等)。调大更快,但更耗额度、更易触发限流。(DD_DR_CONC · 1–32)">
-                                <input
-                                    className={inputCls}
-                                    type="number"
-                                    min={1}
-                                    max={32}
-                                    value={concurrency}
-                                    onChange={(e) => setConcurrency(e.target.value)}
-                                />
-                            </Field>
-                            <Field label="核验条数" hint="送入「3 票对抗核验」的论断条数上限,按相关性取前 N 条。调大核验更全面,但 LLM 调用更多(每条 ×3 票)。(DD_DR_MAX_CLAIMS · 1–80)">
-                                <input
-                                    className={inputCls}
-                                    type="number"
-                                    min={1}
-                                    max={80}
-                                    value={maxClaims}
-                                    onChange={(e) => setMaxClaims(e.target.value)}
-                                />
-                            </Field>
-                        </div>
-                        <div className="mt-2 flex items-center gap-3">
-                            <Button onClick={save} disabled={saving || !config}>
-                                {saving ? '保存中…' : '保存'}
-                            </Button>
-                            {msg && (
-                                <span
-                                    className={
-                                        'text-xs ' +
-                                        (msg.kind === 'ok' ? 'text-[var(--app-hint)]' : 'text-red-500')
-                                    }
+                    {/* right content pane */}
+                    <div className="max-h-[60vh] min-w-0 flex-1 overflow-y-auto pr-1">
+                        {tab === 'general' && (
+                            <div className="divide-y divide-[var(--app-divider)]">
+                                <Row label="外观">
+                                    <Segment<Theme>
+                                        value={theme}
+                                        onChange={setTheme}
+                                        options={[
+                                            { value: 'light', label: '浅色' },
+                                            { value: 'dark', label: '深色' },
+                                        ]}
+                                    />
+                                </Row>
+                                <Row label="语言 / Language">
+                                    <Segment
+                                        value={locale}
+                                        onChange={(v) => setLocale(v as 'zh-CN' | 'en')}
+                                        options={[
+                                            { value: 'zh-CN', label: '中文' },
+                                            { value: 'en', label: 'English' },
+                                        ]}
+                                    />
+                                </Row>
+                            </div>
+                        )}
+
+                        {tab === 'model' && (
+                            <div>
+                                <Field label="模型 Model" hint="如 deepseek-chat · mimo-v2.5-pro · claude-opus-4-8">
+                                    <input
+                                        className={inputCls}
+                                        value={model}
+                                        onChange={(e) => setModel(e.target.value)}
+                                        placeholder="(默认)"
+                                        spellCheck={false}
+                                    />
+                                </Field>
+                                <Field label="Base URL" hint="Anthropic 兼容端点;留空 = 官方 Anthropic">
+                                    <input
+                                        className={inputCls}
+                                        value={baseUrl}
+                                        onChange={(e) => setBaseUrl(e.target.value)}
+                                        placeholder="https://api.deepseek.com/anthropic"
+                                        spellCheck={false}
+                                    />
+                                </Field>
+                                <Field
+                                    label="API Key"
+                                    hint={config?.api_key_set ? '已设置 · 清空并保存即移除' : '未设置'}
                                 >
-                                    {msg.text}
-                                </span>
-                            )}
-                        </div>
-                    </div>
+                                    <input
+                                        className={inputCls}
+                                        type="password"
+                                        value={apiKey}
+                                        onChange={(e) => setApiKey(e.target.value)}
+                                        placeholder="sk-…"
+                                        autoComplete="off"
+                                        spellCheck={false}
+                                    />
+                                </Field>
+                            </div>
+                        )}
 
-                    <div className="mt-3 rounded-md bg-[var(--app-subtle-bg)] p-3 text-xs text-[var(--app-hint)]">
-                        <div className="mb-1 font-medium text-[var(--app-fg)]">连接 / 关于</div>
-                        <div>后端 API:Vite 代理 /api → 127.0.0.1:8099</div>
-                        <div>
-                            实时运行:
-                            {config ? (config.real_available ? '可用' : '不可用(缺 SDK 或密钥)') : '…'}
-                        </div>
+                        {tab === 'run' && (
+                            <div>
+                                <Field label="并发上限" hint="深度研究时同时并行运行的 agent 数(检索/抓取/核验等)。调大更快,但更耗额度、更易触发限流。(DD_DR_CONC · 1–32)">
+                                    <input
+                                        className={inputCls}
+                                        type="number"
+                                        min={1}
+                                        max={32}
+                                        value={concurrency}
+                                        onChange={(e) => setConcurrency(e.target.value)}
+                                    />
+                                </Field>
+                                <Field label="核验条数" hint="送入「3 票对抗核验」的论断条数上限,按相关性取前 N 条。调大核验更全面,但 LLM 调用更多(每条 ×3 票)。(DD_DR_MAX_CLAIMS · 1–80)">
+                                    <input
+                                        className={inputCls}
+                                        type="number"
+                                        min={1}
+                                        max={80}
+                                        value={maxClaims}
+                                        onChange={(e) => setMaxClaims(e.target.value)}
+                                    />
+                                </Field>
+                            </div>
+                        )}
+
+                        {tab === 'about' && (
+                            <div className="rounded-md bg-[var(--app-subtle-bg)] p-3 text-xs text-[var(--app-hint)]">
+                                <div className="mb-1 font-medium text-[var(--app-fg)]">连接 / 关于</div>
+                                <div>后端 API:Vite 代理 /api → 127.0.0.1:8099</div>
+                                <div>
+                                    实时运行:
+                                    {config ? (config.real_available ? '可用' : '不可用(缺 SDK 或密钥)') : '…'}
+                                </div>
+                            </div>
+                        )}
                     </div>
+                </div>
+
+                {/* footer: save applies to 模型 + 运行 (外观/语言 即时生效) */}
+                <div className="mt-4 flex items-center gap-3 border-t border-[var(--app-divider)] pt-3">
+                    <Button onClick={save} disabled={saving || !config}>
+                        {saving ? '保存中…' : '保存'}
+                    </Button>
+                    {msg && (
+                        <span
+                            className={
+                                'text-xs ' + (msg.kind === 'ok' ? 'text-[var(--app-hint)]' : 'text-red-500')
+                            }
+                        >
+                            {msg.text}
+                        </span>
+                    )}
+                    <span className="ml-auto text-xs text-[var(--app-hint)]">
+                        {persistTab ? '改完点保存 · 下次运行生效' : '外观 / 语言即时生效'}
+                    </span>
                 </div>
             </DialogContent>
         </Dialog>
