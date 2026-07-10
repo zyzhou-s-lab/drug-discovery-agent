@@ -1,6 +1,6 @@
 // Direct Anthropic Messages client for the non-agent LLM endpoints (side-chat / intake translate /
 // report narrative) — distinct from the agent SDK (orchestrate.ts) used by the research pipeline.
-// Config from DD_JUDGE_* falling back to ANTHROPIC_*, mirroring api.py campaign_chat.
+// Single config source: the ANTHROPIC_* env managed by config.ts (settings page) — no per-stage override.
 import Anthropic from "@anthropic-ai/sdk";
 
 export interface JudgeClient {
@@ -16,14 +16,14 @@ export interface ChatMessage {
 /** Build an Anthropic client from the judge/LLM env, or null if no credential is configured. */
 export function makeJudgeClient(): JudgeClient | null {
   const authToken = process.env.ANTHROPIC_AUTH_TOKEN;
-  const apiKey = process.env.DD_JUDGE_API_KEY || process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!authToken && !apiKey) return null;
-  const baseURL = process.env.DD_JUDGE_BASE_URL || process.env.ANTHROPIC_BASE_URL;
+  const baseURL = process.env.ANTHROPIC_BASE_URL;
   const opts: Record<string, unknown> = {};
   if (baseURL) opts.baseURL = baseURL;
   if (apiKey) opts.apiKey = apiKey;
   else if (authToken) opts.authToken = authToken;
-  const model = process.env.DD_JUDGE_MODEL || process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
+  const model = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
   return { client: new Anthropic(opts), model };
 }
 

@@ -61,7 +61,7 @@ async function realTranslateCodepoints(codepoints: string): Promise<string | nul
     systemPrompt:
       "Decode the Unicode codepoints and reply with the standard English disease/indication name. " +
       "Reply ONLY with the English name, nothing else.",
-    model: process.env.DD_INTAKE_MODEL || "mimo-v2.5-pro",
+    model: process.env.ANTHROPIC_MODEL, // single source: config.ts (settings page)
     mcpServers: {},
     allowedTools: [],
     permissionMode: "bypassPermissions",
@@ -107,7 +107,7 @@ export async function validateDisease(raw: string, deps: IntakeDeps = {}): Promi
   try {
     [v] = await runAgent("intake", INTAKE_USER(raw), "submit_intake", IntakeSchema.shape, makeIntakeMcp(searchDisease), budget, sem, {
       systemPrompt: INTAKE_SYSTEM,
-      model: process.env.DD_INTAKE_MODEL || "mimo-v2.5", // lighter/faster tier than the deep-research model
+      // model comes from runAgent's single source (ANTHROPIC_MODEL / config.ts) — no per-stage override
       allowedTools: ["mcp__submit__submit_intake", "mcp__otdisease__search_disease"], // EFO hit IS the evidence — no WebSearch
       disallowedTools: DISALLOWED,
       maxTurns: parseInt(process.env.DD_INTAKE_MAX_TURNS || "12", 10),

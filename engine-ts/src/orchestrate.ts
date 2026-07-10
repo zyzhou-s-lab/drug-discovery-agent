@@ -83,15 +83,10 @@ class InputStream {
   }
 }
 
-/** Per-agent model/proxy env overrides (DD_DR_MODEL / DD_AGENT_PROXY_SOCKS), like run_agent. */
+/** Optional SOCKS proxy env override (DD_AGENT_PROXY_SOCKS). Model/endpoint/key come from the single
+ * config.ts source (ANTHROPIC_MODEL/BASE_URL/AUTH_TOKEN) — no per-agent model override. */
 function buildEnvOverride(): Record<string, string> | undefined {
   const env: Record<string, string> = {};
-  const drModel = process.env.DD_DR_MODEL;
-  if (drModel) {
-    env.ANTHROPIC_MODEL = drModel;
-    if (process.env.DD_DR_BASE_URL) env.ANTHROPIC_BASE_URL = process.env.DD_DR_BASE_URL;
-    if (process.env.DD_DR_AUTH_TOKEN) env.ANTHROPIC_AUTH_TOKEN = process.env.DD_DR_AUTH_TOKEN;
-  }
   if (process.env.DD_AGENT_PROXY_SOCKS) {
     // The agent gets an HTTP proxy (http_proxy) pointing at the in-process HTTP→SOCKS5 bridge
     // (proxy_bridge.py); DD_AGENT_PROXY_SOCKS names the bridge's UPSTREAM socks (host:port). So the
@@ -125,7 +120,6 @@ export interface RunAgentOpts {
   maxTurns?: number;
   shouldStop?: ShouldStop;
   systemPrompt?: string; // agent system prompt (e.g. the intake gate persona)
-  model?: string; // overrides DD_DR_MODEL (e.g. intake's DD_INTAKE_MODEL)
   allowedTools?: string[]; // whitelist — restrict the agent's tools (intake: only submit + search_disease)
   disallowedTools?: string[]; // blocklist (belt-and-suspenders alongside allowedTools)
   breaker?: CircuitBreaker; // fed this agent's outcome (success/rate-limit fail) for auto-pause
@@ -147,7 +141,7 @@ export async function runAgent(
   sem: Semaphore,
   opts: RunAgentOpts = {},
 ): Promise<[Record<string, unknown> | null, ToolResult[]]> {
-  const { onMessage, maxTurns = 12, shouldStop, systemPrompt, model: modelOpt, allowedTools, disallowedTools, breaker } = opts;
+  const { onMessage, maxTurns = 12, shouldStop, systemPrompt, allowedTools, disallowedTools, breaker } = opts;
   let lastErrMsg = ""; // most recent error text (any attempt)
   let rateLimitMsg = ""; // a rate-limit/quota error seen on ANY attempt — survives a later attempt's
   // different error so a 429-then-other-error call is still counted as rate-limited by the breaker
@@ -174,7 +168,7 @@ export async function runAgent(
   if (systemPrompt) options.systemPrompt = systemPrompt;
   if (allowedTools) options.allowedTools = allowedTools;
   if (disallowedTools) options.disallowedTools = disallowedTools;
-  const model = modelOpt ?? process.env.DD_DR_MODEL; // opts.model (e.g. intake) wins over DD_DR_MODEL
+  const model = process.env.ANTHROPIC_MODEL; // single source: config.ts (settings page)
   if (model) options.model = model;
   if (envOver) options.env = { ...process.env, ...envOver };
   // WebFetch's "preflight" is a domain safety/blocklist check that calls back to claude.ai. On a
