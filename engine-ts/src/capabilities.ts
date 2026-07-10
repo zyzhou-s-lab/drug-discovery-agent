@@ -1,10 +1,9 @@
-// Capability inventory surfaced in the settings page (技能 + 工具/MCP). Mirrors the tools registered
-// on the in-process MCP servers (litmcp.ts: literature/ontology/opentargets/cellatlas; intake.ts adds
-// search_disease under the same `opentargets` server). The `submit` server is
-// internal plumbing (forced structured output), not a user-facing capability, so it's excluded.
-// Static (tools are compiled in) — keep in sync when tools change. `enabled` reflects the toolgate
-// store; `required` tools (search_disease — intake depends on it) can't be disabled.
+// Capability inventory surfaced in the settings page (技能 + 工具/MCP). Built ENTIRELY from the single
+// source of truth (toolspec.ts) — the `desc` shown here is the exact string the model reads, so UI and
+// model never drift. `enabled` reflects the toolgate store; `required` tools (search_disease — intake
+// depends on it) can't be disabled. The internal `submit` server is excluded (forced-output plumbing).
 import { getDisabledTools } from "./toolgate";
+import { SERVER_LABELS, type ServerId, TOOL_SPECS } from "./toolspec";
 
 export interface ToolParam {
   name: string;
@@ -13,13 +12,13 @@ export interface ToolParam {
 }
 export interface ToolInfo {
   name: string;
-  desc: string;
+  desc: string; // == toolspec doc (what the model reads)
   params: ToolParam[];
   required: boolean; // core tool — toggle locked
   enabled: boolean;
 }
 export interface ToolGroup {
-  server: string; // MCP server id (mcp__<server>__<tool>) or "builtin"
+  server: string;
   kind: "mcp" | "builtin";
   label: string;
   tools: ToolInfo[];
@@ -33,54 +32,25 @@ export interface Capabilities {
   toolGroups: ToolGroup[];
 }
 
-const str = (name: string): ToolParam => ({ name, type: "string", required: true });
+const SERVER_ORDER: ServerId[] = ["literature", "ontology", "opentargets", "cellatlas"];
 
 export function getCapabilities(): Capabilities {
   const disabled = getDisabledTools();
-  const mk = (name: string, desc: string, params: ToolParam[], required = false): ToolInfo => ({
-    name,
-    desc,
-    params,
-    required,
-    enabled: required || !disabled.has(name),
-  });
+  const toolGroups: ToolGroup[] = SERVER_ORDER.map((server) => ({
+    server,
+    kind: "mcp" as const,
+    label: SERVER_LABELS[server],
+    tools: TOOL_SPECS.filter((s) => s.server === server).map((s) => ({
+      name: s.name,
+      desc: s.doc, // single source — same text the agent reads
+      params: s.params,
+      required: Boolean(s.required),
+      enabled: Boolean(s.required) || !disabled.has(s.name),
+    })),
+  }));
   return {
-    // No model-invoked skills yet — the deep-research pipeline runs fixed stages over the MCP tools below.
+    // No model-invoked skills yet — the deep-research pipeline runs fixed stages over the MCP tools above.
     skills: [],
-    toolGroups: [
-      {
-        server: "literature",
-        kind: "mcp",
-        label: "文献 · literature",
-        tools: [
-          mk("search_literature", "检索同行评审文献(OpenAlex + Semantic Scholar),返回可追溯论文", [str("query")]),
-          mk("get_paper", "按 DOI 取论文摘要 + 元数据(用于论断抽取)", [str("doi")]),
-        ],
-      },
-      {
-        server: "ontology",
-        kind: "mcp",
-        label: "本体 / 术语 · ontology",
-        tools: [mk("ontology_lookup", "在本体库查疾病 / 表型 / 基因术语(MONDO / EFO / HP / GO,经 EBI OLS4)", [str("query")])],
-      },
-      {
-        server: "opentargets",
-        kind: "mcp",
-        label: "Open Targets · opentargets",
-        tools: [
-          mk("search_disease", "把疾病名解析为 Open Targets EFO id(intake 门用,EFO 命中 = 真实疾病)", [str("name")], true),
-          mk("get_opentarget_targets", "给定疾病取排序后的候选靶点(Open Targets 关联分,keyless GraphQL)", [str("disease")]),
-        ],
-      },
-      {
-        server: "cellatlas",
-        kind: "mcp",
-        label: "单细胞 / 空间 / 图谱 · cellatlas",
-        tools: [
-          mk("get_cellxgene_datasets", "按疾病 / 组织找单细胞与空间转录组数据集(CZI CELLxGENE)", [str("query")]),
-          mk("get_hca_projects", "按器官 / 组织找 Human Cell Atlas 项目(Azul facet)", [str("organ")]),
-        ],
-      },
-    ],
+    toolGroups,
   };
 }

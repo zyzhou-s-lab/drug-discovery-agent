@@ -9,6 +9,7 @@ import { Budget } from "./core";
 import { type CircuitBreaker, runAgent as realRunAgent, Semaphore } from "./orchestrate";
 import { IntakeSchema } from "./schemas";
 import { searchDisease as realSearchDisease } from "./tools/opentargets";
+import { toolDoc } from "./toolspec";
 
 export interface DiseaseIntake {
   accepted: boolean;
@@ -47,7 +48,7 @@ const DISALLOWED = ["WebSearch", "WebFetch", "Bash", "Read", "Write", "Edit", "G
 function makeIntakeMcp(searchDisease: typeof realSearchDisease): Record<string, unknown> {
   const searchTool = tool(
     "search_disease",
-    "Resolve a disease name to OpenTargets EFO ids. Returns JSON [{id,name}]. Empty list = not a recognized disease.",
+    toolDoc("search_disease"),
     { name: z.string() },
     async (args: any) => ({ content: [{ type: "text", text: JSON.stringify(await searchDisease(args.name)) }] }),
   );

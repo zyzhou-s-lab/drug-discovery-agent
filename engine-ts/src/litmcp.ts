@@ -10,6 +10,7 @@ import { z } from "zod";
 
 import { emit } from "./events";
 import { abstractByDoi, cellxgeneDatasets, hcaProjects, ontologyLookup, openTargetTargets, searchLiteratureMulti } from "./tools/paperfetch";
+import { toolDoc } from "./toolspec";
 
 export interface LitDeps {
   searchLiteratureMulti: typeof searchLiteratureMulti;
@@ -123,56 +124,19 @@ const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
 
 /** Build the literature MCP server dict to spread into runAgent's extraMcp. */
 export function makeLitMcp(deps: LitDeps = DEFAULT_DEPS, disabled: Set<string> = new Set()): Record<string, unknown> {
-  const searchLit = tool(
-    "search_literature",
-    "Search peer-reviewed literature (OpenAlex + Semantic Scholar). Returns papers with " +
-      "doi/title/year/venue. Use this for the scholarly-literature part of the angle.",
-    { query: z.string() },
-    async (args: { query: string }) => text(await searchLiteratureText(args.query ?? "", deps)),
-  );
-  const getPaper = tool(
-    "get_paper",
-    "Fetch a paper's abstract + metadata by DOI (for claim extraction).",
-    { doi: z.string() },
-    async (args: { doi: string }) => text(await getPaperText(args.doi ?? "", deps)),
-  );
-  const ontology = tool(
-    "ontology_lookup",
-    "Look up disease/phenotype/gene terms in ontologies (MONDO/EFO/HP/GO via EBI OLS4 API). " +
-      "Returns STRUCTURED records [{id,label,ontology,definition}]. Use this for ontology IDs / " +
-      "subtypes / classifications instead of WebFetch-ing ontology web pages (which need JS).",
-    { query: z.string() },
-    async (args: { query: string }) => text(await ontologyText(args.query ?? "", deps)),
-  );
-  const otTargets = tool(
-    "get_opentarget_targets",
-    "Get RANKED drug-target–disease associations from the Open Targets Platform (keyless GraphQL). " +
-      "Accepts a disease NAME (e.g. 'metabolic dysfunction-associated steatohepatitis') OR an ontology " +
-      "id (MONDO/EFO/HP). Returns STRUCTURED rows [{symbol,name,ensemblId,score,evidence:{genetic_" +
-      "association,literature,clinical,...}}] ranked by overall association score. Use this for the " +
-      "target-discovery / druggable-target part of an angle instead of WebFetch-ing the Open Targets " +
-      "website (which needs JS and returns nothing).",
-    { disease: z.string() },
-    async (args: { disease: string }) => text(await openTargetsText(args.disease ?? "", deps)),
-  );
-  const cellxgene = tool(
-    "get_cellxgene_datasets",
-    "Find single-cell & spatial-transcriptomics DATASETS for a disease/tissue from the CZI CELLxGENE " +
-      "Discover index (keyless). Pass a disease name or tissue (e.g. 'metabolic dysfunction-associated " +
-      "steatohepatitis' or 'liver'). Returns STRUCTURED rows [{title,disease,tissue,assay,organism," +
-      "cell_count,spatial,link}] (spatial=true for Visium/Slide-seq/etc.). Use this instead of " +
-      "WebFetch-ing the CELLxGENE website for the single-cell / spatial part of an angle.",
-    { query: z.string() },
-    async (args: { query: string }) => text(await cellxgeneText(args.query ?? "", deps)),
-  );
-  const hca = tool(
-    "get_hca_projects",
-    "Find Human Cell Atlas projects for an ORGAN/tissue (Azul facet, e.g. 'liver', 'brain', 'lung'; " +
-      "keyless). Returns STRUCTURED rows [{title,organ,cell_count,lab,doi,link}]. Pass the organ, not a " +
-      "disease name. Complements get_cellxgene_datasets for single-cell data availability.",
-    { organ: z.string() },
-    async (args: { organ: string }) => text(await hcaText(args.organ ?? "", deps)),
-  );
+  // tool descriptions come from the single source (toolspec.ts) — same string the settings UI shows
+  const searchLit = tool("search_literature", toolDoc("search_literature"), { query: z.string() },
+    async (args: { query: string }) => text(await searchLiteratureText(args.query ?? "", deps)));
+  const getPaper = tool("get_paper", toolDoc("get_paper"), { doi: z.string() },
+    async (args: { doi: string }) => text(await getPaperText(args.doi ?? "", deps)));
+  const ontology = tool("ontology_lookup", toolDoc("ontology_lookup"), { query: z.string() },
+    async (args: { query: string }) => text(await ontologyText(args.query ?? "", deps)));
+  const otTargets = tool("get_opentarget_targets", toolDoc("get_opentarget_targets"), { disease: z.string() },
+    async (args: { disease: string }) => text(await openTargetsText(args.disease ?? "", deps)));
+  const cellxgene = tool("get_cellxgene_datasets", toolDoc("get_cellxgene_datasets"), { query: z.string() },
+    async (args: { query: string }) => text(await cellxgeneText(args.query ?? "", deps)));
+  const hca = tool("get_hca_projects", toolDoc("get_hca_projects"), { organ: z.string() },
+    async (args: { organ: string }) => text(await hcaText(args.organ ?? "", deps)));
   // Focused, single-source MCP servers (the settings 工具 page groups by these). Each tool is filtered
   // by the toolgate disabled set → a toggle takes effect on the next run. search_disease lives in the
   // intake agent's own `opentargets` server (intake.ts); here `opentargets` carries the target query.
