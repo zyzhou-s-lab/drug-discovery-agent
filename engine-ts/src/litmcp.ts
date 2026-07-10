@@ -173,9 +173,14 @@ export function makeLitMcp(deps: LitDeps = DEFAULT_DEPS, disabled: Set<string> =
     { organ: z.string() },
     async (args: { organ: string }) => text(await hcaText(args.organ ?? "", deps)),
   );
-  // filter out user-disabled tools (settings 工具 toggles) — applied at build time = takes effect next run
-  const allTools = [searchLit, getPaper, ontology, otTargets, cellxgene, hca];
-  const allNames = ["search_literature", "get_paper", "ontology_lookup", "get_opentarget_targets", "get_cellxgene_datasets", "get_hca_projects"];
-  const tools = allTools.filter((_, i) => !disabled.has(allNames[i]!));
-  return { lit: createSdkMcpServer({ name: "lit", version: "1.0.0", tools }) };
+  // Focused, single-source MCP servers (the settings 工具 page groups by these). Each tool is filtered
+  // by the toolgate disabled set → a toggle takes effect on the next run. search_disease lives in the
+  // intake agent's own `opentargets` server (intake.ts); here `opentargets` carries the target query.
+  const pick = <T,>(items: T[], names: string[]): T[] => items.filter((_, i) => !disabled.has(names[i]!));
+  return {
+    literature: createSdkMcpServer({ name: "literature", version: "1.0.0", tools: pick([searchLit, getPaper], ["search_literature", "get_paper"]) }),
+    ontology: createSdkMcpServer({ name: "ontology", version: "1.0.0", tools: pick([ontology], ["ontology_lookup"]) }),
+    opentargets: createSdkMcpServer({ name: "opentargets", version: "1.0.0", tools: pick([otTargets], ["get_opentarget_targets"]) }),
+    cellatlas: createSdkMcpServer({ name: "cellatlas", version: "1.0.0", tools: pick([cellxgene, hca], ["get_cellxgene_datasets", "get_hca_projects"]) }),
+  };
 }

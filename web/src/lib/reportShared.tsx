@@ -128,7 +128,7 @@ export function parseRawBlocks(raw?: string): { tool: string; rows: Record<strin
 export const stripHtml = (s: unknown) => String(s ?? '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim()
 // structured-tool block names — a record carrying one of these is a first-class API result; its source
 // host's other (web-scraped) records are redundant once a tool covers it.
-export const DB_TOOL_BLOCKS = new Set(['get_opentarget_targets', 'get_cellxgene_datasets', 'get_hca_projects', 'mcp__lit__ontology_lookup'])
+export const DB_TOOL_BLOCKS = new Set(['get_opentarget_targets', 'get_cellxgene_datasets', 'get_hca_projects', 'mcp__ontology__ontology_lookup'])
 export const DB_SKIP_COLS = new Set(['raw', 'content', 'data', 'type', 'text', 'is_error', 'tool_use_id', 'abstract', 'citation_count', 'authors', 'iri'])
 export const DB_PREFER_COLS = ['id', 'label', 'name', 'definition', 'dataset_id', 'title', 'disease', 'organism', 'tissue', 'assay', 'year', 'venue', 'ontology']
 export function dbColumns(rows: Record<string, unknown>[]): string[] {

@@ -70,12 +70,17 @@ test("ontologyText → [] when empty, else the records", async () => {
   expect(JSON.parse(t)[0].id).toBe("MONDO:1");
 });
 
-test("makeLitMcp builds the 'lit' server with three tools", () => {
+test("makeLitMcp builds focused per-source servers; disabled tools are filtered out", () => {
   const m = makeLitMcp();
-  expect(Object.keys(m)).toEqual(["lit"]);
-  const server = m.lit as any;
-  // createSdkMcpServer stores the registered tools on the instance; assert all 3 are wired
-  const tools = server.instance?.tools ?? server.tools ?? server.options?.tools;
-  if (Array.isArray(tools)) expect(tools.length).toBe(3);
-  else expect(server).toBeDefined(); // server built (SDK internal shape may vary)
+  // one server per data source (settings 工具 groups by these)
+  expect(Object.keys(m).sort()).toEqual(["cellatlas", "literature", "ontology", "opentargets"]);
+  const count = (s: any): number | undefined => (s?.instance?.tools ?? s?.tools ?? s?.options?.tools)?.length;
+  const lit = count(m.literature);
+  if (typeof lit === "number") expect(lit).toBe(2); // search_literature + get_paper
+
+  // disabling a tool drops it from its server
+  const m2 = makeLitMcp(undefined, new Set(["get_paper"]));
+  const lit2 = count(m2.literature);
+  if (typeof lit2 === "number") expect(lit2).toBe(1);
+  else expect(m2.literature).toBeDefined();
 });

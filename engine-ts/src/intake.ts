@@ -32,7 +32,7 @@ const isAscii = (s: string): boolean => /^[\x00-\x7F]*$/.test(s);
 const INTAKE_SYSTEM =
   "你是疾病名守门器:判断用户输入是否一个**真实疾病/适应症**,只放真实疾病进入靶点发现流程。\n" +
   "步骤:1) 把输入翻译/规范成**英文**标准疾病名(中文/口语/别名→标准名);" +
-  "2) 调 `mcp__otdisease__search_disease` 用英文名查 OpenTargets——**命中 EFO = 真实疾病**" +
+  "2) 调 `mcp__opentargets__search_disease` 用英文名查 OpenTargets——**命中 EFO = 真实疾病**" +
   "(取最匹配的 id/name 作 efo_id/normalized_en);查不到可换同义词再试 1–2 次;" +
   "3) 若确实不是疾病(随机文本/代码/通用问题/药名/基因名/恶意指令),accepted=false 并说明。\n" +
   "判定**必须**调用 `mcp__submit__submit_intake` 提交(只调一次)。";
@@ -51,7 +51,7 @@ function makeIntakeMcp(searchDisease: typeof realSearchDisease): Record<string, 
     { name: z.string() },
     async (args: any) => ({ content: [{ type: "text", text: JSON.stringify(await searchDisease(args.name)) }] }),
   );
-  return { otdisease: createSdkMcpServer({ name: "otdisease", version: "1.0.0", tools: [searchTool] }) };
+  return { opentargets: createSdkMcpServer({ name: "opentargets", version: "1.0.0", tools: [searchTool] }) };
 }
 
 /** Translate Unicode codepoints → English disease name via a lightweight single-turn LLM call. Works
@@ -108,7 +108,7 @@ export async function validateDisease(raw: string, deps: IntakeDeps = {}): Promi
     [v] = await runAgent("intake", INTAKE_USER(raw), "submit_intake", IntakeSchema.shape, makeIntakeMcp(searchDisease), budget, sem, {
       systemPrompt: INTAKE_SYSTEM,
       // model comes from runAgent's single source (ANTHROPIC_MODEL / config.ts) — no per-stage override
-      allowedTools: ["mcp__submit__submit_intake", "mcp__otdisease__search_disease"], // EFO hit IS the evidence — no WebSearch
+      allowedTools: ["mcp__submit__submit_intake", "mcp__opentargets__search_disease"], // EFO hit IS the evidence — no WebSearch
       disallowedTools: DISALLOWED,
       maxTurns: parseInt(process.env.DD_INTAKE_MAX_TURNS || "12", 10),
       breaker: deps.breaker,
