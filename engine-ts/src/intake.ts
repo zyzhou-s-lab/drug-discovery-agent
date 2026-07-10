@@ -9,7 +9,6 @@ import { Budget } from "./core";
 import { type CircuitBreaker, runAgent as realRunAgent, Semaphore } from "./orchestrate";
 import { IntakeSchema } from "./schemas";
 import { searchDisease as realSearchDisease } from "./tools/opentargets";
-import { toolDoc } from "./toolspec";
 
 export interface DiseaseIntake {
   accepted: boolean;
@@ -44,15 +43,19 @@ const INTAKE_USER = (raw: string): string =>
 
 const DISALLOWED = ["WebSearch", "WebFetch", "Bash", "Read", "Write", "Edit", "Glob", "Grep", "Task", "TodoWrite", "NotebookEdit"];
 
-/** The intake agent's only external tool: OpenTargets search_disease (EFO lookup). */
-function makeIntakeMcp(searchDisease: typeof realSearchDisease): Record<string, unknown> {
-  const searchTool = tool(
+/** The intake agent's only external tool: OpenTargets search_disease (EFO lookup). Exported so
+ * capabilities.ts can introspect it under the `opentargets` server (single source — no registry). */
+export function searchDiseaseTool(searchDisease: typeof realSearchDisease = realSearchDisease) {
+  return tool(
     "search_disease",
-    toolDoc("search_disease"),
+    "Resolve a disease name to OpenTargets EFO ids. Returns JSON [{id,name}]. Empty list = not a recognized disease.",
     { name: z.string() },
     async (args: any) => ({ content: [{ type: "text", text: JSON.stringify(await searchDisease(args.name)) }] }),
   );
-  return { opentargets: createSdkMcpServer({ name: "opentargets", version: "1.0.0", tools: [searchTool] }) };
+}
+
+function makeIntakeMcp(searchDisease: typeof realSearchDisease): Record<string, unknown> {
+  return { opentargets: createSdkMcpServer({ name: "opentargets", version: "1.0.0", tools: [searchDiseaseTool(searchDisease)] }) };
 }
 
 /** Translate Unicode codepoints → English disease name via a lightweight single-turn LLM call. Works

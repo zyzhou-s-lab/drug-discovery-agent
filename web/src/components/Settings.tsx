@@ -342,7 +342,6 @@ export function Settings(props: { open: boolean; onOpenChange: (v: boolean) => v
                                                         </div>
                                                         {open && (
                                                             <div className="border-t border-[var(--app-divider)] bg-[var(--app-subtle-bg)] px-3 py-2">
-                                                                <div className="mb-1 text-[11px] font-medium text-[var(--app-hint)]">说明(模型看到的)</div>
                                                                 <div className="mb-2 whitespace-pre-wrap text-[11px] leading-relaxed text-[var(--app-fg)]">{t.desc}</div>
                                                                 <div className="mb-1 text-[11px] font-medium text-[var(--app-hint)]">参数</div>
                                                                 {t.params.length ? (
