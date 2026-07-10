@@ -85,7 +85,9 @@ function isLoopbackOrPrivate(host: string): boolean {
     const p = host.split(".").map(Number);
     const a = p[0]!;
     const b = p[1]!;
-    return a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
+    // 127/8 loopback · 10/8 · 172.16-31 · 192.168 · 169.254 link-local · 100.64/10 Tailscale CGNAT
+    // (the web is reached over the tailnet IP, e.g. 100.123.x.x — its same-origin POSTs must be trusted)
+    return a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254) || (a === 100 && b >= 64 && b <= 127);
   }
   const h = host.toLowerCase(); // IPv6: loopback / ULA / link-local
   return h === "::1" || h.startsWith("fc") || h.startsWith("fd") || h.startsWith("fe80");
