@@ -30,14 +30,8 @@ import type {
     StageStatus,
     TargetCandidate,
 } from '@/types/dda'
-import {
-    STATUS_VARIANT, STATUS_LABEL, STAGE_LABEL, STAGE_DESC, MODALITY_LABEL, KIND_LABEL, SCORE_LABEL,
-    stageLabel, fmtDur, refNFor, confVariant,
-    DB_BIO_TYPES, dbBioType, parseRawBlocks, stripHtml, DB_TOOL_BLOCKS, DB_SKIP_COLS, DB_PREFER_COLS,
-    dbColumns, dbCell, pruneDbFacts, fmtRaw,
-} from '@/lib/reportShared'
-import { DeepReportView, CandidateCard, Bibliography } from '@/components/report/reportView'
-import { DeepResearchPage, StageRail, StageDetail, ScopeAngles } from '@/components/pipeline/pipelineViews'
+import { DeepReportView, Bibliography } from '@/components/report/reportView'
+import { DeepResearchPage, StageRail, StageDetail } from '@/components/pipeline/pipelineViews'
 
 
 
