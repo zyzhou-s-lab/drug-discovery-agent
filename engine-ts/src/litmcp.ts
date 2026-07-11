@@ -9,7 +9,7 @@ import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 
 import { emit } from "./events";
-import { abstractByDoi, cellxgeneDatasets, hcaProjects, ontologyLookup, openTargetTargets, searchLiteratureMulti } from "./tools/paperfetch";
+import { abstractByDoi, cellxgeneDatasets, clinicalTrials, hcaProjects, ontologyLookup, openTargetTargets, searchLiteratureMulti } from "./tools/paperfetch";
 
 export interface LitDeps {
   searchLiteratureMulti: typeof searchLiteratureMulti;
@@ -18,8 +18,9 @@ export interface LitDeps {
   openTargetTargets: typeof openTargetTargets;
   cellxgeneDatasets: typeof cellxgeneDatasets;
   hcaProjects: typeof hcaProjects;
+  clinicalTrials: typeof clinicalTrials;
 }
-const DEFAULT_DEPS: LitDeps = { searchLiteratureMulti, abstractByDoi, ontologyLookup, openTargetTargets, cellxgeneDatasets, hcaProjects };
+const DEFAULT_DEPS: LitDeps = { searchLiteratureMulti, abstractByDoi, ontologyLookup, openTargetTargets, cellxgeneDatasets, hcaProjects, clinicalTrials };
 
 // Tuned constants (verbatim from deep_research.py _lit_server). LIT_SEARCH_SIZE is intentionally
 // below searchLiteratureMulti's default 10: these results carry abstracts + tldr, so a smaller set
@@ -119,6 +120,18 @@ export async function hcaText(organ: string, deps: LitDeps = DEFAULT_DEPS): Prom
   return rows.length ? JSON.stringify(rows) : "[]";
 }
 
+/** get_clinical_trials body → interventional drug-trial JSON, or "[]" when empty/error (never throws). */
+export async function clinicalTrialsText(disease: string, deps: LitDeps = DEFAULT_DEPS): Promise<string> {
+  let rows: unknown[] = [];
+  try {
+    rows = await deps.clinicalTrials(disease, 20);
+  } catch (e) {
+    toolError("get_clinical_trials", e, disease);
+    rows = [];
+  }
+  return rows.length ? JSON.stringify(rows) : "[]";
+}
+
 const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
 
 /** The tool definitions, grouped by the MCP server they belong to. This is the SINGLE source: the
@@ -184,6 +197,18 @@ export function litToolDefs(deps: LitDeps = DEFAULT_DEPS): Record<string, any[]>
         async (args: { organ: string }) => text(await hcaText(args.organ ?? "", deps)),
       ),
     ],
+    clinicaltrials: [
+      tool(
+        "get_clinical_trials",
+        "Find INTERVENTIONAL drug trials for a disease from ClinicalTrials.gov (v2 API, keyless). Returns " +
+          "STRUCTURED rows [{nctId,title,status,phase,interventions:[{type,name}],conditions,url}] — the " +
+          "drugs/modalities already in clinical development for this disease (real phases only; NA / " +
+          "non-drug interventions filtered out). Use this for the existing-drugs / clinical-validation " +
+          "part of an angle instead of WebFetch-ing the ClinicalTrials.gov site.",
+        { disease: z.string() },
+        async (args: { disease: string }) => text(await clinicalTrialsText(args.disease ?? "", deps)),
+      ),
+    ],
   };
 }
 
@@ -198,5 +223,6 @@ export function makeLitMcp(deps: LitDeps = DEFAULT_DEPS, disabled: Set<string> =
     ontology: srv("ontology", defs.ontology!),
     opentargets: srv("opentargets", defs.opentargets!),
     cellatlas: srv("cellatlas", defs.cellatlas!),
+    clinicaltrials: srv("clinicaltrials", defs.clinicaltrials!),
   };
 }

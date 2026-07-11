@@ -364,6 +364,49 @@ export async function openTargetTargets(disease: string, size = 25): Promise<OTT
   }
 }
 
+/** get_clinical_trials body. Interventional DRUG trials for a disease from the ClinicalTrials.gov v2
+ * API (keyless), slimmed to the fields drug-target discovery cares about. Filters to real phases
+ * (drops NA) and drug-ish interventions (drops dietary supplement / behavioral / device / other). */
+export async function clinicalTrials(disease: string, size = 20): Promise<Record<string, unknown>[]> {
+  try {
+    const cond = String(disease ?? "").trim();
+    if (!cond) return [];
+    const n = Math.max(1, Math.min(size, 50));
+    const params = new URLSearchParams({
+      "query.cond": cond,
+      "aggFilters": "studyType:int", // interventional only
+      "pageSize": String(n),
+      "sort": "LastUpdatePostDate:desc",
+      "fields": "protocolSection.identificationModule,protocolSection.statusModule,protocolSection.designModule,protocolSection.armsInterventionsModule,protocolSection.conditionsModule",
+    });
+    const data = await httpJson(`https://clinicaltrials.gov/api/v2/studies?${params}`);
+    const DRUG_TYPES = new Set(["DRUG", "BIOLOGICAL", "GENETIC", "COMBINATION_PRODUCT"]); // focus on molecular interventions
+    const out: Record<string, unknown>[] = [];
+    for (const s of data?.studies ?? []) {
+      const p = s?.protocolSection ?? {};
+      const phases: string[] = (p.designModule?.phases ?? []).filter((ph: string) => ph && ph !== "NA");
+      if (!phases.length) continue; // drop NA / no-phase (dietary-supplement etc.)
+      const ivs = (p.armsInterventionsModule?.interventions ?? [])
+        .filter((i: any) => DRUG_TYPES.has(String(i?.type ?? "").toUpperCase()) && !/placebo/i.test(String(i?.name ?? "")))
+        .map((i: any) => ({ type: i.type, name: i.name }));
+      if (!ivs.length) continue; // no molecular intervention → not target-relevant
+      const nctId = p.identificationModule?.nctId ?? null;
+      out.push({
+        nctId,
+        title: p.identificationModule?.briefTitle ?? null,
+        status: p.statusModule?.overallStatus ?? null,
+        phase: phases.join("/"),
+        interventions: ivs.slice(0, 5),
+        conditions: (p.conditionsModule?.conditions ?? []).slice(0, 4),
+        url: nctId ? `https://clinicaltrials.gov/study/${nctId}` : "",
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 /** Backend-only raw GET → JSON verbatim / HTML stripped to text. '' on failure. (Not an agent tool.) */
 export async function fetchText(url: string, maxChars = 2500): Promise<string> {
   if (!/^https?:\/\//.test(url || "")) return "";
