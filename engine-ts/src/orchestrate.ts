@@ -167,12 +167,13 @@ export async function runAgent(
   };
   if (systemPrompt) options.systemPrompt = systemPrompt;
   if (allowedTools) options.allowedTools = allowedTools;
-  // When web-rooter (client-side MCP search) is wired into this agent, block the Anthropic
-  // server-side WebSearch/WebFetch built-ins: on the Kimi gateway they're broken (400 / no real
-  // web access), so leaving them available just burns turns + tokens. The agent uses
-  // mcp__webrooter__web_search / _web_fetch instead. Only these two are forced off; everything
-  // else (lit MCP tools, Bash, Read, submit) stays available.
-  const effDisallow = "webrooter" in extraMcp ? [...(disallowedTools ?? []), "WebSearch", "WebFetch"] : disallowedTools;
+  // When web-rooter (client-side MCP search) is wired into this agent, block only the Anthropic
+  // server-side WebSearch built-in: on the Kimi gateway it's dead (400 Invalid request), so leaving
+  // it available just burns turns + tokens — the agent uses mcp__webrooter__web_search instead.
+  // WebFetch is intentionally NOT blocked: with skipWebFetchPreflight it works on Kimi and is faster
+  // than web-rooter's browser fetch, so page reading stays on the native tool. Everything else (lit
+  // MCP tools, web-rooter's own web_fetch as a fallback, Bash, Read, submit) stays available.
+  const effDisallow = "webrooter" in extraMcp ? [...(disallowedTools ?? []), "WebSearch"] : disallowedTools;
   if (effDisallow) options.disallowedTools = effDisallow;
   const model = process.env.ANTHROPIC_MODEL; // single source: config.ts (settings page)
   if (model) options.model = model;

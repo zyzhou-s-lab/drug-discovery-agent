@@ -14,11 +14,15 @@
 
 export const WEBROOTER_ENABLED = Boolean(process.env.DD_WEBROOTER_PY && process.env.DD_WEBROOTER_MAIN);
 
-// Short tool names used in the prompts. Under the hood the agent sees mcp__webrooter__web_search /
-// mcp__webrooter__web_fetch; the model resolves the short name, matching how the lit MCP tools
-// (search_literature, get_paper, …) are referenced in the same prompts.
+// Only WebSearch is dead on the Kimi gateway (400 Invalid request). When web-rooter is wired in the
+// agent sees mcp__webrooter__web_search; the model resolves the short name, matching how the lit MCP
+// tools (search_literature, get_paper, …) are referenced in the same prompts.
 export const WEB_SEARCH = WEBROOTER_ENABLED ? "web_search" : "WebSearch";
-export const WEB_FETCH = WEBROOTER_ENABLED ? "web_fetch" : "WebFetch";
+// WebFetch is NOT dead: with skipWebFetchPreflight (orchestrate.ts) it fetches fine on Kimi (verified
+// against PubMed) and is faster than web-rooter's akko-browser fetch, so page READING stays on the
+// native built-in — always "WebFetch", regardless of web-rooter. web-rooter's own web_fetch is still
+// registered and available as a fallback, just not the tool the prompts steer to.
+export const WEB_FETCH = "WebFetch";
 
 /** stdio MCP server config for the SDK (mcpServers["webrooter"]), or {} when not configured. */
 export function webRooterMcp(): Record<string, unknown> {
