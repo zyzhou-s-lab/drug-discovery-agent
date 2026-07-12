@@ -6,6 +6,7 @@
 import { Budget, clampInt, IMP_RANK, lexicalClusters, MAX_FETCH, MAX_VERIFY_CLAIMS, CONF_RANK, dedupResults, normUrl, QUAL_RANK, rankClaims, type SearchResult, survives, VOTES_PER_CLAIM, REFUTATIONS_REQUIRED, MAX_DB_RAW } from "./core";
 import { makeLitMcp } from "./litmcp";
 import { getDisabledTools } from "./toolgate";
+import { WEB_FETCH, WEB_SEARCH, webRooterMcp } from "./webrooter";
 import { CircuitBreaker, type OnMessage, runAgent as realRunAgent, type RunAgentOpts, Semaphore, type ToolResult } from "./orchestrate";
 import { AngleFindingSchema, ExtractSchema, MergeSchema, SearchSchema, VerdictSubmitSchema } from "./schemas";
 import { abstractByDoi, citeByDoi, normDoi } from "./tools/paperfetch";
@@ -43,7 +44,7 @@ export function SEARCH_PROMPT(question: string, angle: Angle): string {
     "Your angle: **" + angle.label + "** — " + (angle.rationale ?? "") + "\n" +
     "Search query: `" + angle.query + "`\n\n" +
     "## Task\nFind the top 4-8 most relevant sources for this angle, drawing on THREE kinds of sources:\n" +
-    "1. **web** — use WebSearch for guidelines, reviews, institutional pages. Skip SEO spam/content farms.\n" +
+    "1. **web** — use the `" + WEB_SEARCH + "` tool for guidelines, reviews, institutional pages. Skip SEO spam/content farms.\n" +
     "2. **paper** — use the `search_literature` tool for peer-reviewed papers; return each paper's `doi`.\n" +
     "3. **database** — when relevant, surface AUTHORITATIVE database / ontology API records and return their\n" +
     "   record/API URL: disease ontologies (EFO/MONDO via EBI OLS4), gene/variant resources\n" +
@@ -55,8 +56,8 @@ export function SEARCH_PROMPT(question: string, angle: Angle): string {
     "Tag every result with `source_type` (web | paper | database). For paper set `doi`; for web/database set `url`.\n" +
     "Rank by relevance to the ORIGINAL question, not just the search query. Add a short snippet per result.\n\n" +
     "BE FAST — this is only source DISCOVERY, not reading:\n" +
-    "- Make AT MOST ~2 WebSearch calls and ~1 `search_literature` call total, then submit. Do not loop.\n" +
-    "- Do NOT WebFetch / open pages here — just return the URLs/DOIs; a later step reads them.\n" +
+    "- Make AT MOST ~2 `" + WEB_SEARCH + "` calls and ~1 `search_literature` call total, then submit. Do not loop.\n" +
+    "- Do NOT open/read pages here — just return the URLs/DOIs; a later step reads them.\n" +
     "- A database result is just a known record/API URL (e.g. an OLS4 term URL); return it, don't fetch it.\n\n" +
     "NOTE: database / dataset records are PRIMARY factual sources — freely surface them and capture the\n" +
     "exact field values as data, INCLUDING quantitative ones (GWAS associations, LINCS L1000 / CMap\n" +
@@ -79,17 +80,17 @@ export function FETCH_PROMPT(question: string, source: FetchSource, angle: strin
       "   terms (MONDO/EFO/HP/GO) PREFER the `ontology_lookup` tool (returns structured records);\n" +
       "   for DRUG-TARGET–disease associations (Open Targets — target lists, association scores,\n" +
       "   evidence types) PREFER the `get_opentarget_targets` tool (pass the disease name or MONDO/EFO id;\n" +
-      "   returns ranked structured targets) — do NOT WebFetch the Open Targets site (JS-only, returns nothing);\n" +
+      "   returns ranked structured targets) — do NOT " + WEB_FETCH + " the Open Targets site (JS-only, returns nothing);\n" +
       "   for SINGLE-CELL / SPATIAL datasets PREFER `get_cellxgene_datasets` (disease or tissue) and\n" +
       "   `get_hca_projects` (organ, e.g. 'liver') — both return structured dataset rows;\n" +
       "   for CLINICAL TRIALS / existing drugs PREFER `get_clinical_trials` (pass the disease name; returns\n" +
-      "   structured interventional drug-trial rows) — do NOT WebFetch the ClinicalTrials.gov site;\n" +
-      "   otherwise WebFetch the API / record URL:\n" +
+      "   structured interventional drug-trial rows) — do NOT " + WEB_FETCH + " the ClinicalTrials.gov site;\n" +
+      "   otherwise use `" + WEB_FETCH + "` on the API / record URL:\n" +
       "   **URL:** " + (source.url ?? "") + "\n" +
       "   Treat it as a PRIMARY source; capture the EXACT record fields/values (IDs, gene-subtype\n" +
       "   mappings, counts, classifications) — not a vague prose summary.\n";
   } else {
-    retrieve = "## Task\n1. Use WebFetch to retrieve the page content:\n   **URL:** " + (source.url ?? "") + "\n";
+    retrieve = "## Task\n1. Use `" + WEB_FETCH + "` to retrieve the page content:\n   **URL:** " + (source.url ?? "") + "\n";
   }
   return (
     "## Source Extractor (" + st + ")\n\n" +
@@ -118,8 +119,8 @@ export function VERIFY_PROMPT(question: string, claim: VerifyClaim, v: number): 
     '**Supporting quote:** "' + (claim.quote ?? "") + '"\n\n' +
     "## Checklist\n" +
     "1. Is the claim actually supported by the quote, or is it an overreach/misread?\n" +
-    "2. WebSearch for contradicting evidence — does any credible source dispute or heavily qualify this? " +
-    "Use WebFetch to read a page; for peer-reviewed papers use `search_literature` / `get_paper`.\n" +
+    "2. Use `" + WEB_SEARCH + "` for contradicting evidence — does any credible source dispute or heavily qualify this? " +
+    "Use `" + WEB_FETCH + "` to read a page; for peer-reviewed papers use `search_literature` / `get_paper`.\n" +
     "3. Is the source quality sufficient for the claim's strength? (extraordinary claims need primary sources)\n" +
     "4. Is the claim outdated? (check dates — old claims about fast-moving fields are suspect)\n" +
     "5. Is this a marketing claim / press release / cherry-picked benchmark / forum speculation?\n\n" +
@@ -361,7 +362,7 @@ export async function research(question: string, angles: Angle[], opts: Research
   let lit = opts.lit;
   if (lit === undefined) {
     try {
-      lit = makeLitMcp(undefined, getDisabledTools());
+      lit = { ...makeLitMcp(undefined, getDisabledTools()), ...webRooterMcp() };
     } catch {
       lit = {};
     }
