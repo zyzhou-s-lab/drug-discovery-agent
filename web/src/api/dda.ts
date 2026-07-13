@@ -90,7 +90,7 @@ export const ddaApi = {
     stopSearch: (c: string) =>
         fetch(`${BASE}/campaigns/${encodeURIComponent(c)}/stop`, { method: 'POST' }).then((r) => r.json()),
 
-    startRun: (body: { disease: string; campaign: string; real?: boolean; skip_intake?: boolean }) =>
+    startRun: (body: { disease: string; campaign: string; real?: boolean; skip_intake?: boolean; focus?: string }) =>
         fetch(`${BASE}/campaigns`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },

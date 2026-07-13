@@ -12,7 +12,7 @@ the disease — NOT target nomination or scoring.
 
 ## Disease
 {QUESTION}
-
+{FOCUS}
 ## Task
 Generate distinct, high-signal search queries that together characterize the disease from
 these complementary angles. Cover every angle that applies; merge or drop one only if it is
@@ -47,13 +47,34 @@ export interface ScopeOpts {
   sem?: Semaphore;
   onMessage?: OnMessage;
   breaker?: CircuitBreaker; // fed the agent's outcome so a quota/rate-limit outage pauses (not a false empty)
+  focus?: string; // optional user research focus — steers the angle set (Option A)
+}
+
+// The user's own research focus, injected between the disease and the angle checklist. The user is a
+// domain expert who already knows the generic disease background, so when a focus is given the scope
+// should CONCENTRATE on it rather than restate textbook overview. A focus that names a concrete
+// target/gene/pathway/drug is allowed to be centered on (overriding the "don't pre-name" rule, which
+// only bars the model from inventing names the user never gave).
+export function focusBlock(focus?: string): string {
+  const f = (focus ?? "").trim();
+  if (!f) return "";
+  return (
+    `\n## User's research focus — PRIORITIZE THIS\n` +
+    f +
+    `\n\nThe user is a domain expert who already knows the generic disease background, so a textbook ` +
+    `overview adds little. RESHAPE the angle set to concentrate on this focus: merge, drop, or re-scope ` +
+    `the angles below so that together they directly serve it. If the focus names a specific target / ` +
+    `gene / pathway / drug / modality / patient subtype, it is CORRECT to center angles on that named ` +
+    `entity — that overrides the "do NOT pre-name" rule below, which only bars YOU from inventing names ` +
+    `the user did not give. Do not invent OTHER unverified names beyond what the focus states.\n`
+  );
 }
 
 /** Run the Scope phase. Returns {question, angles[], budget} or null if the agent never submitted. */
 export async function scope(disease: string, opts: ScopeOpts = {}): Promise<Record<string, unknown> | null> {
   const budget = opts.budget ?? new Budget();
   const sem = opts.sem ?? new Semaphore(1);
-  const prompt = SCOPE_PROMPT.replace("{QUESTION}", disease);
+  const prompt = SCOPE_PROMPT.replace("{QUESTION}", disease).replace("{FOCUS}", focusBlock(opts.focus));
   const [result] = await runAgent("scope", prompt, "submit_angles", SCOPE_SCHEMA, {}, budget, sem, {
     maxTurns: 6,
     onMessage: opts.onMessage,

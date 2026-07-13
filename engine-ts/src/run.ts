@@ -6,7 +6,7 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { deriveAssets, writeStepItem } from "./assets";
+import { deriveAssets, writeCandidates, writeStepItem } from "./assets";
 import { research as realResearch } from "./deep_research";
 import { emit, emitStream, eventsDir } from "./events";
 import { validateDisease as realValidate } from "./intake";
@@ -146,6 +146,14 @@ export async function runSearch(
       }),
     );
     writeJson(reportPath, report);
+    // nomination → candidates.json (the ranked target list — the tool's target-discovery output).
+    // efo/mondo id is best-effort scraped from an Open Targets source URL in the run's evidence.
+    try {
+      const efoId = (JSON.stringify(report.databaseFacts ?? []).match(/(?:MONDO|EFO)[_:]\d+/) ?? [""])[0].replace(":", "_");
+      writeCandidates(report.candidates ?? [], artifactsRoot, campaign, { efoId, sortBy: "score" });
+    } catch (e) {
+      console.warn(`candidate write failed for ${campaign}:`, e);
+    }
     // Derive the compute-facing assets/ contract by reducing the deepresearch/ record (the single
     // source of truth) — so assets/ can't drift from it and is rebuildable. The bibliography
     // (report.references) is threaded in (a cross-source, network-enriched projection not held in any
@@ -197,7 +205,7 @@ export async function runPipeline(
   artifactsRoot: string,
   campaign: string,
   disease: string,
-  opts: { real?: boolean; skipIntake?: boolean } & PipelineDeps = {},
+  opts: { real?: boolean; skipIntake?: boolean; focus?: string } & PipelineDeps = {},
 ): Promise<void> {
   const scope = opts.scope ?? realScope;
   const validate = opts.intake ?? realValidate;
@@ -236,7 +244,7 @@ export async function runPipeline(
   try {
     const res = await eventsDir.run(evDir, async () => {
       emit(OVERVIEW_STAGE, "scope", "session_start", { prompt: `deep-research scope: ${disease}` });
-      return scope(disease, { onMessage: (m) => emitStream(OVERVIEW_STAGE, "scope", m, { skipText: true }), breaker });
+      return scope(disease, { focus: opts.focus, onMessage: (m) => emitStream(OVERVIEW_STAGE, "scope", m, { skipText: true }), breaker });
     });
     if (breaker.tripped) {
       markPaused(); // provider quota/rate-limit during scope → paused, not a false "0 angles / done"
@@ -244,13 +252,13 @@ export async function runPipeline(
     }
     const angles = ((res as any)?.angles as any[]) ?? [];
     const output = angles.length
-      ? { stage: OVERVIEW_STAGE, summary: `Deep-research scope: ${angles.length} 个研究角度`, candidates: [], open_questions: ["scope-only 研究计划;完整检索简报(search→verify→synth)待 M2"], data: { kind: "scope", question: (res as any)?.question ?? disease, angles, budget: (res as any)?.budget } }
+      ? { stage: OVERVIEW_STAGE, summary: `Deep-research scope: ${angles.length} 个研究角度`, candidates: [], open_questions: ["scope-only 研究计划;完整检索简报(search→verify→synth)待 M2"], data: { kind: "scope", question: (res as any)?.question ?? disease, focus: opts.focus || undefined, angles, budget: (res as any)?.budget } }
       : { stage: OVERVIEW_STAGE, summary: "[deep-research scope] 未能拆解出研究角度", candidates: [], open_questions: ["scope returned no angles"] };
     idx.markDone(campaign, OVERVIEW_STAGE, output, {});
     // single scope agent → deepresearch/01_scope/scope.json (best-effort; never fails the run)
     try {
       writeStepItem(artifactsRoot, campaign, "01_scope", "scope", {
-        question: (res as any)?.question ?? disease, count: angles.length, angles,
+        question: (res as any)?.question ?? disease, focus: opts.focus || undefined, count: angles.length, angles,
       });
     } catch (e) {
       eventsDir.run(evDir, () => emit(OVERVIEW_STAGE, "scope", "log", { msg: `01_scope 落盘失败: ${e instanceof Error ? e.message : String(e)}` }));

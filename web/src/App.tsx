@@ -138,11 +138,11 @@ export function App() {
 
     // real is always true now (the "实时" toggle was removed); the disease has already
     // passed the intake pre-check in the dialog, so skip_intake avoids a redundant gate.
-    const startRun = (disease: string) => {
+    const startRun = (disease: string, focus?: string) => {
         const slug = disease.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'run'
         const id = `${slug}-${Date.now().toString(36)}`
         ddaApi
-            .startRun({ disease, campaign: id, real: true, skip_intake: true })
+            .startRun({ disease, campaign: id, real: true, skip_intake: true, focus })
             .then(() => {
                 setSelected(null)
                 setCampaign(id)

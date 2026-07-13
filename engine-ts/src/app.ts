@@ -356,7 +356,8 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
     const disease = String(body.disease ?? "").trim();
     if (!disease) return c.json({ error: "disease required" }, 400);
     if (disease.length > 2000) return c.json({ error: "disease too long" }, 400); // bound the LLM input
-    const out = await scopeFn(disease);
+    const focus = String(body.focus ?? "").trim().slice(0, 2000) || undefined;
+    const out = await scopeFn(disease, { focus });
     return c.json(out ?? { question: disease, summary: "", angles: [], budget: null });
   });
 
@@ -367,10 +368,11 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
     if (!safeSegment(campaign)) return c.json({ error: "invalid campaign" }, 400); // path-segment downstream
     const disease = String(body.disease ?? "");
     if (disease.length > 2000) return c.json({ error: "disease too long" }, 400);
+    const focus = String(body.focus ?? "").trim().slice(0, 2000) || undefined; // optional user research focus (steers scope)
     const real = body.real !== false;
     index.recordCampaign(campaign, disease); // group by disease immediately
     // runPipeline catches its own errors, but guard the fire-and-forget against an unhandled rejection
-    void pipelineFn(index, artifactsRoot, campaign, disease, { real, skipIntake: Boolean(body.skip_intake) }).catch((e) => console.warn(`pipeline failed for ${campaign}:`, e));
+    void pipelineFn(index, artifactsRoot, campaign, disease, { real, skipIntake: Boolean(body.skip_intake), focus }).catch((e) => console.warn(`pipeline failed for ${campaign}:`, e));
     return c.json({ campaign, disease, real, started: true });
   });
 

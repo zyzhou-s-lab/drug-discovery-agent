@@ -63,15 +63,17 @@ function NewRunDialog(props: {
     open: boolean
     onOpenChange: (v: boolean) => void
     initialDisease: string
-    onStart: (disease: string) => void
+    onStart: (disease: string, focus?: string) => void
 }) {
     const [disease, setDisease] = useState(props.initialDisease)
+    const [focus, setFocus] = useState('')
     const [seen, setSeen] = useState(props.initialDisease)
     const [checking, setChecking] = useState(false)
     const [error, setError] = useState<string | null>(null)
     if (props.open && seen !== props.initialDisease) {
         setSeen(props.initialDisease)
         setDisease(props.initialDisease)
+        setFocus('')
         setError(null)
     }
     // Validate the disease at submit time (intake gate): reject junk/non-disease input
@@ -89,7 +91,7 @@ function NewRunDialog(props: {
             }
             // create the run under the canonical (OpenTargets-aligned) disease name, not the raw
             // user input — so "t2d" / "阿尔兹海默" display as "type 2 diabetes mellitus" etc.
-            props.onStart(res.normalized_en?.trim() || d)
+            props.onStart(res.normalized_en?.trim() || d, focus.trim() || undefined)
             props.onOpenChange(false)
         } catch {
             setError('疾病名校验失败,请稍后重试。')
@@ -118,6 +120,17 @@ function NewRunDialog(props: {
                             className="rounded-md border border-[var(--app-border)] bg-transparent px-2 py-1.5 text-sm outline-none focus:border-[var(--app-button)] disabled:opacity-60"
                         />
                     </label>
+                    <label className="flex flex-col gap-1 text-sm">
+                        <span className="text-xs text-[var(--app-hint)]">你关心的问题 / 靶点发现方向(可选)</span>
+                        <textarea
+                            value={focus}
+                            onChange={(e) => setFocus(e.target.value)}
+                            placeholder="例:与肝纤维化消退相关的可成药靶点;或直接给一个候选靶点(如 PNPLA3)。留空则做疾病综述。"
+                            disabled={checking}
+                            rows={3}
+                            className="resize-none rounded-md border border-[var(--app-border)] bg-transparent px-2 py-1.5 text-sm outline-none focus:border-[var(--app-button)] disabled:opacity-60"
+                        />
+                    </label>
                     {error && (
                         <p className="text-sm text-[var(--app-badge-error-text,#dc2626)]">{error}</p>
                     )}
@@ -139,7 +152,7 @@ export function Sidebar(props: {
     apiDown: boolean
     selected: string | null
     onSelect: (campaign: string) => void
-    onStartRun: (disease: string) => void
+    onStartRun: (disease: string, focus?: string) => void
     onMutate: (deleted?: string) => void
 }) {
     // hapi useSidebarResize params (280/420/600) — faithful replication of upstream
