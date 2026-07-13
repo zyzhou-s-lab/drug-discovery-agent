@@ -87,6 +87,10 @@ export const TargetCandidateSchema = z.object({
   rationale: z.string().default(""),
 });
 
+// ── nomination: submit_candidates forced-output — the ranked target list (hybrid: deterministic
+// OpenTargets base + LLM enrichment). Reuses TargetCandidateSchema per candidate. ──
+export const NominateSchema = z.object({ candidates: z.array(TargetCandidateSchema).default([]) });
+
 export type SearchSubmit = z.infer<typeof SearchSchema>;
 export type ExtractSubmit = z.infer<typeof ExtractSchema>;
 export type VerdictSubmit = z.infer<typeof VerdictSubmitSchema>;

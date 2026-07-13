@@ -181,6 +181,8 @@ export interface DeepReport {
     caveats?: string
     openQuestions?: string[]
     refuted?: { claim: string; vote: string; source: string }[]
+    // nomination: the ranked candidate target list (target-discovery output)
+    candidates?: TargetCandidate[]
     sources?: { url: string; quality: string; angle?: string; claimCount?: number }[]
     // unified numbered bibliography over ALL cited sources (paper→apa7 / database+web→title+url)
     references?: { n: number; kind?: string; doi?: string; apa7?: string; title?: string; url?: string }[]

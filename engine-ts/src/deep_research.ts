@@ -8,7 +8,7 @@ import { makeLitMcp } from "./litmcp";
 import { getDisabledTools } from "./toolgate";
 import { WEB_FETCH, WEB_SEARCH, webRooterMcp } from "./webrooter";
 import { CircuitBreaker, type OnMessage, runAgent as realRunAgent, type RunAgentOpts, Semaphore, type ToolResult } from "./orchestrate";
-import { AngleFindingSchema, ExtractSchema, MergeSchema, SearchSchema, VerdictSubmitSchema } from "./schemas";
+import { AngleFindingSchema, ExtractSchema, MergeSchema, NominateSchema, SearchSchema, VerdictSubmitSchema } from "./schemas";
 import { abstractByDoi, citeByDoi, normDoi } from "./tools/paperfetch";
 
 const END = (toolName: string) =>
@@ -209,6 +209,88 @@ export function MERGE_PROMPT(question: string, findings: any[]): string {
   );
 }
 
+// ── target nomination (hybrid) ──────────────────────────────────────────────────────────────────
+// Deterministic base: parse the Open Targets ranked-target rows the run actually captured in
+// databaseFacts (raw = "[get_opentarget_targets] [{target,score,genetic_association,…}]"). Returns
+// de-duped rows (highest overall score per symbol), score-sorted — objective, no model prior.
+export function otBase(dbOut: any[]): Array<{ symbol: string; name: string | null; scores: Record<string, number>; source: string }> {
+  const byS = new Map<string, { symbol: string; name: string | null; scores: Record<string, number>; source: string }>();
+  for (const f of dbOut ?? []) {
+    const raw = String((f as any)?.raw ?? "");
+    const m = raw.match(/\[get_opentarget_targets\]\s*(\[[\s\S]*\])/);
+    if (!m) continue;
+    let rows: any[];
+    try { rows = JSON.parse(m[1] ?? "[]"); } catch { continue; }
+    if (!Array.isArray(rows)) continue;
+    for (const r of rows) {
+      const symbol = String(r?.target ?? "").trim();
+      if (!symbol) continue;
+      const scores: Record<string, number> = {};
+      for (const k of ["score", "genetic_association", "literature", "clinical"]) if (typeof r?.[k] === "number") scores[k === "score" ? "overall" : k] = r[k];
+      const prev = byS.get(symbol);
+      if (!prev || (scores.overall ?? 0) > (prev.scores.overall ?? 0)) byS.set(symbol, { symbol, name: r?.approvedName ?? null, scores, source: String((f as any)?.source ?? "") });
+    }
+  }
+  return [...byS.values()].sort((a, b) => (b.scores.overall ?? 0) - (a.scores.overall ?? 0));
+}
+
+// Anti-hallucination guard: keep only candidates whose symbol is GROUNDED — it came from the Open
+// Targets base, or appears as a bounded token in a confirmed claim's text/quote. Normalizes shape,
+// de-dupes by symbol. This is what makes "no invented target names" enforceable, not just prompted.
+export function guardCandidates(raw: any[], otPool: Array<{ symbol: string }>, confirmed: any[]): any[] {
+  const baseSyms = new Set(otPool.map((r) => r.symbol.toUpperCase()));
+  const evText = confirmed.map((c) => (c.claim ?? "") + " " + (c.quote ?? "")).join(" ").toUpperCase();
+  const grounded = (sym: string): boolean => {
+    const s = sym.toUpperCase();
+    if (baseSyms.has(s)) return true;
+    const esc = s.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&");
+    return new RegExp("(^|[^A-Z0-9])" + esc + "([^A-Z0-9]|$)").test(evText);
+  };
+  const seen = new Set<string>();
+  const out: any[] = [];
+  for (const c of raw ?? []) {
+    const symbol = String(c?.symbol ?? "").trim();
+    if (!symbol || seen.has(symbol.toUpperCase()) || !grounded(symbol)) continue;
+    seen.add(symbol.toUpperCase());
+    out.push({
+      symbol,
+      name: c?.name ?? null,
+      modality: c?.modality ?? null,
+      evidence: Array.isArray(c?.evidence) ? c.evidence : [],
+      scores: c?.scores && typeof c.scores === "object" ? c.scores : {},
+      rationale: String(c?.rationale ?? ""),
+    });
+  }
+  return out;
+}
+
+export function NOMINATE_PROMPT(question: string, otPool: Array<{ symbol: string; name: string | null; scores: Record<string, number> }>, confirmed: any[]): string {
+  const base = otPool.map((r, i) => `${i + 1}. ${r.symbol}${r.name ? " (" + r.name + ")" : ""} — scores ${JSON.stringify(r.scores)}`).join("\n");
+  const ev = confirmed.slice(0, 60).map((c, i) => `[C${i + 1}] ${c.claim}  «${String(c.quote ?? "").slice(0, 160)}»  — ${c.sourceUrl ?? ""}`).join("\n");
+  return (
+    "## Target Nominator\n\n" +
+    'Research question: "' + question + '"\n\n' +
+    "Nominate the most promising **drug targets** for this question, grounded ONLY in the evidence\n" +
+    "below — NEVER invent gene names from prior knowledge.\n\n" +
+    "## Deterministic base — Open Targets ranked, disease-associated targets (with scores)\n" +
+    (base || "(none captured)") + "\n\n" +
+    "## Verified evidence — adversarially-confirmed claims (each with its source)\n" +
+    (ev || "(none)") + "\n\n" +
+    "## Task\nProduce a RANKED list of up to 20 target candidates:\n" +
+    "1. Start from the Open Targets base — those are real, disease-associated, scored targets.\n" +
+    "2. You MAY add a target NOT in the base ONLY if a confirmed claim above directly implicates it\n" +
+    "   (genetics / causal mechanism); cite that claim as its evidence ref. Add nothing else.\n" +
+    "3. For EACH candidate fill: `symbol` (gene), `name`, `modality` (druggability if evident, else null),\n" +
+    "   `scores` (carry the Open Targets scores; you may add 0-1 dims like `genetic` / `mechanism`),\n" +
+    "   `evidence` (array of {kind, source, detail, ref} — `ref` MUST be a source URL/DOI from the\n" +
+    "   evidence above; every target claim needs a ref), and a 1-2 sentence `rationale`.\n" +
+    "4. RANK by strength of genetic + causal support relevant to the question (genetically-supported,\n" +
+    "   mechanistically-implicated, tractable targets first).\n" +
+    "5. Only include targets with ≥1 real piece of evidence — better 8 well-grounded than 20 thin.\n" +
+    END("submit_candidates")
+  );
+}
+
 /** From the sources backing CONFIRMED claims, build one unified, sequentially-numbered reference
  * list (papers get an APA7 string via citeByDoi). */
 export async function bibliography(confirmed: any[], allSources: any[]): Promise<any[]> {
@@ -355,6 +437,7 @@ export async function research(question: string, angles: Angle[], opts: Research
   // effect on the NEXT run without an engine restart; the core constants are the defaults.
   const fetchBudget = opts.fetchBudget ?? clampInt(process.env.DD_DR_MAX_FETCH, MAX_FETCH, 1, 100);
   const maxVerifyClaims = opts.maxVerifyClaims ?? clampInt(process.env.DD_DR_MAX_CLAIMS, MAX_VERIFY_CLAIMS, 1, 80);
+  const maxCandidates = clampInt(process.env.DD_DR_MAX_CANDIDATES, 20, 1, 100); // nomination top-N
   const runAgent: RunAgentFn = opts.runAgent ?? realRunAgent;
   // stop predicate seen by every agent: a user stop OR the circuit breaker tripping (sustained
   // rate-limit) — so a dead provider auto-pauses the run instead of grinding every agent to failure.
@@ -555,7 +638,7 @@ export async function research(question: string, angles: Angle[], opts: Research
     return {
       question,
       summary: "All " + voted.length + " claims refuted by adversarial verification. Research inconclusive — sources may be low-quality or claims overstated.",
-      findings: [], refuted: refutedOut, databaseFacts: dbOut, literature,
+      findings: [], refuted: refutedOut, candidates: [], databaseFacts: dbOut, literature,
       sources: allSources.map((s) => ({ url: s.url, quality: s.sourceQuality, claimCount: s.claims.length })),
       stats: { ...statsBase, verified: voted.length, confirmed: 0, killed: killed.length },
       budget: budget.report(),
@@ -614,6 +697,22 @@ export async function research(question: string, angles: Angle[], opts: Research
   doPersistStep("05_synthesize", "merge", (merged as any) ?? { summary: "", caveats: "", openQuestions: [] });
   ev("synthesize", "报告生成:" + findings.length + " 条 per-angle 发现 + 合并");
 
+  // ── nominate: hybrid — deterministic Open Targets base (parsed from the run's own databaseFacts)
+  // + LLM enrichment → ranked TargetCandidate[]. The guard drops any symbol not grounded in the base
+  // or a confirmed claim, so nominated targets are always traceable, never hallucinated. ──
+  const otPool = otBase(dbOut).slice(0, 30);
+  let candidates: any[] = [];
+  if (otPool.length || confirmed.length) {
+    const [nom] = await runAgent("synthesize", NOMINATE_PROMPT(question, otPool, confirmed), "submit_candidates", NominateSchema.shape, {}, budget, sem, {
+      onMessage: amsg("nominate"),
+      shouldStop: stopPred, breaker: opts.breaker,
+      disallowedTools: ["WebSearch", "WebFetch", "Bash"], // synthesize from the given evidence ONLY — no fetching
+    });
+    candidates = guardCandidates(((nom as any)?.candidates ?? []) as any[], otPool, confirmed).slice(0, maxCandidates);
+    doPersistStep("06_nominate", "candidates", { question, count: candidates.length, candidates });
+    ev("synthesize", "靶点提名:" + candidates.length + " 个候选靶点");
+  }
+
   const sourcesOut = allSources.map((s) => ({ url: s.url, quality: s.sourceQuality, angle: s.angle, claimCount: s.claims.length }));
   const references = await bibliography(confirmed, allSources);
   const stats = {
@@ -629,6 +728,7 @@ export async function research(question: string, angles: Angle[], opts: Research
     caveats: (merged as any)?.caveats ?? "",
     openQuestions: (merged as any)?.openQuestions ?? [],
     refuted: refutedOut,
+    candidates,
     sources: sourcesOut,
     references,
     literature,

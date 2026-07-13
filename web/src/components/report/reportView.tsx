@@ -478,10 +478,35 @@ export function ClaimSection(props: { report: DeepReport; onJumpToAngle?: (angle
 }
 
 // top-level report view: composes the cards above
+// nomination output — the ranked candidate target list (target-discovery deliverable). Reuses the
+// existing CandidateCard; adds rank numbers + a section header. Hidden when a run produced none.
+export function CandidatesCard(props: { candidates?: DeepReport['candidates'] }) {
+    const cs = props.candidates ?? []
+    if (cs.length === 0) return null
+    return (
+        <section>
+            <div className="mb-2 flex items-center gap-2">
+                <h3 className="text-base font-semibold">候选靶点</h3>
+                <span className="rounded bg-[var(--app-subtle-bg)] px-1.5 py-0.5 text-xs font-medium text-[var(--app-hint)]">{cs.length}</span>
+                <span className="text-xs text-[var(--app-hint)]">按遗传 / 因果证据排序 · 每条证据可溯源</span>
+            </div>
+            <div className="flex flex-col gap-3">
+                {cs.map((c, i) => (
+                    <div key={c.symbol + i} className="flex gap-2.5">
+                        <span className="mt-4 w-5 shrink-0 text-right text-sm font-semibold text-[var(--app-hint)]">{i + 1}</span>
+                        <div className="min-w-0 flex-1"><CandidateCard c={c} /></div>
+                    </div>
+                ))}
+            </div>
+        </section>
+    )
+}
+
 export function DeepReportView(props: { report: DeepReport; onJumpToAngle?: (angle: string) => void }) {
     const r = props.report
     return (
         <div className="flex flex-col gap-4">
+            <CandidatesCard candidates={r.candidates} />
             <StudyOverviewCard report={r} />
             <ResearchReportCard report={r} />
             <LiteratureCard literature={r.literature} />
