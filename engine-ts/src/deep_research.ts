@@ -9,7 +9,7 @@ import { getDisabledTools } from "./toolgate";
 import { WEB_FETCH, WEB_SEARCH, webRooterMcp } from "./webrooter";
 import { CircuitBreaker, type OnMessage, runAgent as realRunAgent, type RunAgentOpts, Semaphore, type ToolResult } from "./orchestrate";
 import { AngleFindingSchema, ExtractSchema, MergeSchema, NominateSchema, SearchSchema, VerdictSubmitSchema } from "./schemas";
-import { abstractByDoi, citeByDoi, normDoi } from "./tools/paperfetch";
+import { abstractByDoi, citeByDoi, clinvarVariants, geneInfo, gwasForGene, normDoi } from "./tools/paperfetch";
 
 const END = (toolName: string) =>
   `\n\nYour ONLY completion action is to call \`${toolName}\` exactly once with the structured ` +
@@ -292,6 +292,52 @@ export function NOMINATE_PROMPT(question: string, otPool: Array<{ symbol: string
     "5. Only include targets with ≥1 real piece of evidence — better 8 well-grounded than 20 thin.\n" +
     END("submit_candidates")
   );
+}
+
+// Deterministic per-candidate enrichment: after the LLM nominates targets, augment EACH with real
+// cross-database gene evidence (MyGene: function/pathways/InterPro domains/PDB structures; GWAS
+// Catalog: mapped SNP count; ClinVar: pathogenic variants). No model prior — every added item has a
+// traceable ref; fills the structure/druggability (modality) + genetics dimensions the LLM can't
+// invent. Batched (4×) to stay polite to NCBI/EBI. Best-effort: a failed lookup just adds nothing.
+async function enrichOne(c: any): Promise<any> {
+  const sym = String(c?.symbol ?? "").trim();
+  if (!sym) return c;
+  const [gi, gwas, cv] = await Promise.all([
+    geneInfo(sym).catch(() => null),
+    gwasForGene(sym, 5).catch(() => null),
+    clinvarVariants(sym, 3).catch(() => null),
+  ]);
+  const ev = Array.isArray(c.evidence) ? [...c.evidence] : [];
+  const scores: Record<string, number> = { ...(c.scores ?? {}) };
+  let name = c.name ?? null;
+  let modality = c.modality ?? null;
+  if (gi) {
+    if (!name && gi.name) name = gi.name;
+    if (gi.pdb?.length) {
+      ev.push({ kind: "structure", source: "PDB", detail: `${gi.pdb.length} solved structures (${gi.pdb.slice(0, 3).join(", ")}…)`, ref: `https://www.rcsb.org/search?request=${encodeURIComponent(sym)}` });
+      scores.structure = 1;
+    }
+    if (gi.domains?.length) ev.push({ kind: "domain", source: "InterPro", detail: gi.domains.slice(0, 3).map((d: any) => d.name).join(", "), ref: gi.uniprotId ? `https://www.uniprot.org/uniprotkb/${gi.uniprotId}` : "" });
+    if (gi.pathways?.length) ev.push({ kind: "pathway", source: gi.pathways[0]?.db ?? "pathway", detail: gi.pathways.slice(0, 3).map((p: any) => p.name).join("; "), ref: "" });
+    if (!modality) {
+      const dtxt = (gi.domains ?? []).map((d: any) => d.name).join(" ").toLowerCase() + " " + (gi.name ?? "").toLowerCase();
+      if (/receptor|gpcr/.test(dtxt)) modality = "small molecule / antibody";
+      else if (/kinase|enzyme|hydrolase|transferase|lipase|protease|channel/.test(dtxt)) modality = "small molecule";
+      else if (gi.pdb?.length) modality = "structure-enabled";
+    }
+  }
+  if (gwas?.snpCount) {
+    ev.push({ kind: "genetic", source: "GWAS Catalog", detail: `${gwas.snpCount} mapped GWAS SNPs`, ref: `https://www.ebi.ac.uk/gwas/genes/${encodeURIComponent(sym)}` });
+    scores.gwas = Math.round(Math.min(1, gwas.snpCount / 100) * 100) / 100;
+  }
+  if (cv?.pathogenicCount) ev.push({ kind: "variant", source: "ClinVar", detail: `${cv.pathogenicCount} pathogenic/likely-pathogenic variants`, ref: `https://www.ncbi.nlm.nih.gov/clinvar/?term=${encodeURIComponent(sym)}%5Bgene%5D` });
+  return { ...c, name, modality, evidence: ev, scores };
+}
+
+export async function enrichCandidates(candidates: any[]): Promise<any[]> {
+  const out: any[] = [];
+  for (let i = 0; i < candidates.length; i += 4) out.push(...(await Promise.all(candidates.slice(i, i + 4).map(enrichOne))));
+  return out;
 }
 
 /** From the sources backing CONFIRMED claims, build one unified, sequentially-numbered reference
@@ -736,8 +782,11 @@ export async function research(question: string, angles: Angle[], opts: Research
       disallowedTools: ["WebSearch", "WebFetch", "Bash"], // synthesize from the given evidence ONLY — no fetching
     });
     candidates = guardCandidates(((nom as any)?.candidates ?? []) as any[], otPool, confirmed).slice(0, maxCandidates);
+    // deterministic cross-DB enrichment: attach real gene function / pathways / InterPro domains /
+    // PDB structures / GWAS SNPs / ClinVar variants to each candidate (structure + genetics evidence).
+    try { candidates = await enrichCandidates(candidates); } catch { /* best-effort — keep bare candidates */ }
     doPersistStep("06_nominate", "candidates", { question, count: candidates.length, candidates });
-    ev("synthesize", "靶点提名:" + candidates.length + " 个候选靶点");
+    ev("synthesize", "靶点提名:" + candidates.length + " 个候选靶点(已补基因/结构/通路/遗传证据)");
   }
 
   const sourcesOut = allSources.map((s) => ({ url: s.url, quality: s.sourceQuality, angle: s.angle, claimCount: s.claims.length }));
