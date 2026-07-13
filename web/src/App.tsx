@@ -77,10 +77,10 @@ export function App() {
             setSelected(REPORT_TAB)
         }
     }, [report?.report, report?.status.run, selected])
-    const onStartSearch = (angles: ScopeAngle[]) => {
+    const onStartSearch = (angles: ScopeAngle[], resume?: boolean) => {
         if (!campaign) return
         ddaApi
-            .startSearch(campaign, angles)
+            .startSearch(campaign, angles, undefined, resume)
             .then(() => {
                 setSelected(SEARCH_TAB)
                 refreshReport()

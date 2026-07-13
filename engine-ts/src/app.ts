@@ -389,8 +389,9 @@ export function createApp(idx?: Index, artifactsRoot: string = ARTIFACTS, opts: 
     if (diseaseIn.length > 2000) return c.json({ error: "disease too long" }, 400); // bound the LLM input
     if (isRunning(campaign)) return c.json({ error: "search already running" }, 409);
     const disease = diseaseIn || campaign;
-    void runSearch(artifactsRoot, campaign, disease, angles, { research: opts.researchFn });
-    return c.json({ campaign, started: true, angles: angles.length });
+    const resume = Boolean(body.resume); // resume-from-checkpoint: continue a paused run's tail
+    void runSearch(artifactsRoot, campaign, disease, angles, { research: opts.researchFn }, resume);
+    return c.json({ campaign, started: true, angles: angles.length, resume });
   });
 
   app.post("/api/campaigns/:campaign/stop", (c) => {

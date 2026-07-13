@@ -101,12 +101,17 @@ export async function runSearch(
   disease: string,
   angles: Angle[],
   deps: RunDeps = {},
+  resume = false,
 ): Promise<void> {
   const research = deps.research ?? realResearch;
   const base = join(artifactsRoot, campaign);
   const statusPath = join(base, "search_status.json");
   const reportPath = join(base, "report.json");
+  const ckptPath = join(base, "checkpoint.json");
   const evDir = join(base, "events");
+  // resume-from-checkpoint: reuse the persisted post-fetch / post-verify state (written by prior runs)
+  // so a 429-paused run continues its tail instead of redoing search/fetch/verify. null → fresh run.
+  const resumeState = resume ? readJson(ckptPath) : null;
 
   // Heal a prior-lifetime orphan first: an on-disk 'running' with no live worker (checked BEFORE we
   // register) is a dead run — mark it stopped so its terminal state is recorded before this re-run.
@@ -118,10 +123,13 @@ export async function runSearch(
   const entry: RunEntry = { stopped: false };
   registry.set(campaign, entry);
 
-  // restart hygiene: a re-search starts clean — clear the prior run's report + this stage's event
-  // log (verbatim from api.py _run_search), so old and new agent cards never mix.
-  rmSync(reportPath, { force: true });
-  rmSync(join(evDir, `${SEARCH_STAGE}.jsonl`), { force: true });
+  // restart hygiene: a FRESH re-search starts clean — clear the prior run's report + this stage's
+  // event log so old and new agent cards never mix. A RESUME keeps them: it continues the SAME run's
+  // tail from the checkpoint (search/fetch/verify are skipped), so their cards must survive.
+  if (!resumeState) {
+    rmSync(reportPath, { force: true });
+    rmSync(join(evDir, `${SEARCH_STAGE}.jsonl`), { force: true });
+  }
 
   // run id (api.py: int(time.time()*1000)) — the frontend resets its event view per (re)start.
   // isRunning() blocks a same-campaign concurrent start, so a same-ms collision can't happen.
@@ -143,9 +151,14 @@ export async function runSearch(
         // (deriveAssets). A throw here is surfaced via ev (→ the event stream) and continues — never
         // failing the run, but no longer silently swallowed.
         persistStep: (step, key, payload) => writeStepItem(artifactsRoot, campaign, step, key, payload),
+        // resume plumbing: continue from `resumeState`; persist post-fetch / post-verify checkpoints so
+        // a later re-run can resume the tail. The checkpoint is deleted once the report is written.
+        resumeState,
+        onCheckpoint: (phase, state) => writeJson(ckptPath, { phase, ...state }),
       }),
     );
     writeJson(reportPath, report);
+    rmSync(ckptPath, { force: true }); // run completed cleanly → checkpoint no longer needed
     // nomination → candidates.json (the ranked target list — the tool's target-discovery output).
     // efo/mondo id is best-effort scraped from an Open Targets source URL in the run's evidence.
     try {

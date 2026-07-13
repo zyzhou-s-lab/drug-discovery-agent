@@ -429,6 +429,11 @@ export interface ResearchOpts {
   lit?: Record<string, unknown>; // injectable; defaults to makeLitMcp()
   persistStep?: (step: string, key: string, payload: Record<string, unknown>) => void; // per-sub-agent deepresearch/ record (single source of truth; assets/ are derived from it)
   breaker?: CircuitBreaker; // rate-limit auto-pause; research checks .tripped in its stop predicate
+  // resume-from-checkpoint: skip the completed phases when a prior run (e.g. paused by a 429) already
+  // produced them. `resumeState` is loaded by the caller; `onCheckpoint` lets the caller persist the
+  // post-fetch / post-verify state so a future re-run can resume the tail instead of redoing it all.
+  resumeState?: { phase: "fetched" | "verified"; allSources: any[]; voted?: any[] } | null;
+  onCheckpoint?: (phase: "fetched" | "verified", state: { allSources: any[]; voted?: any[] }) => void;
 }
 
 /** Run Search→Fetch→Verify→Synthesize over pre-scoped `angles`. Returns the report dict (or a
@@ -561,60 +566,79 @@ export async function research(question: string, angles: Angle[], opts: Research
     return fetched.filter((f): f is any => f != null);
   };
 
-  const perAngle = await Promise.all(angles.map((a, i) => angleChain(a, i)));
-  const allSources = perAngle.flat();
+  // ── search + fetch — run the per-angle chains, OR resume: skip them when a prior run already
+  // produced the sources (checkpoint written after fetch). Lets a 429-paused run continue the tail. ──
+  const resume = opts.resumeState ?? null;
+  let allSources: any[];
+  if (resume) {
+    allSources = resume.allSources ?? [];
+    prog.search = [angles.length, angles.length]; emitProg("search");
+    prog.fetch = [allSources.length, allSources.length]; emitProg("fetch");
+    ev("search", "续跑:复用已落盘的检索 + 抓取(" + allSources.length + " 源)");
+  } else {
+    const perAngle = await Promise.all(angles.map((a, i) => angleChain(a, i)));
+    allSources = perAngle.flat();
+    opts.onCheckpoint?.("fetched", { allSources });
+  }
   const allClaims = allSources.flatMap((s) => s.claims);
   const dbFacts = allClaims.filter((c) => c.source_type === "database");
-  // pre-verify dedup: collapse near-duplicate claims so each fact is verified once (lossless — see
-  // dedupeClaims). Persisted for audit; db records + bibliography are unaffected (use allClaims/allSources).
-  const { deduped, clusters } = dedupeClaims(allClaims);
-  if (clusters.length) {
-    ev("fetch", "去重:" + allClaims.length + " → " + deduped.length + " claims(合并 " + clusters.length + " 簇,每簇仅验一次)");
-    doPersistStep("03b_dedup", "clusters", { before: allClaims.length, after: deduped.length, merged: clusters.length, clusters });
-  }
-  const ranked = rankClaims(deduped, maxVerifyClaims);
-  ev("fetch", "抓取 " + allSources.length + " 源 → " + allClaims.length + " claims(数据库 " + dbFacts.length + " 保留;去重后 " + deduped.length + ")→ 验证前 " + ranked.length);
-
   const statsBase = {
     angles: angles.length, sources: allSources.length, claims: allClaims.length,
     dupes: dupes.length, budgetDropped: budgetDropped.length, databaseFacts: dbFacts.length,
   };
 
-  if (!ranked.length) {
-    return {
-      question,
-      summary: "No claims extracted. " + allSources.length + " sources fetched, all empty/failed.",
-      findings: [], refuted: [],
-      sources: allSources.map((s) => ({ url: s.url, quality: s.sourceQuality })),
-      stats: statsBase, budget: budget.report(),
+  // ── verify: 3-vote adversarial (barrier) — or resume the already-verified claim pool ──
+  let voted: any[];
+  if (resume?.phase === "verified" && resume.voted) {
+    voted = resume.voted;
+    const vt = voted.length * VOTES_PER_CLAIM;
+    prog.verify = [vt, vt]; emitProg("verify");
+    ev("verify", "续跑:复用已落盘的 " + voted.length + " 条核验裁决");
+  } else {
+    // pre-verify dedup: collapse near-duplicate claims so each fact is verified once (lossless — see
+    // dedupeClaims). Persisted for audit; db records + bibliography use allClaims/allSources.
+    const { deduped, clusters } = dedupeClaims(allClaims);
+    if (clusters.length) {
+      ev("fetch", "去重:" + allClaims.length + " → " + deduped.length + " claims(合并 " + clusters.length + " 簇,每簇仅验一次)");
+      doPersistStep("03b_dedup", "clusters", { before: allClaims.length, after: deduped.length, merged: clusters.length, clusters });
+    }
+    const ranked = rankClaims(deduped, maxVerifyClaims);
+    ev("fetch", "抓取 " + allSources.length + " 源 → " + allClaims.length + " claims(数据库 " + dbFacts.length + " 保留;去重后 " + deduped.length + ")→ 验证前 " + ranked.length);
+    if (!ranked.length) {
+      return {
+        question,
+        summary: "No claims extracted. " + allSources.length + " sources fetched, all empty/failed.",
+        findings: [], refuted: [],
+        sources: allSources.map((s) => ({ url: s.url, quality: s.sourceQuality })),
+        stats: statsBase, budget: budget.report(),
+      };
+    }
+    bump("verify", 0, ranked.length * VOTES_PER_CLAIM);
+    const verifyClaim = async (claim: any): Promise<any> => {
+      const rawVerdicts = await Promise.all(
+        Array.from({ length: VOTES_PER_CLAIM }, (_, v) =>
+          runAgent("verify", VERIFY_PROMPT(question, claim, v), "submit_verdict", VerdictSubmitSchema.shape, lit!, budget, sem, {
+            onMessage: amsg("verify · " + claim.claim.slice(0, 18) + " v" + (v + 1)),
+            shouldStop: stopPred, breaker: opts.breaker,
+          }).then((r) => r[0]),
+        ),
+      );
+      bump("verify", VOTES_PER_CLAIM);
+      const verdicts = rawVerdicts.filter((v) => v != null) as any[];
+      const refuted = verdicts.filter((v) => v.refuted).length;
+      const surv = survives(verdicts);
+      ev("verify", '"' + claim.claim.slice(0, 50) + '…": ' + (verdicts.length - refuted) + "-" + refuted + (surv ? " ✓" : " ✗"));
+      // per-claim 3-vote verification → 04_verify/NN_<claim>.json
+      doPersistStep("04_verify", `${pad(++verifySeq)}_${claim.claim}`, {
+        claim: claim.claim, quote: claim.quote, source: claim.sourceUrl, doi: claim.doi, angle: claim.angle,
+        votes: verdicts.length, refutedVotes: refuted, survives: surv,
+        vote: (verdicts.length - refuted) + "-" + refuted, verdicts,
+      });
+      return { ...claim, verdicts, refutedVotes: refuted, survives: surv };
     };
+    voted = await Promise.all(ranked.map(verifyClaim));
+    opts.onCheckpoint?.("verified", { allSources, voted });
   }
-
-  // ── verify: 3-vote adversarial (barrier — claim pool fully assembled first) ──
-  bump("verify", 0, ranked.length * VOTES_PER_CLAIM);
-  const verifyClaim = async (claim: any): Promise<any> => {
-    const rawVerdicts = await Promise.all(
-      Array.from({ length: VOTES_PER_CLAIM }, (_, v) =>
-        runAgent("verify", VERIFY_PROMPT(question, claim, v), "submit_verdict", VerdictSubmitSchema.shape, lit!, budget, sem, {
-          onMessage: amsg("verify · " + claim.claim.slice(0, 18) + " v" + (v + 1)),
-          shouldStop: stopPred, breaker: opts.breaker,
-        }).then((r) => r[0]),
-      ),
-    );
-    bump("verify", VOTES_PER_CLAIM);
-    const verdicts = rawVerdicts.filter((v) => v != null) as any[];
-    const refuted = verdicts.filter((v) => v.refuted).length;
-    const surv = survives(verdicts);
-    ev("verify", '"' + claim.claim.slice(0, 50) + '…": ' + (verdicts.length - refuted) + "-" + refuted + (surv ? " ✓" : " ✗"));
-    // per-claim 3-vote verification → 04_verify/NN_<claim>.json
-    doPersistStep("04_verify", `${pad(++verifySeq)}_${claim.claim}`, {
-      claim: claim.claim, quote: claim.quote, source: claim.sourceUrl, doi: claim.doi, angle: claim.angle,
-      votes: verdicts.length, refutedVotes: refuted, survives: surv,
-      vote: (verdicts.length - refuted) + "-" + refuted, verdicts,
-    });
-    return { ...claim, verdicts, refutedVotes: refuted, survives: surv };
-  };
-  const voted = await Promise.all(ranked.map(verifyClaim));
   const confirmed = voted.filter((c) => c.survives);
   const killed = voted.filter((c) => !c.survives);
   ev("verify", "验证完成:" + voted.length + " → 确认 " + confirmed.length + ",否决 " + killed.length);

@@ -77,11 +77,11 @@ export const ddaApi = {
         }),
 
     // deep-research Search: run Search→Fetch→Verify→Synthesize over the user-approved angles
-    startSearch: (c: string, angles: ScopeAngle[], disease?: string) =>
+    startSearch: (c: string, angles: ScopeAngle[], disease?: string, resume?: boolean) =>
         fetch(`${BASE}/campaigns/${encodeURIComponent(c)}/search`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ angles, disease }),
+            body: JSON.stringify({ angles, disease, resume }),
         }).then((r) => {
             if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
             return r.json() as Promise<{ started: boolean; angles: number }>

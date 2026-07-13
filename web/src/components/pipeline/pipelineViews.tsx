@@ -57,7 +57,7 @@ export function StageRail(props: {
 export function ScopeAngles(props: {
     serverAngles: ScopeAngle[]
     spentTokens?: number
-    onSearch?: (angles: ScopeAngle[]) => void
+    onSearch?: (angles: ScopeAngle[], resume?: boolean) => void
     searchState?: 'none' | 'running' | 'stopping' | 'stopped' | 'done' | 'paused' | 'error'
 }) {
     const [extra, setExtra] = useState<string[]>([])
@@ -70,12 +70,12 @@ export function ScopeAngles(props: {
     }
     const total = props.serverAngles.length + extra.length
     const running = props.searchState === 'running'
-    const startSearch = () => {
+    const startSearch = (resume = false) => {
         const merged: ScopeAngle[] = [
             ...props.serverAngles,
             ...extra.map((label) => ({ label, query: label })),
         ]
-        props.onSearch?.(merged)
+        props.onSearch?.(merged, resume)
     }
     return (
         <Card className="p-4">
@@ -118,9 +118,17 @@ export function ScopeAngles(props: {
             </div>
             {props.onSearch && (
                 <div className="mt-3 flex items-center gap-3 border-t border-[var(--app-border)] pt-3">
-                    <Button size="sm" onClick={startSearch} disabled={running || total === 0}>
-                        {running ? '检索中…' : props.searchState === 'done' ? '重新检索' : `开始检索（${total} 个方向）→`}
-                    </Button>
+                    {props.searchState === 'paused' ? (
+                        <>
+                            <Button size="sm" onClick={() => startSearch(true)} disabled={running || total === 0}>续跑（从断点）→</Button>
+                            <Button size="sm" variant="outline" onClick={() => startSearch(false)} disabled={running || total === 0}>重新开始</Button>
+                            <span className="text-xs text-[var(--app-hint)]">续跑复用已完成的检索/核验,只补最后一步</span>
+                        </>
+                    ) : (
+                        <Button size="sm" onClick={() => startSearch(false)} disabled={running || total === 0}>
+                            {running ? '检索中…' : props.searchState === 'done' ? '重新检索' : `开始检索（${total} 个方向）→`}
+                        </Button>
+                    )}
                 </div>
             )}
         </Card>
