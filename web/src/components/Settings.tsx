@@ -37,10 +37,10 @@ function Segment<T extends string | boolean>(props: {
 
 function Row(props: { label: string; hint?: string; children: ReactNode }) {
     return (
-        <div className="flex items-center justify-between gap-4 py-2">
+        <div className="flex items-center justify-between gap-4 py-3.5">
             <div>
-                <div className="text-sm font-medium">{props.label}</div>
-                {props.hint && <div className="text-xs text-[var(--app-hint)]">{props.hint}</div>}
+                <div className="text-[15px] font-medium text-[var(--app-fg)]">{props.label}</div>
+                {props.hint && <div className="mt-0.5 text-xs text-[var(--app-hint)]">{props.hint}</div>}
             </div>
             {props.children}
         </div>
@@ -93,6 +93,26 @@ const SETTINGS_NAV: { id: SettingsTab; label: string }[] = [
     { id: 'tools', label: '工具' },
     { id: 'about', label: '关于' },
 ]
+const SETTINGS_TITLE: Record<SettingsTab, string> = {
+    general: '通用', model: '模型', run: '运行', skills: '技能', tools: '工具', about: '关于',
+}
+
+// Dependency-free line icons (project has no icon lib — uses inline <svg>). 18px, inherit color.
+function NavIcon({ id }: { id: SettingsTab }) {
+    const p: Record<SettingsTab, ReactNode> = {
+        general: (<><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 8 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 8a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></>),
+        model: (<><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" /><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3" /></>),
+        run: (<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />),
+        skills: (<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" />),
+        tools: (<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.1-3.1a6 6 0 0 1-7.6 7.6l-6.3 6.3a2.1 2.1 0 0 1-3-3l6.3-6.3a6 6 0 0 1 7.6-7.6l-3.1 3.1z" />),
+        about: (<><circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" /></>),
+    }
+    return (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-[18px] w-[18px] shrink-0">
+            {p[id]}
+        </svg>
+    )
+}
 
 export function Settings(props: { open: boolean; onOpenChange: (v: boolean) => void }) {
     const [theme, setTheme] = useTheme()
@@ -171,30 +191,33 @@ export function Settings(props: { open: boolean; onOpenChange: (v: boolean) => v
     const persistTab = tab === 'model' || tab === 'run'
     return (
         <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-            <DialogContent className="max-w-2xl">
+            <DialogContent className="max-w-3xl">
                 <DialogTitle className="sr-only">设置</DialogTitle>
 
-                <div className="flex min-h-[340px] gap-5">
+                <div className="flex min-h-[420px] gap-6">
                     {/* left category nav (codex-style directory) */}
-                    <nav className="flex w-28 shrink-0 flex-col gap-0.5 border-r border-[var(--app-divider)] pr-2">
+                    <nav className="flex w-40 shrink-0 flex-col gap-0.5 border-r border-[var(--app-divider)] pr-3">
                         {SETTINGS_NAV.map((n) => (
                             <button
                                 key={n.id}
                                 onClick={() => setTab(n.id)}
                                 className={
-                                    'rounded-md px-2.5 py-1.5 text-left text-sm transition-colors ' +
+                                    'flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors ' +
                                     (tab === n.id
                                         ? 'bg-[var(--app-subtle-bg)] font-medium text-[var(--app-fg)]'
-                                        : 'text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)]')
+                                        : 'font-normal text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]')
                                 }
                             >
+                                <span className="text-[var(--app-hint)]"><NavIcon id={n.id} /></span>
                                 {n.label}
                             </button>
                         ))}
                     </nav>
 
                     {/* right content pane */}
-                    <div className="max-h-[60vh] min-w-0 flex-1 overflow-y-auto pr-1">
+                    <div className="flex min-w-0 flex-1 flex-col">
+                        <h2 className="mb-4 border-b border-[var(--app-divider)] pb-3 text-lg font-semibold text-[var(--app-fg)]">{SETTINGS_TITLE[tab]}</h2>
+                        <div className="max-h-[56vh] overflow-y-auto pr-1">
                         {tab === 'general' && (
                             <div className="divide-y divide-[var(--app-divider)]">
                                 <Row label="外观">
@@ -384,6 +407,7 @@ export function Settings(props: { open: boolean; onOpenChange: (v: boolean) => v
                                 </div>
                             </div>
                         )}
+                        </div>
                     </div>
                 </div>
 
