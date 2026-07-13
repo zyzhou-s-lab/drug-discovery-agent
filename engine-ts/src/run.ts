@@ -3,7 +3,7 @@
 // eventsDir AsyncLocalStorage so emit() writes under the campaign, and writing search_status.json +
 // report.json. Stop is cooperative (a shouldStop flag — no new agents; in-flight ones drain).
 // research is injectable for offline tests. See docs/bun-migration-eval.md Phase 4.
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { deriveAssets, writeCandidates, writeStepItem } from "./assets";
@@ -88,6 +88,31 @@ function readJson(path: string): any | null {
   }
 }
 
+/** Rebuild a resume checkpoint from the crash-safe per-step records (deepresearch/03_fetch +
+ * 04_verify) — for runs that PAUSED before the checkpoint feature existed. allSources = the fetched
+ * source records; voted = each verify verdict re-joined to its full claim. null if nothing to
+ * resume from (no fetch or no verify records). */
+function reconstructCheckpoint(base: string): { phase: "verified"; allSources: any[]; voted: any[] } | null {
+  const drop = (o: any) => { if (o) { delete o.campaign; delete o.step; delete o.key; } return o; };
+  const readDir = (step: string): any[] => {
+    const dir = join(base, "deepresearch", step);
+    if (!existsSync(dir)) return [];
+    return readdirSync(dir).filter((f) => f.endsWith(".json")).map((f) => readJson(join(dir, f))).filter(Boolean);
+  };
+  const allSources = readDir("03_fetch").map(drop);
+  const verifyRecs = readDir("04_verify");
+  if (!allSources.length || !verifyRecs.length) return null;
+  const allClaims = allSources.flatMap((s: any) => s.claims ?? []);
+  const voted = verifyRecs.map((v: any) => {
+    const c =
+      allClaims.find((x: any) => x.claim === v.claim && x.sourceUrl === v.source) ??
+      allClaims.find((x: any) => x.claim === v.claim) ??
+      { claim: v.claim, quote: v.quote, sourceUrl: v.source, doi: v.doi, angle: v.angle, source_type: "web", sourceQuality: "unknown", raw: "" };
+    return { ...c, verdicts: v.verdicts ?? [], refutedVotes: v.refutedVotes ?? 0, survives: Boolean(v.survives) };
+  });
+  return { phase: "verified", allSources, voted };
+}
+
 export interface RunDeps {
   research?: ResearchFn;
   present?: typeof realPresent; // injectable narrative (defaults to presentReport); tests pass a no-op
@@ -111,7 +136,7 @@ export async function runSearch(
   const evDir = join(base, "events");
   // resume-from-checkpoint: reuse the persisted post-fetch / post-verify state (written by prior runs)
   // so a 429-paused run continues its tail instead of redoing search/fetch/verify. null → fresh run.
-  const resumeState = resume ? readJson(ckptPath) : null;
+  const resumeState = resume ? (readJson(ckptPath) ?? reconstructCheckpoint(base)) : null;
 
   // Heal a prior-lifetime orphan first: an on-disk 'running' with no live worker (checked BEFORE we
   // register) is a dead run — mark it stopped so its terminal state is recorded before this re-run.
@@ -123,13 +148,13 @@ export async function runSearch(
   const entry: RunEntry = { stopped: false };
   registry.set(campaign, entry);
 
-  // restart hygiene: a FRESH re-search starts clean — clear the prior run's report + this stage's
-  // event log so old and new agent cards never mix. A RESUME keeps them: it continues the SAME run's
-  // tail from the checkpoint (search/fetch/verify are skipped), so their cards must survive.
-  if (!resumeState) {
-    rmSync(reportPath, { force: true });
-    rmSync(join(evDir, `${SEARCH_STAGE}.jsonl`), { force: true });
-  }
+  // restart hygiene: a FRESH re-search clears the prior report + this stage's event log so old and
+  // new agent cards never mix. A RESUME keeps the report (it's overwritten when the tail finishes) but
+  // STILL clears the stage event log — otherwise the first run's stuck/failed cards (e.g. a 403
+  // "retrying" verify that never terminated) linger above the resumed synth cards and read as if
+  // nothing progressed. The resumed run re-emits "复用已落盘的检索/核验" + fresh synth cards.
+  if (!resumeState) rmSync(reportPath, { force: true });
+  rmSync(join(evDir, `${SEARCH_STAGE}.jsonl`), { force: true });
 
   // run id (api.py: int(time.time()*1000)) — the frontend resets its event view per (re)start.
   // isRunning() blocks a same-campaign concurrent start, so a same-ms collision can't happen.

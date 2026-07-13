@@ -118,17 +118,9 @@ export function ScopeAngles(props: {
             </div>
             {props.onSearch && (
                 <div className="mt-3 flex items-center gap-3 border-t border-[var(--app-border)] pt-3">
-                    {props.searchState === 'paused' ? (
-                        <>
-                            <Button size="sm" onClick={() => startSearch(true)} disabled={running || total === 0}>续跑（从断点）→</Button>
-                            <Button size="sm" variant="outline" onClick={() => startSearch(false)} disabled={running || total === 0}>重新开始</Button>
-                            <span className="text-xs text-[var(--app-hint)]">续跑复用已完成的检索/核验,只补最后一步</span>
-                        </>
-                    ) : (
-                        <Button size="sm" onClick={() => startSearch(false)} disabled={running || total === 0}>
-                            {running ? '检索中…' : props.searchState === 'done' ? '重新检索' : `开始检索（${total} 个方向）→`}
-                        </Button>
-                    )}
+                    <Button size="sm" onClick={() => startSearch(false)} disabled={running || total === 0}>
+                        {running ? '检索中…' : props.searchState === 'done' ? '重新检索' : `开始检索（${total} 个方向）→`}
+                    </Button>
                 </div>
             )}
         </Card>
@@ -245,6 +237,24 @@ export function DeepResearchPage(props: { campaign: string; report: ReportRespon
                     >
                         {state === 'stopping' ? '停止中…' : '停止研究'}
                     </Button>
+                )}
+                {state === 'paused' && angles.length > 0 && (
+                    <>
+                        <span className="mr-auto self-center text-xs text-[var(--app-hint)]">断点续跑:复用已完成的检索/核验,只补最后一步</span>
+                        <Button
+                            size="sm"
+                            onClick={() => ddaApi.startSearch(props.campaign, angles, undefined, true).catch(() => {})}
+                        >
+                            续跑（从断点）→
+                        </Button>
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => ddaApi.startSearch(props.campaign, angles).catch(() => {})}
+                        >
+                            重新研究
+                        </Button>
+                    </>
                 )}
                 {terminal && angles.length > 0 && (
                     <Button
