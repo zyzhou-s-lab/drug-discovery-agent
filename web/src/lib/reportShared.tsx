@@ -53,6 +53,12 @@ export const KIND_LABEL: Record<string, string> = {
     safety: '安全',
     pathway: '通路',
     animal_model: '动物模型',
+    structure: '结构',
+    domain: '结构域',
+    variant: '变异',
+    mechanism: '机制',
+    disease_association: '疾病关联',
+    clinical: '临床',
 }
 
 export const SCORE_LABEL: Record<string, string> = {
@@ -60,6 +66,14 @@ export const SCORE_LABEL: Record<string, string> = {
     tractability: '可成药性',
     constraint: '遗传约束',
     safety: '安全性',
+    overall: '综合关联',
+    genetic_association: '遗传关联',
+    genetic: '遗传',
+    literature: '文献',
+    clinical: '临床',
+    structure: '结构可及',
+    gwas: 'GWAS 信号',
+    mechanism: '机制',
 }
 
 export const stageLabel = (name: string) => STAGE_LABEL[name] ?? name

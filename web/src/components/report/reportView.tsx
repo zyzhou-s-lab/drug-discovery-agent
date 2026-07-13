@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/card'
 import { Markdown } from '@/components/Markdown'
 import { ddaApi, doiRef } from '@/api/dda'
 import {
-    SCORE_LABEL, KIND_LABEL, MODALITY_LABEL, fmtDur, refNFor, confVariant,
+    SCORE_LABEL, KIND_LABEL, MODALITY_LABEL, fmtDur, refNFor,
     dbBioType, parseRawBlocks, dbColumns, dbCell, stripHtml, pruneDbFacts, fmtRaw,
 } from '@/lib/reportShared'
 import type { DeepFinding, DeepReport, Evidence, Reference, ReferencesResponse, TargetCandidate } from '@/types/dda'
@@ -210,7 +210,6 @@ export function FindingCard(props: { finding: DeepFinding; report: DeepReport; o
         <li className="rounded-lg border border-[var(--app-border)] p-2.5">
             <div className="flex flex-wrap items-start gap-2">
                 <Badge variant="success" className="shrink-0">确认</Badge>
-                <Badge variant={confVariant(f.confidence)} className="shrink-0">{f.confidence}</Badge>
                 {f.angle && (
                     <button type="button" className="shrink-0" title="查看研究过程" onClick={() => props.onJumpToAngle?.(f.angle!)}>
                         <Badge variant="default" className="cursor-pointer hover:opacity-80">{f.angle} →</Badge>
@@ -305,8 +304,8 @@ export function ResearchReportCard(props: { report: DeepReport }) {
                             <ul className="flex list-disc flex-col gap-1 pl-5 text-sm">
                                 {g.items.map((f, i) => (
                                     <li key={i}>
-                                        <span className="text-[var(--app-hint)]">[{f.confidence}]</span> {f.claim}
-                                        {f.evidence ? <span className="text-[var(--app-hint)]"> — {f.evidence}</span> : null}
+                                        <span className="text-[var(--app-fg)]">{f.claim}</span>
+                                        {f.evidence ? <div className="mt-0.5 text-xs leading-relaxed text-[var(--app-hint)]">{f.evidence}</div> : null}
                                     </li>
                                 ))}
                             </ul>
@@ -506,8 +505,8 @@ export function DeepReportView(props: { report: DeepReport; onJumpToAngle?: (ang
     const r = props.report
     return (
         <div className="flex flex-col gap-4">
-            <CandidatesCard candidates={r.candidates} />
             <StudyOverviewCard report={r} />
+            <CandidatesCard candidates={r.candidates} />
             <ResearchReportCard report={r} />
             <LiteratureCard literature={r.literature} />
             <DatabaseCard facts={r.databaseFacts} />
