@@ -217,8 +217,8 @@ export function Sidebar(props: {
             <div onPointerDown={onResize} className="sidebar-resize-handle absolute inset-y-0 -right-0.5 z-20 hidden w-1.5 cursor-col-resize hover:bg-[var(--app-link-muted,rgba(0,0,0,0.12))] lg:block" />
             <div className="flex items-center justify-between px-3 py-2.5">
                 <div className="text-sm">
-                    <span className="font-semibold">药物靶点发现</span>
-                    <span className="ml-1 text-xs text-[var(--app-hint)]">{total} 运行 · {groups.length} 疾病</span>
+                    <span className="font-semibold">TargetS</span>
+                    <span className="ml-1 text-xs text-[var(--app-hint)]">{groups.length} 疾病 · {total} 项目</span>
                 </div>
                 <div className="flex items-center gap-1 text-[var(--app-hint)]">
                     <button onClick={() => setSettingsOpen(true)} title="设置" className="rounded p-1 hover:bg-[var(--app-subtle-bg)]"><GearIcon /></button>
