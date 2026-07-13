@@ -9,7 +9,7 @@ import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 
 import { emit } from "./events";
-import { abstractByDoi, cellxgeneDatasets, clinicalTrials, hcaProjects, ontologyLookup, openTargetTargets, searchLiteratureMulti } from "./tools/paperfetch";
+import { abstractByDoi, cellxgeneDatasets, clinicalTrials, clinvarVariants, geneInfo, gwasForGene, hcaProjects, ontologyLookup, openTargetTargets, searchLiteratureMulti } from "./tools/paperfetch";
 
 export interface LitDeps {
   searchLiteratureMulti: typeof searchLiteratureMulti;
@@ -19,8 +19,11 @@ export interface LitDeps {
   cellxgeneDatasets: typeof cellxgeneDatasets;
   hcaProjects: typeof hcaProjects;
   clinicalTrials: typeof clinicalTrials;
+  geneInfo: typeof geneInfo;
+  clinvarVariants: typeof clinvarVariants;
+  gwasForGene: typeof gwasForGene;
 }
-const DEFAULT_DEPS: LitDeps = { searchLiteratureMulti, abstractByDoi, ontologyLookup, openTargetTargets, cellxgeneDatasets, hcaProjects, clinicalTrials };
+const DEFAULT_DEPS: LitDeps = { searchLiteratureMulti, abstractByDoi, ontologyLookup, openTargetTargets, cellxgeneDatasets, hcaProjects, clinicalTrials, geneInfo, clinvarVariants, gwasForGene };
 
 // Tuned constants (verbatim from deep_research.py _lit_server). LIT_SEARCH_SIZE is intentionally
 // below searchLiteratureMulti's default 10: these results carry abstracts + tldr, so a smaller set
@@ -132,6 +135,38 @@ export async function clinicalTrialsText(disease: string, deps: LitDeps = DEFAUL
   return rows.length ? JSON.stringify(rows) : "[]";
 }
 
+/** get_gene_info body → gene record JSON, or "NOT_FOUND" (never throws). */
+export async function geneInfoText(gene: string, deps: LitDeps = DEFAULT_DEPS): Promise<string> {
+  let r: unknown = null;
+  try {
+    r = await deps.geneInfo(gene);
+  } catch (e) {
+    toolError("get_gene_info", e, gene);
+    r = null;
+  }
+  return r ? JSON.stringify(r) : "NOT_FOUND";
+}
+
+/** get_clinvar_variants body → {gene,pathogenicCount,variants} JSON (never throws). */
+export async function clinvarText(gene: string, deps: LitDeps = DEFAULT_DEPS): Promise<string> {
+  try {
+    return JSON.stringify(await deps.clinvarVariants(gene, 10));
+  } catch (e) {
+    toolError("get_clinvar_variants", e, gene);
+    return JSON.stringify({ gene, pathogenicCount: 0, variants: [] });
+  }
+}
+
+/** get_gwas_for_gene body → {gene,snpCount,snps} JSON (never throws). */
+export async function gwasText(gene: string, deps: LitDeps = DEFAULT_DEPS): Promise<string> {
+  try {
+    return JSON.stringify(await deps.gwasForGene(gene, 10));
+  } catch (e) {
+    toolError("get_gwas_for_gene", e, gene);
+    return JSON.stringify({ gene, snpCount: 0, snps: [] });
+  }
+}
+
 const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
 
 /** The tool definitions, grouped by the MCP server they belong to. This is the SINGLE source: the
@@ -209,6 +244,36 @@ export function litToolDefs(deps: LitDeps = DEFAULT_DEPS): Record<string, any[]>
         async (args: { disease: string }) => text(await clinicalTrialsText(args.disease ?? "", deps)),
       ),
     ],
+    genetics: [
+      tool(
+        "get_gene_info",
+        "Get a CROSS-DATABASE gene record from MyGene.info (keyless aggregator) — ONE call folds together " +
+          "NCBI Gene (summary/aliases/type), Ensembl + UniProt ids, PATHWAYS (KEGG/Reactome/WikiPathways), " +
+          "InterPro protein DOMAINS, PDB STRUCTURES (presence ⇒ structural tractability), and Gene Ontology " +
+          "(MF/BP). Pass a gene SYMBOL (e.g. 'PNPLA3'). Returns {symbol,name,entrezId,ensemblId,uniprotId," +
+          "type,aliases,summary,pathways:[{db,id,name}],domains:[{id,name}],pdb:[...],go:{MF,BP}}. Use this " +
+          "for gene function / pathway / structure / druggability context instead of WebFetch-ing NCBI Gene " +
+          "/ KEGG / UniProt / PDB pages.",
+        { gene: z.string() },
+        async (args: { gene: string }) => text(await geneInfoText(args.gene ?? "", deps)),
+      ),
+      tool(
+        "get_clinvar_variants",
+        "Get pathogenic / likely-pathogenic ClinVar variants for a gene (NCBI, keyless): total count + top " +
+          "variant summaries {gene,pathogenicCount,variants:[{title,clinicalSignificance,condition,reviewStatus}]}. " +
+          "Pass a gene SYMBOL. Use this for human genetic / variant evidence instead of esearch-ing ClinVar.",
+        { gene: z.string() },
+        async (args: { gene: string }) => text(await clinvarText(args.gene ?? "", deps)),
+      ),
+      tool(
+        "get_gwas_for_gene",
+        "Get GWAS Catalog variants mapped to a gene (EBI, keyless): the SNP count + top rsIds/functional " +
+          "classes — a genetic-association presence signal {gene,snpCount,snps:[{rsId,functionalClass}]}. " +
+          "Pass a gene SYMBOL. Use this instead of hand-querying the EBI GWAS REST API.",
+        { gene: z.string() },
+        async (args: { gene: string }) => text(await gwasText(args.gene ?? "", deps)),
+      ),
+    ],
   };
 }
 
@@ -224,5 +289,6 @@ export function makeLitMcp(deps: LitDeps = DEFAULT_DEPS, disabled: Set<string> =
     opentargets: srv("opentargets", defs.opentargets!),
     cellatlas: srv("cellatlas", defs.cellatlas!),
     clinicaltrials: srv("clinicaltrials", defs.clinicaltrials!),
+    genetics: srv("genetics", defs.genetics!),
   };
 }

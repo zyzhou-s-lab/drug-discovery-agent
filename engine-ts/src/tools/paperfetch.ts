@@ -407,6 +407,142 @@ export async function clinicalTrials(disease: string, size = 20): Promise<Record
   }
 }
 
+// ── MyGene.info (gene summary + aliases + KEGG/Reactome/WikiPathways), keyless ──
+export interface GeneInfo {
+  symbol: string | null;
+  name: string | null;
+  entrezId: string | null;
+  ensemblId: string | null;
+  uniprotId: string | null; // Swiss-Prot accession
+  type: string | null;
+  aliases: string[];
+  summary: string | null;
+  pathways: { db: string; id: string; name: string }[]; // KEGG / Reactome / WikiPathways
+  domains: { id: string; name: string }[]; // InterPro protein domains
+  pdb: string[]; // solved-structure PDB ids (presence ⇒ structural tractability)
+  go: { MF: string[]; BP: string[] }; // Gene Ontology molecular-function / biological-process terms
+}
+
+/** normalize a MyGene field that may be a single value or an array into an array. */
+function asArr<T>(v: T | T[] | undefined | null): T[] {
+  return Array.isArray(v) ? v : v == null ? [] : [v];
+}
+
+/** Cross-database gene record from MyGene.info (keyless aggregator). Accepts a gene symbol or
+ * Entrez/Ensembl id. One call folds together: NCBI Gene (summary/aliases/type), Ensembl id, UniProt
+ * (Swiss-Prot acc), pathways (KEGG/Reactome/WikiPathways), InterPro domains, PDB structures, and Gene
+ * Ontology (MF/BP) — slimmed for the agent. null on any failure. */
+export async function geneInfo(gene: string): Promise<GeneInfo | null> {
+  try {
+    const q = String(gene ?? "").trim();
+    if (!q) return null;
+    const fields =
+      "symbol,name,summary,alias,type_of_gene,entrezgene,ensembl.gene,uniprot.Swiss-Prot,pdb,interpro,pfam,go.MF,go.BP," +
+      "pathway.kegg,pathway.reactome,pathway.wikipathways";
+    const data = await httpJson(`https://mygene.info/v3/query?q=${encodeURIComponent(q)}&species=human&size=1&fields=${fields}`);
+    const h = data?.hits?.[0];
+    if (!h) return null;
+
+    const pw: { db: string; id: string; name: string }[] = [];
+    const p = h.pathway ?? {};
+    const addPw = (db: string, v: any) => { for (const x of asArr(v)) if (x?.id || x?.name) pw.push({ db, id: x.id ?? "", name: x.name ?? "" }); };
+    addPw("KEGG", p.kegg); addPw("Reactome", p.reactome); addPw("WikiPathways", p.wikipathways);
+
+    const domains = asArr<any>(h.interpro).filter((d) => d?.id).map((d) => ({ id: d.id as string, name: (d.short_desc || d.desc || "") as string })).slice(0, 10);
+    const goTerms = (cat: any): string[] => [...new Set(asArr<any>(cat).map((t) => t?.term).filter(Boolean) as string[])].slice(0, 6);
+    const sp = h.uniprot?.["Swiss-Prot"];
+    const ens = Array.isArray(h.ensembl) ? h.ensembl[0]?.gene : h.ensembl?.gene;
+
+    return {
+      symbol: h.symbol ?? null,
+      name: h.name ?? null,
+      entrezId: h.entrezgene != null ? String(h.entrezgene) : null,
+      ensemblId: ens ?? null,
+      uniprotId: (Array.isArray(sp) ? sp[0] : sp) ?? null,
+      type: h.type_of_gene ?? null,
+      aliases: asArr<string>(h.alias).slice(0, 12),
+      summary: h.summary ? String(h.summary).slice(0, 800) : null,
+      pathways: pw.slice(0, 20),
+      domains,
+      pdb: asArr<string>(h.pdb).slice(0, 8),
+      go: { MF: goTerms(h.go?.MF), BP: goTerms(h.go?.BP) },
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ── ClinVar pathogenic variants for a gene (NCBI E-utilities, keyless) ──
+export interface ClinvarVariant {
+  title: string | null;
+  clinicalSignificance: string | null;
+  condition: string | null;
+  reviewStatus: string | null;
+}
+export interface ClinvarResult { gene: string; pathogenicCount: number; variants: ClinvarVariant[] }
+
+/** Pathogenic/likely-pathogenic ClinVar variants for a gene (NCBI E-utilities, keyless): total count
+ * + top-N variant summaries. {pathogenicCount:0, variants:[]} on any failure. */
+export async function clinvarVariants(gene: string, size = 10): Promise<ClinvarResult> {
+  const empty: ClinvarResult = { gene: String(gene ?? ""), pathogenicCount: 0, variants: [] };
+  try {
+    const g = String(gene ?? "").trim();
+    if (!g) return empty;
+    const n = Math.max(1, Math.min(size, 30));
+    const term = encodeURIComponent(`${g}[gene] AND "clinsig pathogenic"[Properties]`);
+    const es = await httpJson(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=clinvar&term=${term}&retmax=${n}&retmode=json`);
+    const ids: string[] = es?.esearchresult?.idlist ?? [];
+    const count = parseInt(es?.esearchresult?.count ?? "0", 10) || 0;
+    if (!ids.length) return { gene: g, pathogenicCount: count, variants: [] };
+    const sm = await httpJson(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=clinvar&id=${ids.join(",")}&retmode=json`);
+    const res = sm?.result ?? {};
+    const variants: ClinvarVariant[] = (res.uids ?? []).map((uid: string) => {
+      const r = res[uid] ?? {};
+      const germ = r.germline_classification ?? {};
+      const trait = germ.trait_set?.[0]?.trait_name ?? r.trait_set?.[0]?.trait_name ?? null;
+      return {
+        title: r.title ?? r.variation_set?.[0]?.variation_name ?? null,
+        clinicalSignificance: germ.description ?? r.clinical_significance?.description ?? null,
+        condition: trait,
+        reviewStatus: germ.review_status ?? r.review_status ?? null,
+      };
+    });
+    return { gene: g, pathogenicCount: count, variants };
+  } catch {
+    return empty;
+  }
+}
+
+// ── GWAS Catalog variants mapped to a gene (EBI, keyless; single-call genetic-association signal) ──
+export interface GwasSnp { rsId: string; functionalClass: string | null }
+export interface GwasResult { gene: string; snpCount: number; snps: GwasSnp[] }
+
+/** GWAS Catalog SNPs mapped to a gene (EBI, keyless). A single-call genetic-association signal: the
+ * total count + top rsIds/functional classes. Per-SNP p-values/traits sit behind further HATEOAS
+ * links and are intentionally NOT followed here (kept fast). {snpCount:0} on any failure. */
+export async function gwasForGene(gene: string, size = 10): Promise<GwasResult> {
+  const empty: GwasResult = { gene: String(gene ?? ""), snpCount: 0, snps: [] };
+  try {
+    const g = String(gene ?? "").trim();
+    if (!g) return empty;
+    const n = Math.max(1, Math.min(size, 20));
+    const data = await httpJson(`https://www.ebi.ac.uk/gwas/rest/api/singleNucleotidePolymorphisms/search/findByGene?geneName=${encodeURIComponent(g)}&size=${n}`);
+    const snps = data?._embedded?.singleNucleotidePolymorphisms ?? [];
+    const seen = new Set<string>();
+    const out: GwasSnp[] = [];
+    for (const s of snps) {
+      const rsId = s?.rsId ?? "";
+      if (!rsId || seen.has(rsId)) continue;
+      seen.add(rsId);
+      out.push({ rsId, functionalClass: s?.functionalClass ?? null });
+    }
+    const total = data?.page?.totalElements ?? out.length;
+    return { gene: g, snpCount: total, snps: out };
+  } catch {
+    return empty;
+  }
+}
+
 /** Backend-only raw GET → JSON verbatim / HTML stripped to text. '' on failure. (Not an agent tool.) */
 export async function fetchText(url: string, maxChars = 2500): Promise<string> {
   if (!/^https?:\/\//.test(url || "")) return "";

@@ -85,6 +85,9 @@ export function FETCH_PROMPT(question: string, source: FetchSource, angle: strin
       "   `get_hca_projects` (organ, e.g. 'liver') — both return structured dataset rows;\n" +
       "   for CLINICAL TRIALS / existing drugs PREFER `get_clinical_trials` (pass the disease name; returns\n" +
       "   structured interventional drug-trial rows) — do NOT " + WEB_FETCH + " the ClinicalTrials.gov site;\n" +
+      "   for a specific GENE PREFER `get_gene_info` (function + pathways KEGG/Reactome), for its human\n" +
+      "   PATHOGENIC variants PREFER `get_clinvar_variants`, and for its GWAS variants PREFER\n" +
+      "   `get_gwas_for_gene` (all take a gene SYMBOL) — do NOT esearch NCBI / " + WEB_FETCH + " KEGG or the EBI GWAS API;\n" +
       "   otherwise use `" + WEB_FETCH + "` on the API / record URL:\n" +
       "   **URL:** " + (source.url ?? "") + "\n" +
       "   Treat it as a PRIMARY source; capture the EXACT record fields/values (IDs, gene-subtype\n" +

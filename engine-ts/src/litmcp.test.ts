@@ -12,6 +12,9 @@ const deps = (over: Partial<LitDeps>): LitDeps => ({
   cellxgeneDatasets: async () => [],
   hcaProjects: async () => [],
   clinicalTrials: async () => [],
+  geneInfo: async () => null,
+  clinvarVariants: async () => ({ gene: "", pathogenicCount: 0, variants: [] }),
+  gwasForGene: async () => ({ gene: "", snpCount: 0, snps: [] }),
   ...over,
 });
 
@@ -74,7 +77,7 @@ test("ontologyText → [] when empty, else the records", async () => {
 test("makeLitMcp builds focused per-source servers; disabled tools are filtered out", () => {
   const m = makeLitMcp();
   // one server per data source (settings 工具 groups by these)
-  expect(Object.keys(m).sort()).toEqual(["cellatlas", "clinicaltrials", "literature", "ontology", "opentargets"]);
+  expect(Object.keys(m).sort()).toEqual(["cellatlas", "clinicaltrials", "genetics", "literature", "ontology", "opentargets"]);
   const count = (s: any): number | undefined => (s?.instance?.tools ?? s?.tools ?? s?.options?.tools)?.length;
   const lit = count(m.literature);
   if (typeof lit === "number") expect(lit).toBe(2); // search_literature + get_paper

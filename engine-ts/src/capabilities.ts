@@ -42,8 +42,9 @@ const SERVER_LABELS: Record<string, string> = {
   opentargets: "Open Targets · opentargets",
   cellatlas: "单细胞 / 空间 / 图谱 · cellatlas",
   clinicaltrials: "临床试验 · clinicaltrials",
+  genetics: "基因 / 遗传 / 通路 · genetics",
 };
-const SERVER_ORDER = ["literature", "ontology", "opentargets", "cellatlas", "clinicaltrials"];
+const SERVER_ORDER = ["literature", "ontology", "opentargets", "cellatlas", "clinicaltrials", "genetics"];
 const CORE_TOOLS = new Set(["search_disease"]); // policy: can't be disabled (intake gate needs it)
 
 /** Read param name/type/required off a tool's zod inputSchema (SDK stores the raw shape). */
@@ -65,6 +66,7 @@ export function getCapabilities(): Capabilities {
     opentargets: [searchDiseaseTool(), ...(defs.opentargets ?? [])],
     cellatlas: defs.cellatlas ?? [],
     clinicaltrials: defs.clinicaltrials ?? [],
+    genetics: defs.genetics ?? [],
   };
   const toolGroups: ToolGroup[] = SERVER_ORDER.map((server) => ({
     server,
