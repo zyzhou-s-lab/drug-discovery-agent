@@ -70,9 +70,16 @@ export function App() {
     const REPORT_TAB = '__report__'   // 检索简报 (narrative + db data + claims)
     // when the report first lands, jump to the report tab — once per run
     const autoReportRun = useRef<number | undefined>(undefined)
+    const sawRunning = useRef<Set<number>>(new Set())
     useEffect(() => {
         const run = report?.status.run
-        if (report?.report && run != null && autoReportRun.current !== run && selected === SEARCH_TAB) {
+        if (run == null) return
+        // remember runs we've watched still in-flight (no report yet) this session
+        if (!report?.report) { sawRunning.current.add(run); return }
+        // auto-jump to the report ONLY when a run we watched go running → done finishes while the user
+        // is on the live tab — NOT when they manually open 深度研究 of an already-finished run (that
+        // used to bounce the first click straight to 研究报告).
+        if (autoReportRun.current !== run && sawRunning.current.has(run) && selected === SEARCH_TAB) {
             autoReportRun.current = run
             setSelected(REPORT_TAB)
         }
