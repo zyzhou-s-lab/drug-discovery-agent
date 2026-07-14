@@ -284,7 +284,8 @@ export function NOMINATE_PROMPT(question: string, otPool: Array<{ symbol: string
     "2. You MAY add a target NOT in the base ONLY if a confirmed claim above directly implicates it\n" +
     "   (genetics / causal mechanism); cite that claim as its evidence ref. Add nothing else.\n" +
     "3. For EACH candidate fill: `symbol` (gene), `name`, `modality` (druggability if evident, else null),\n" +
-    "   `scores` (carry the Open Targets scores; you may add 0-1 dims like `genetic` / `mechanism`),\n" +
+    "   `scores` (carry ONLY the Open Targets scores through verbatim — do NOT invent your own score\n" +
+    "   dimensions; objective structure/GWAS signals are added downstream),\n" +
     "   `evidence` (array of {kind, source, detail, ref} — `ref` MUST be a source URL/DOI from the\n" +
     "   evidence above; every target claim needs a ref), and a 1-2 sentence `rationale`.\n" +
     "4. RANK by strength of genetic + causal support relevant to the question (genetically-supported,\n" +
@@ -309,14 +310,15 @@ async function enrichOne(c: any): Promise<any> {
   ]);
   const ev = Array.isArray(c.evidence) ? [...c.evidence] : [];
   const scores: Record<string, number> = { ...(c.scores ?? {}) };
+  delete scores.mechanism; // drop the LLM's subjective, non-traceable score dims
+  delete scores.genetic;
   let name = c.name ?? null;
   let modality = c.modality ?? null;
   if (gi) {
     if (!name && gi.name) name = gi.name;
-    if (gi.pdb?.length) {
-      ev.push({ kind: "structure", source: "PDB", detail: `${gi.pdb.length} solved structures (${gi.pdb.slice(0, 3).join(", ")}…)`, ref: `https://www.rcsb.org/search?request=${encodeURIComponent(sym)}` });
-      scores.structure = 1;
-    }
+    // structure / GWAS / variants are FACTS (presence + counts), not 0-1 association scores — they're
+    // surfaced as evidence badges, never as scores. Only Open Targets datatype scores stay in `scores`.
+    if (gi.pdb?.length) ev.push({ kind: "structure", source: "PDB", detail: `${gi.pdb.length} solved structures (${gi.pdb.slice(0, 3).join(", ")}…)`, ref: `https://www.rcsb.org/search?request=${encodeURIComponent(sym)}` });
     if (gi.domains?.length) ev.push({ kind: "domain", source: "InterPro", detail: gi.domains.slice(0, 3).map((d: any) => d.name).join(", "), ref: gi.uniprotId ? `https://www.uniprot.org/uniprotkb/${gi.uniprotId}` : "" });
     if (gi.pathways?.length) ev.push({ kind: "pathway", source: gi.pathways[0]?.db ?? "pathway", detail: gi.pathways.slice(0, 3).map((p: any) => p.name).join("; "), ref: "" });
     if (!modality) {
@@ -326,10 +328,7 @@ async function enrichOne(c: any): Promise<any> {
       else if (gi.pdb?.length) modality = "structure-enabled";
     }
   }
-  if (gwas?.snpCount) {
-    ev.push({ kind: "genetic", source: "GWAS Catalog", detail: `${gwas.snpCount} mapped GWAS SNPs`, ref: `https://www.ebi.ac.uk/gwas/genes/${encodeURIComponent(sym)}` });
-    scores.gwas = Math.round(Math.min(1, gwas.snpCount / 100) * 100) / 100;
-  }
+  if (gwas?.snpCount) ev.push({ kind: "genetic", source: "GWAS Catalog", detail: `${gwas.snpCount} mapped GWAS SNPs`, ref: `https://www.ebi.ac.uk/gwas/genes/${encodeURIComponent(sym)}` });
   if (cv?.pathogenicCount) ev.push({ kind: "variant", source: "ClinVar", detail: `${cv.pathogenicCount} pathogenic/likely-pathogenic variants`, ref: `https://www.ncbi.nlm.nih.gov/clinvar/?term=${encodeURIComponent(sym)}%5Bgene%5D` });
   return { ...c, name, modality, evidence: ev, scores };
 }

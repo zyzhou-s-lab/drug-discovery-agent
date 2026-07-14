@@ -48,7 +48,14 @@ export function EvidenceChip(props: { ev: Evidence }) {
 
 export function CandidateCard(props: { c: TargetCandidate }) {
     const { c } = props
-    const scoreKeys = Object.keys(c.scores ?? {})
+    // Scores = ONLY objective 0-1 association scores (Open Targets datatypes). The LLM's subjective
+    // dims (mechanism/genetic) and the presence/count "facts" (structure/gwas) are NOT scores.
+    const scoreKeys = Object.keys(c.scores ?? {}).filter((k) => !['mechanism', 'genetic', 'structure', 'gwas'].includes(k))
+    // Evidence splits into disease-specific CLAIMS (mechanism/literature — the discovery signal) and
+    // generic target-profile FACTS (structure/domain/pathway/GWAS/variant — shown with their numbers).
+    const FACT_KINDS = new Set(['structure', 'domain', 'pathway', 'variant', 'genetic'])
+    const claims = (c.evidence ?? []).filter((e) => !FACT_KINDS.has(e.kind))
+    const facts = (c.evidence ?? []).filter((e) => FACT_KINDS.has(e.kind))
     return (
         <Card className="p-4">
             <div className="mb-1 flex items-center gap-2">
@@ -63,11 +70,29 @@ export function CandidateCard(props: { c: TargetCandidate }) {
                     ))}
                 </div>
             )}
-            {c.evidence && c.evidence.length > 0 && (
+            {claims.length > 0 && (
                 <div className="mb-2 flex flex-wrap gap-1">
-                    {c.evidence.map((ev, i) => (
+                    {claims.map((ev, i) => (
                         <EvidenceChip key={i} ev={ev} />
                     ))}
+                </div>
+            )}
+            {facts.length > 0 && (
+                <div className="mb-2 flex flex-wrap gap-1.5">
+                    {facts.map((ev, i) => {
+                        const label = KIND_LABEL[ev.kind] ?? ev.kind
+                        const inner = (
+                            <span className="inline-flex items-center gap-1.5 rounded-md bg-[var(--app-subtle-bg)] px-2 py-0.5 text-xs">
+                                <span className="font-medium text-[var(--app-fg)]">{label}</span>
+                                <span className="text-[var(--app-hint)]">{ev.detail || ev.source}</span>
+                            </span>
+                        )
+                        return ev.ref ? (
+                            <a key={i} href={ev.ref} target="_blank" rel="noreferrer" className="hover:opacity-80">{inner}</a>
+                        ) : (
+                            <span key={i}>{inner}</span>
+                        )
+                    })}
                 </div>
             )}
             {c.rationale && <p className="text-sm text-[var(--app-fg)]">{c.rationale}</p>}
