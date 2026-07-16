@@ -35,3 +35,18 @@ jobs:
       - name: Typecheck (tsc --noEmit)
         run: npm run typecheck
         working-directory: web
+
+  engine-ts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install
+        run: bun install --frozen-lockfile
+        working-directory: engine-ts
+      - name: Typecheck (tsc --noEmit)
+        run: bun run typecheck
+        working-directory: engine-ts
+      - name: Test (bun test)
+        run: bun test
+        working-directory: engine-ts
